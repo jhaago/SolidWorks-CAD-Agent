@@ -1,0 +1,28 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - feature/v1-solidworks-2020
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore unit-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Build unit tests
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Run unit tests
+        shell: pwsh
+        run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --logger "trx;LogFileName=unit-tests.trx"
