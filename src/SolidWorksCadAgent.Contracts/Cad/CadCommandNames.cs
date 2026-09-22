@@ -7,6 +7,7 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string NewPart = "NewPart";
         public const string OpenPart = "OpenPart";
         public const string SavePart = "SavePart";
+        public const string CloseDocument = "CloseDocument";
         public const string CreateSketch = "CreateSketch";
         public const string AddRectangle = "AddRectangle";
         public const string AddCircle = "AddCircle";
@@ -17,5 +18,6 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetBoundingBox = "GetBoundingBox";
         public const string GetBodyCount = "GetBodyCount";
         public const string GetRebuildErrors = "GetRebuildErrors";
+        public const string GetFeatureTree = "GetFeatureTree";
     }
 }
