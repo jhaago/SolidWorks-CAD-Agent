@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.Contracts", "src\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj", "{1A77A6F0-1E6D-4BF8-9C2B-2F0A44E73E11}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.Core", "src\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj", "{4F9D174A-32E9-4C76-AD1D-6D9D3BA46E2E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.UnitTests", "tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj", "{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1A77A6F0-1E6D-4BF8-9C2B-2F0A44E73E11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A77A6F0-1E6D-4BF8-9C2B-2F0A44E73E11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A77A6F0-1E6D-4BF8-9C2B-2F0A44E73E11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A77A6F0-1E6D-4BF8-9C2B-2F0A44E73E11}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F9D174A-32E9-4C76-AD1D-6D9D3BA46E2E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F9D174A-32E9-4C76-AD1D-6D9D3BA46E2E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F9D174A-32E9-4C76-AD1D-6D9D3BA46E2E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F9D174A-32E9-4C76-AD1D-6D9D3BA46E2E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
