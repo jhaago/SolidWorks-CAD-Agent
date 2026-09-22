@@ -37,14 +37,14 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public void CadCommandNames_DefinesInitialAcceptanceCommandsExactly()
+        public void CadCommandNames_DefinesInitialV1CommandsExactly()
         {
             var type = RequireType("SolidWorksCadAgent.Contracts.Cad.CadCommandNames");
             var expected = new[]
             {
-                "AttachSolidWorks", "LaunchSolidWorks", "NewPart", "OpenPart", "SavePart",
+                "AttachSolidWorks", "LaunchSolidWorks", "NewPart", "OpenPart", "SavePart", "CloseDocument",
                 "CreateSketch", "AddRectangle", "AddCircle", "ExitSketch", "Extrude",
-                "CutExtrude", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors"
+                "CutExtrude", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree"
             };
 
             var values = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
