@@ -14,5 +14,6 @@
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.SolidWorksBridge\SolidWorksCadAgent.SolidWorksBridge.csproj" />
+    <ProjectReference Include="..\..\src\SolidWorksCadAgent.AgentHost\SolidWorksCadAgent.AgentHost.csproj" />
   </ItemGroup>
 </Project>
