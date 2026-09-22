@@ -38,7 +38,11 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new ExitSketchCommandHandler(_session),
                 new ExtrudeCommandHandler(_session),
                 new CutExtrudeCommandHandler(_session),
-                new RebuildCommandHandler(_session)
+                new RebuildCommandHandler(_session),
+                new GetBodyCountCommandHandler(_session),
+                new GetBoundingBoxCommandHandler(_session),
+                new GetFeatureTreeCommandHandler(_session),
+                new GetRebuildErrorsCommandHandler(_session)
             });
         }
 
