@@ -26,3 +26,11 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --logger "trx;LogFileName=unit-tests.trx"
+
+      - name: Restore integration-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Compile integration-test contract only
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
