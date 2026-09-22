@@ -2,7 +2,9 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Commands;
+using SolidWorksCadAgent.Core.Workspace;
 using SolidWorksCadAgent.SolidWorksBridge.Commands;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
@@ -16,22 +18,35 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         private bool _disposed;
 
         public SolidWorksBridgeFacade()
-            : this(new SolidWorksSession(), true)
+            : this(new SolidWorksSession(), new WorkspacePolicy(new AgentSettings().WorkspaceRoot), true)
         {
         }
 
         public SolidWorksBridgeFacade(ISolidWorksSession session)
-            : this(session, false)
+            : this(session, new WorkspacePolicy(new AgentSettings().WorkspaceRoot), false)
         {
         }
 
-        private SolidWorksBridgeFacade(ISolidWorksSession session, bool ownsSession)
+        public SolidWorksBridgeFacade(ISolidWorksSession session, WorkspacePolicy workspacePolicy)
+            : this(session, workspacePolicy, false)
+        {
+        }
+
+        private SolidWorksBridgeFacade(ISolidWorksSession session, WorkspacePolicy workspacePolicy, bool ownsSession)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
+            if (workspacePolicy == null)
+            {
+                throw new ArgumentNullException(nameof(workspacePolicy));
+            }
+
             _ownsSession = ownsSession;
             _registry = new CadCommandRegistry(new ICadCommandHandler[]
             {
                 new NewPartCommandHandler(_session),
+                new OpenPartCommandHandler(_session, workspacePolicy),
+                new SavePartCommandHandler(_session, workspacePolicy),
+                new CloseDocumentCommandHandler(_session),
                 new CreateSketchCommandHandler(_session),
                 new AddRectangleCommandHandler(_session),
                 new AddCircleCommandHandler(_session),
@@ -46,9 +61,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             });
         }
 
-        public Task<CadCommandResult> ExecuteAsync(
-            CadCommandEnvelope command,
-            CancellationToken cancellationToken)
+        public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken)
         {
             if (_disposed)
             {
