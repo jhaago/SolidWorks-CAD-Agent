@@ -1,0 +1,30 @@
+# Visual Studio / .NET
+.vs/
+**/bin/
+**/obj/
+TestResults/
+*.user
+*.suo
+
+# NuGet
+packages/
+*.nupkg
+
+# Local agent state and secrets
+.superpowers/
+*.db
+*.db-shm
+*.db-wal
+appsettings.local.json
+.env
+
+# Generated CAD workspace
+Workspace/
+workspace/
+*.SLDPRT
+*.SLDASM
+*.SLDDRW
+
+# OS
+Thumbs.db
+.DS_Store
