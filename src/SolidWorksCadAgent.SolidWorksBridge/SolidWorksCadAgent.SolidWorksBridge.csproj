@@ -31,8 +31,4 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-
-  <ItemGroup Condition="'$(SolidWorksInteropAvailable)' != 'true'">
-    <Compile Remove="Session\SolidWorksSession.cs" />
-  </ItemGroup>
 </Project>
