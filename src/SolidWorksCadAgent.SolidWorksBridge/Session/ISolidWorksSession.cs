@@ -20,6 +20,11 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         Task<SolidWorksSessionStatus> GetStatusAsync(CancellationToken cancellationToken);
         Task<SolidWorksSessionStatus> AttachAsync(CancellationToken cancellationToken);
         Task<SolidWorksSessionStatus> LaunchAsync(CancellationToken cancellationToken);
-        Task<object> GetApplicationAsync(CancellationToken cancellationToken);
+
+        // The delegate is executed on the session's dedicated STA thread. The raw COM
+        // application object must never escape this callback.
+        Task<T> InvokeWithApplicationAsync<T>(
+            Func<object, T> operation,
+            CancellationToken cancellationToken);
     }
 }
