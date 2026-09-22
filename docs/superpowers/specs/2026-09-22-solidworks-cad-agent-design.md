@@ -33,9 +33,9 @@ The initial acceptance part is a 100 x 60 x 10 mm rectangular plate with one cen
 
 ### 3.1 V1 in scope
 
-- C# Windows application.
+- C# Windows application suite.
 - WinForms desktop control panel.
-- .NET Framework 4.8.
+- .NET Framework 4.8 for the V1 Windows projects, including the initial Agent Host process.
 - Development and testing on the same PC as SolidWorks 2018.
 - Separate local Agent Host process.
 - Localhost HTTP/JSON communication between WinForms and Agent Host.
@@ -123,7 +123,7 @@ Responsibilities:
 - Provide Approve Build, Request Changes, Cancel, and later revision controls.
 - Show execution progress, verification results, and logs.
 - Show persistent job history.
-- Expose Settings including workspace, approval/Auto mode, API credential status, provider/model selection, SolidWorks path override, and logging level.
+- Expose Settings including workspace, approval/Auto mode, API credential status, OpenAI model selection, SolidWorks path override, and logging level.
 
 The UI must not contain SolidWorks API logic or cloud-provider implementation logic.
 
@@ -217,6 +217,8 @@ Primary states:
 ```text
 New
  -> Interpreting
+ -> AwaitingClarification (only when required)
+ -> Interpreting
  -> AwaitingApproval
  -> Approved
  -> Executing
@@ -230,7 +232,7 @@ Terminal/interrupt states available from applicable stages:
 - Failed
 - Cancelled
 
-Auto mode may transition from Interpreting directly into execution only after all validation and ambiguity checks pass. Hard safety gates are not bypassed by Auto mode.
+A job with no ambiguity proceeds directly from Interpreting to AwaitingApproval. Auto mode may transition from Interpreting directly into execution only after all validation and ambiguity checks pass. Hard safety gates are not bypassed by Auto mode.
 
 A Job stores:
 
@@ -259,7 +261,7 @@ Where feasible, revisions should modify native SolidWorks features rather than r
 
 ### 5.2 Ambiguity policy
 
-The agent must not silently invent important manufacturing/design dimensions or feature intent. If a material ambiguity can affect geometry or function, the Job stops in a clarification state before execution.
+The agent must not silently invent important manufacturing/design dimensions or feature intent. If a material ambiguity can affect geometry or function, the Job enters AwaitingClarification before execution.
 
 Examples:
 
@@ -297,7 +299,7 @@ IAgentModel
   ReviewResult(...)
 ```
 
-V1 implements one provider first. The architecture must permit later replacement with another cloud provider or an on-prem/local model without changing the SolidWorks Bridge or desktop UI.
+V1 implements OpenAI first. The architecture must permit later replacement with another cloud provider or an on-prem/local model without changing the SolidWorks Bridge or desktop UI.
 
 ## 7. Approval and Auto Mode
 
@@ -411,7 +413,7 @@ Primary areas:
    - workspace path
    - approval/Auto mode
    - OpenAI credential status
-   - model/provider configuration
+   - OpenAI model configuration
    - SolidWorks executable override
    - logging verbosity
    - V2 remote access placeholder/status only
@@ -438,7 +440,7 @@ Execution stops when any of the following occurs unless a command-specific recov
 
 Failures are returned as structured error objects including operation, stage, message, and relevant SolidWorks/API data where available.
 
-The Agent Host records the error, marks the Job Failed or AwaitingClarification as appropriate, and preserves recoverable state. It must not silently skip a failed operation and continue building later features.
+The Agent Host records the error and moves the Job to Failed or AwaitingClarification as appropriate while preserving recoverable state. It must not silently skip a failed operation and continue building later features.
 
 ## 13. Testing Strategy
 
