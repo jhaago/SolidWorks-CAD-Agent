@@ -96,6 +96,28 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task SavePart_TraversalOutsideWorkspace_IsRejectedBeforeCom()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteAsync(new CadCommandEnvelope
+                {
+                    Command = CadCommandNames.SavePart,
+                    Parameters = JObject.FromObject(new
+                    {
+                        path = @"..\escape.sldprt",
+                        allowOverwrite = false
+                    })
+                }, CancellationToken.None);
+
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("WORKSPACE_POLICY_VIOLATION", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
         public async Task ArbitraryShellCommand_IsNotRegistered()
         {
             var session = new RecordingSession();
