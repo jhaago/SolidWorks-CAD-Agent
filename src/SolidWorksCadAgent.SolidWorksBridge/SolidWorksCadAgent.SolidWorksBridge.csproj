@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>SolidWorksCadAgent.SolidWorksBridge</RootNamespace>
+    <AssemblyName>SolidWorksCadAgent.SolidWorksBridge</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksInteropAvailable Condition="Exists('$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll') and Exists('$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll')">true</SolidWorksInteropAvailable>
+    <SolidWorksInteropAvailable Condition="'$(SolidWorksInteropAvailable)' == ''">false</SolidWorksInteropAvailable>
+    <DefineConstants Condition="'$(SolidWorksInteropAvailable)' == 'true'">$(DefineConstants);SOLIDWORKS_INTEROP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
+    <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SolidWorksInteropAvailable)' == 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SolidWorksInteropAvailable)' != 'true'">
+    <Compile Remove="Session\SolidWorksSession.cs" />
+  </ItemGroup>
+</Project>
