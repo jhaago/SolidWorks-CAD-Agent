@@ -37,10 +37,17 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             return _dispatcher.InvokeAsync(GetStatusCore, cancellationToken);
         }
 
-        public Task<object> GetApplicationAsync(CancellationToken cancellationToken)
+        public Task<T> InvokeWithApplicationAsync<T>(
+            Func<object, T> operation,
+            CancellationToken cancellationToken)
         {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
             ThrowIfDisposed();
-            return _dispatcher.InvokeAsync(GetApplicationCore, cancellationToken);
+            return _dispatcher.InvokeAsync(() => operation(GetApplicationCore()), cancellationToken);
         }
 
         public void Dispose()
