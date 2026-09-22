@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>SolidWorksCadAgent.AgentHost</RootNamespace>
+    <AssemblyName>SolidWorksCadAgent.AgentHost</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
+    <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Persistence\Schema.sql" Condition="Exists('Persistence\Schema.sql')" />
+  </ItemGroup>
+</Project>
