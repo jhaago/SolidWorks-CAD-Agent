@@ -1,7 +1,10 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core.Jobs;
@@ -15,9 +18,18 @@ namespace SolidWorksCadAgent.AgentHost.Host
         private readonly ISolidWorksSession _solidWorks;
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
+        private readonly JobCoordinator _coordinator;
 
         public AgentRoutes(SqliteJobRepository repository, ISolidWorksSession solidWorks)
-            : this(repository, solidWorks, () => DateTime.UtcNow)
+            : this(repository, solidWorks, null, () => DateTime.UtcNow)
+        {
+        }
+
+        public AgentRoutes(
+            SqliteJobRepository repository,
+            ISolidWorksSession solidWorks,
+            JobCoordinator coordinator)
+            : this(repository, solidWorks, coordinator, () => DateTime.UtcNow)
         {
         }
 
@@ -25,11 +37,21 @@ namespace SolidWorksCadAgent.AgentHost.Host
             SqliteJobRepository repository,
             ISolidWorksSession solidWorks,
             Func<DateTime> utcNow)
+            : this(repository, solidWorks, null, utcNow)
+        {
+        }
+
+        internal AgentRoutes(
+            SqliteJobRepository repository,
+            ISolidWorksSession solidWorks,
+            JobCoordinator coordinator,
+            Func<DateTime> utcNow)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _solidWorks = solidWorks ?? throw new ArgumentNullException(nameof(solidWorks));
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
             _stateMachine = new JobStateMachine(_utcNow);
+            _coordinator = coordinator;
         }
 
         public async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
@@ -79,7 +101,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
                 if (method == "POST" && action == "approve")
                 {
-                    return await ApproveJobAsync(jobId, cancellationToken).ConfigureAwait(false);
+                    return await ApproveJobAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -92,8 +114,35 @@ namespace SolidWorksCadAgent.AgentHost.Host
             return job == null ? JobNotFound() : JobResponse(200, job);
         }
 
-        private async Task<AgentResponse> ApproveJobAsync(Guid id, CancellationToken cancellationToken)
+        private async Task<AgentResponse> ApproveJobAsync(Guid id, string body, CancellationToken cancellationToken)
         {
+            if (_coordinator != null)
+            {
+                JObject request;
+                try
+                {
+                    request = JObject.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+                }
+                catch (JsonException)
+                {
+                    return Error(400, "INVALID_JSON", "The request body is not valid JSON.");
+                }
+
+                if (!Guid.TryParse((string)request["revisionId"], out var revisionId))
+                    return Error(400, "REVISION_REQUIRED", "Approval requires the current revisionId.");
+
+                try
+                {
+                    var snapshot = await _coordinator.ApproveAndExecuteAsync(id, revisionId, cancellationToken)
+                        .ConfigureAwait(false);
+                    return SnapshotResponse(200, snapshot);
+                }
+                catch (JobCoordinatorException ex)
+                {
+                    return Error(ex.Code == "JOB_NOT_FOUND" ? 404 : 409, ex.Code, ex.Message);
+                }
+            }
+
             var job = await _repository.GetAsync(id, cancellationToken).ConfigureAwait(false);
             if (job == null) return JobNotFound();
             if (job.State != JobState.AwaitingApproval || !job.PlanValidated)
@@ -154,6 +203,20 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return Error(400, "PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
             }
 
+            if (_coordinator != null)
+            {
+                try
+                {
+                    var snapshot = await _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken)
+                        .ConfigureAwait(false);
+                    return SnapshotResponse(201, snapshot);
+                }
+                catch (JobCoordinatorException ex)
+                {
+                    return Error(ex.Code == "PROMPT_REQUIRED" ? 400 : 409, ex.Code, ex.Message);
+                }
+            }
+
             var now = _utcNow();
             var job = new CadJob
             {
@@ -202,6 +265,27 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 outputPath = job.OutputPath,
                 createdUtc = job.CreatedUtc,
                 updatedUtc = job.UpdatedUtc
+            });
+        }
+
+        private static AgentResponse SnapshotResponse(int statusCode, JobSnapshot snapshot)
+        {
+            var revision = snapshot?.Revisions?.OrderBy(item => item.RevisionNumber).LastOrDefault();
+            var job = snapshot?.Job;
+            if (job == null) return JobNotFound();
+            return Json(statusCode, new
+            {
+                id = job.Id,
+                prompt = job.Prompt,
+                state = job.State.ToString(),
+                planValidated = job.PlanValidated,
+                hasUnresolvedAmbiguity = job.HasUnresolvedAmbiguity,
+                ambiguityMessage = job.AmbiguityMessage,
+                currentRevisionId = revision?.Id,
+                currentRevisionNumber = revision?.RevisionNumber,
+                plan = revision == null ? null : JToken.Parse(revision.PlanJson),
+                commandCount = snapshot.Commands?.Count ?? 0,
+                verifications = snapshot.Verifications
             });
         }
 
