@@ -178,6 +178,48 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public async Task TryUpdateFromStateAsync_AllowsOnlyOneCompetingTransition()
+        {
+            var databasePath = Path.Combine(
+                Path.GetTempPath(),
+                "SolidWorksCadAgent-CompareSwap-" + Guid.NewGuid().ToString("N") + ".db");
+            var jobId = Guid.NewGuid();
+            var created = new DateTime(2026, 9, 24, 12, 0, 0, DateTimeKind.Utc);
+
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                {
+                    await repository.InitializeAsync();
+                    await repository.CreateAsync(new CadJob
+                    {
+                        Id = jobId,
+                        Prompt = "Create a plate",
+                        State = JobState.AwaitingApproval,
+                        PlanValidated = true,
+                        CreatedUtc = created,
+                        UpdatedUtc = created
+                    });
+
+                    var approval = await repository.GetAsync(jobId);
+                    var cancellation = await repository.GetAsync(jobId);
+                    approval.State = JobState.Approved;
+                    cancellation.State = JobState.Cancelled;
+
+                    Assert.IsTrue(await repository.TryUpdateFromStateAsync(approval, JobState.AwaitingApproval));
+                    Assert.IsFalse(await repository.TryUpdateFromStateAsync(cancellation, JobState.AwaitingApproval));
+                    Assert.AreEqual(JobState.Approved, (await repository.GetAsync(jobId)).State);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
         private static void TryDelete(string path)
         {
             try
