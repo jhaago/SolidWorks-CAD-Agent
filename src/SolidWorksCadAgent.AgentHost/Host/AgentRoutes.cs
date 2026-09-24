@@ -119,6 +119,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             JobState nextState,
             CancellationToken cancellationToken)
         {
+            var expectedState = job.State;
             try
             {
                 _stateMachine.Transition(job, nextState);
@@ -128,7 +129,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return Error(409, "INVALID_JOB_STATE", ex.Message);
             }
 
-            await _repository.UpdateAsync(job, cancellationToken).ConfigureAwait(false);
+            var updated = await _repository.TryUpdateFromStateAsync(job, expectedState, cancellationToken).ConfigureAwait(false);
+            if (!updated)
+            {
+                return Error(409, "CONCURRENT_JOB_UPDATE", "The CAD job changed while this request was being processed. Refresh and try again.");
+            }
             return JobResponse(200, job);
         }
 

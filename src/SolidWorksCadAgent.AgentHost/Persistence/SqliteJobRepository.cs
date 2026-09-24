@@ -114,6 +114,37 @@ WHERE Id = @Id;";
             return Task.CompletedTask;
         }
 
+        public Task<bool> TryUpdateFromStateAsync(
+            CadJob job,
+            JobState expectedState,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateJob(job);
+
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+UPDATE Jobs SET
+    Prompt = @Prompt,
+    State = @State,
+    PlanValidated = @PlanValidated,
+    HasUnresolvedAmbiguity = @HasUnresolvedAmbiguity,
+    AmbiguityMessage = @AmbiguityMessage,
+    OverwriteRequested = @OverwriteRequested,
+    OverwriteAuthorized = @OverwriteAuthorized,
+    OutputPath = @OutputPath,
+    CreatedUtc = @CreatedUtc,
+    UpdatedUtc = @UpdatedUtc
+WHERE Id = @Id AND State = @ExpectedState;";
+                BindJob(command, job);
+                Add(command, "@ExpectedState", (int)expectedState);
+                return Task.FromResult(command.ExecuteNonQuery() == 1);
+            }
+        }
+
         public Task AppendRevisionAsync(JobRevision revision, CancellationToken cancellationToken = default(CancellationToken))
         {
             ThrowIfDisposed();

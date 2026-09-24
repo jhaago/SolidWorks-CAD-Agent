@@ -120,7 +120,13 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 string body = null;
                 if (response == null && context.Request.HasEntityBody)
                 {
-                    body = await ReadBodyAsync(context.Request, cancellationToken).ConfigureAwait(false);
+                    body = await RequestBodyReader.ReadAsync(
+                        context.Request.InputStream,
+                        context.Request.ContentEncoding ?? Encoding.UTF8,
+                        HostRequestPolicy.MaximumBodyBytes,
+                        TimeSpan.FromSeconds(15),
+                        () => SafeAbort(context),
+                        cancellationToken).ConfigureAwait(false);
                 }
 
                 if (response == null)
@@ -134,7 +140,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             {
                 response = new AgentResponse(503, "{\"error\":{\"code\":\"HOST_STOPPING\",\"message\":\"The Agent Host is stopping.\"}}");
             }
-            catch (OperationCanceledException)
+            catch (TimeoutException)
             {
                 response = new AgentResponse(408, "{\"error\":{\"code\":\"REQUEST_TIMEOUT\",\"message\":\"The request body was not received in time.\"}}");
             }
@@ -150,26 +156,6 @@ namespace SolidWorksCadAgent.AgentHost.Host
             context.Response.ContentLength64 = bytes.Length;
             await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length, CancellationToken.None).ConfigureAwait(false);
             context.Response.Close();
-        }
-
-        private static async Task<string> ReadBodyAsync(HttpListenerRequest request, CancellationToken hostCancellationToken)
-        {
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(hostCancellationToken))
-            using (var buffer = new MemoryStream())
-            {
-                timeout.CancelAfter(TimeSpan.FromSeconds(15));
-                var chunk = new byte[8192];
-                while (true)
-                {
-                    var read = await request.InputStream.ReadAsync(chunk, 0, chunk.Length, timeout.Token).ConfigureAwait(false);
-                    if (read == 0) break;
-                    await buffer.WriteAsync(chunk, 0, read, timeout.Token).ConfigureAwait(false);
-                    if (buffer.Length > HostRequestPolicy.MaximumBodyBytes)
-                        throw new InvalidDataException("Request body exceeded the configured limit.");
-                }
-
-                return (request.ContentEncoding ?? Encoding.UTF8).GetString(buffer.ToArray());
-            }
         }
 
         private void Track(Task requestTask)
