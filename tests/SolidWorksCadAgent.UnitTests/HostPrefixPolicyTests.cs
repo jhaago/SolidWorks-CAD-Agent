@@ -22,6 +22,8 @@ namespace SolidWorksCadAgent.UnitTests
         [DataRow("http://192.168.1.20:53741/")]
         [DataRow("https://127.0.0.1:53741/")]
         [DataRow("http://127.0.0.1:53741/api/")]
+        [DataRow("http://user:password@127.0.0.1:53741/")]
+        [DataRow("http://127.0.0.1/")]
         public void Validate_RejectsAnyPrefixThatCouldExposeOrAlterTheV1Host(string prefix)
         {
             Assert.ThrowsException<ArgumentException>(() => HostPrefixPolicy.Validate(prefix));

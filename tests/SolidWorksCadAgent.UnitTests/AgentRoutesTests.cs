@@ -134,6 +134,8 @@ namespace SolidWorksCadAgent.UnitTests
 
             Assert.AreEqual(200, found.StatusCode);
             Assert.AreEqual("Create a bracket", (string)JObject.Parse(found.JsonBody)["prompt"]);
+            Assert.IsFalse((bool)JObject.Parse(found.JsonBody)["overwriteRequested"]);
+            Assert.IsFalse((bool)JObject.Parse(found.JsonBody)["overwriteAuthorized"]);
             Assert.AreEqual(404, missing.StatusCode);
             Assert.AreEqual("JOB_NOT_FOUND", (string)JObject.Parse(missing.JsonBody)["error"]["code"]);
         }
