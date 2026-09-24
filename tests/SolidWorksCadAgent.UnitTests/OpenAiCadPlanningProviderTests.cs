@@ -9,6 +9,7 @@ using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost.Ai;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Ai;
+using SolidWorksCadAgent.Core.Security;
 
 namespace SolidWorksCadAgent.UnitTests
 {
@@ -110,6 +111,25 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsNull(handler.RequestUri);
         }
 
+        [TestMethod]
+        public async Task PlanAsync_ReadsOpenAiCredentialThroughSecretStoreBoundary()
+        {
+            var handler = new RecordingHandler(PlanResponse(
+                "Create a native plate.", new JArray(), new JArray(), new JArray()));
+            var secrets = new FakeSecretStore("stored-secret");
+            var provider = new OpenAiCadPlanningProvider(
+                new HttpClient(handler),
+                secrets,
+                "gpt-5.6-sol");
+
+            await provider.PlanAsync(
+                new CadPlanningRequest { Prompt = "Create a plate" },
+                CancellationToken.None);
+
+            Assert.AreEqual(OpenAiCadPlanningProvider.OpenAiCredentialTarget, secrets.LastGetTarget);
+            Assert.AreEqual("stored-secret", handler.AuthorizationParameter);
+        }
+
         private static string PlanResponse(string summary, JArray assumptions, JArray ambiguities, JArray commands)
         {
             var arguments = new JObject
@@ -161,6 +181,30 @@ namespace SolidWorksCadAgent.UnitTests
                     Content = new StringContent(_responseBody, Encoding.UTF8, "application/json")
                 };
             }
+        }
+
+        private sealed class FakeSecretStore : ISecretStore
+        {
+            private readonly string _secret;
+
+            public FakeSecretStore(string secret)
+            {
+                _secret = secret;
+            }
+
+            public string LastGetTarget { get; private set; }
+
+            public void Set(string target, string secret) { throw new NotSupportedException(); }
+
+            public string Get(string target)
+            {
+                LastGetTarget = target;
+                return _secret;
+            }
+
+            public bool Exists(string target) { return Get(target) != null; }
+
+            public void Delete(string target) { throw new NotSupportedException(); }
         }
     }
 }
