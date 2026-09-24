@@ -10,7 +10,7 @@ using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.SolidWorksBridge
 {
-    public sealed class SolidWorksBridgeFacade : IDisposable
+    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IDisposable
     {
         private readonly ISolidWorksSession _session;
         private readonly bool _ownsSession;
