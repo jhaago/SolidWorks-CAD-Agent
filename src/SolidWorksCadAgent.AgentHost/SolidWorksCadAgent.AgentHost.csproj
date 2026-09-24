@@ -4,6 +4,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>SolidWorksCadAgent.AgentHost</RootNamespace>
     <AssemblyName>SolidWorksCadAgent.AgentHost</AssemblyName>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>

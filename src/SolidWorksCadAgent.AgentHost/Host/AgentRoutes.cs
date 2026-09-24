@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core.Jobs;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.AgentHost.Host
@@ -13,6 +14,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
         private readonly SqliteJobRepository _repository;
         private readonly ISolidWorksSession _solidWorks;
         private readonly Func<DateTime> _utcNow;
+        private readonly JobStateMachine _stateMachine;
 
         public AgentRoutes(SqliteJobRepository repository, ISolidWorksSession solidWorks)
             : this(repository, solidWorks, () => DateTime.UtcNow)
@@ -27,6 +29,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _solidWorks = solidWorks ?? throw new ArgumentNullException(nameof(solidWorks));
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
+            _stateMachine = new JobStateMachine(_utcNow);
         }
 
         public async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
@@ -47,12 +50,86 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return SolidWorksStatus(await _solidWorks.GetStatusAsync(cancellationToken).ConfigureAwait(false));
             }
 
+            if (method == "POST" && path == "/solidworks/attach")
+            {
+                return SolidWorksStatus(await _solidWorks.AttachAsync(cancellationToken).ConfigureAwait(false));
+            }
+
+            if (method == "POST" && path == "/solidworks/launch")
+            {
+                return SolidWorksStatus(await _solidWorks.LaunchAsync(cancellationToken).ConfigureAwait(false));
+            }
+
             if (method == "POST" && path == "/jobs")
             {
                 return await CreateJobAsync(request.Body, cancellationToken).ConfigureAwait(false);
             }
 
+            if (TryParseJobPath(path, out var jobId, out var action))
+            {
+                if (method == "GET" && action == null)
+                {
+                    return await GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (method == "POST" && action == "cancel")
+                {
+                    return await TransitionJobAsync(jobId, JobState.Cancelled, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (method == "POST" && action == "approve")
+                {
+                    return await ApproveJobAsync(jobId, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             return Error(404, "ROUTE_NOT_FOUND", "The requested Agent Host route does not exist.");
+        }
+
+        private async Task<AgentResponse> GetJobAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var job = await _repository.GetAsync(id, cancellationToken).ConfigureAwait(false);
+            return job == null ? JobNotFound() : JobResponse(200, job);
+        }
+
+        private async Task<AgentResponse> ApproveJobAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var job = await _repository.GetAsync(id, cancellationToken).ConfigureAwait(false);
+            if (job == null) return JobNotFound();
+            if (job.State != JobState.AwaitingApproval || !job.PlanValidated)
+            {
+                return Error(409, "INVALID_JOB_STATE", "Only a job with a validated plan awaiting approval can be approved.");
+            }
+
+            return await TransitionAndSaveAsync(job, JobState.Approved, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<AgentResponse> TransitionJobAsync(
+            Guid id,
+            JobState nextState,
+            CancellationToken cancellationToken)
+        {
+            var job = await _repository.GetAsync(id, cancellationToken).ConfigureAwait(false);
+            if (job == null) return JobNotFound();
+            return await TransitionAndSaveAsync(job, nextState, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<AgentResponse> TransitionAndSaveAsync(
+            CadJob job,
+            JobState nextState,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                _stateMachine.Transition(job, nextState);
+            }
+            catch (JobStateTransitionException ex)
+            {
+                return Error(409, "INVALID_JOB_STATE", ex.Message);
+            }
+
+            await _repository.UpdateAsync(job, cancellationToken).ConfigureAwait(false);
+            return JobResponse(200, job);
         }
 
         private async Task<AgentResponse> CreateJobAsync(string body, CancellationToken cancellationToken)
@@ -105,6 +182,27 @@ namespace SolidWorksCadAgent.AgentHost.Host
             });
         }
 
+        private static AgentResponse JobResponse(int statusCode, CadJob job)
+        {
+            return Json(statusCode, new
+            {
+                id = job.Id,
+                prompt = job.Prompt,
+                state = job.State.ToString(),
+                planValidated = job.PlanValidated,
+                hasUnresolvedAmbiguity = job.HasUnresolvedAmbiguity,
+                ambiguityMessage = job.AmbiguityMessage,
+                outputPath = job.OutputPath,
+                createdUtc = job.CreatedUtc,
+                updatedUtc = job.UpdatedUtc
+            });
+        }
+
+        private static AgentResponse JobNotFound()
+        {
+            return Error(404, "JOB_NOT_FOUND", "The requested CAD job does not exist.");
+        }
+
         private static AgentResponse Json(int statusCode, object value)
         {
             return new AgentResponse(statusCode, JsonConvert.SerializeObject(value));
@@ -121,6 +219,20 @@ namespace SolidWorksCadAgent.AgentHost.Host
             var queryIndex = path.IndexOf('?');
             var normalized = queryIndex >= 0 ? path.Substring(0, queryIndex) : path;
             return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
+        }
+
+        private static bool TryParseJobPath(string path, out Guid id, out string action)
+        {
+            id = Guid.Empty;
+            action = null;
+            var segments = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 2 || segments.Length > 3 || segments[0] != "jobs" || !Guid.TryParse(segments[1], out id))
+            {
+                return false;
+            }
+
+            action = segments.Length == 3 ? segments[2].ToLowerInvariant() : null;
+            return true;
         }
     }
 }
