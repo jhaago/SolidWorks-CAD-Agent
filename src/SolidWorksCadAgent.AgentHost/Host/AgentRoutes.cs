@@ -192,6 +192,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 planValidated = job.PlanValidated,
                 hasUnresolvedAmbiguity = job.HasUnresolvedAmbiguity,
                 ambiguityMessage = job.AmbiguityMessage,
+                overwriteRequested = job.OverwriteRequested,
+                overwriteAuthorized = job.OverwriteAuthorized,
                 outputPath = job.OutputPath,
                 createdUtc = job.CreatedUtc,
                 updatedUtc = job.UpdatedUtc
