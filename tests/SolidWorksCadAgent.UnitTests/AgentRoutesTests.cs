@@ -5,8 +5,12 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost.Host;
+using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
+using SolidWorksCadAgent.AgentHost.Planning;
+using SolidWorksCadAgent.AgentHost.Simulation;
 using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.UnitTests
@@ -170,6 +174,64 @@ namespace SolidWorksCadAgent.UnitTests
 
             Assert.AreEqual(409, approve.StatusCode);
             Assert.AreEqual("INVALID_JOB_STATE", (string)JObject.Parse(approve.JsonBody)["error"]["code"]);
+        }
+
+        [TestMethod]
+        public async Task CoordinatedRoutes_CreatePlansAndApproveExecutesOnlyTheCurrentRevision()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(
+                _repository,
+                new DeterministicCadPlanningProvider(),
+                executor,
+                new AgentSettings { AutoMode = false });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+
+            var create = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.\"}"),
+                CancellationToken.None);
+
+            Assert.AreEqual(201, create.StatusCode);
+            var created = JObject.Parse(create.JsonBody);
+            Assert.AreEqual("AwaitingApproval", (string)created["state"]);
+            var jobId = Guid.Parse((string)created["id"]);
+            var revisionId = Guid.Parse((string)created["currentRevisionId"]);
+            Assert.AreEqual(0, executor.ExecutedCommands.Count);
+
+            var approve = await routes.HandleAsync(
+                new AgentRequest(
+                    "POST",
+                    "/jobs/" + jobId.ToString("D") + "/approve",
+                    "{\"revisionId\":\"" + revisionId.ToString("D") + "\"}"),
+                CancellationToken.None);
+
+            Assert.AreEqual(200, approve.StatusCode);
+            Assert.AreEqual("ReadyForReview", (string)JObject.Parse(approve.JsonBody)["state"]);
+            Assert.IsTrue(executor.ExecutedCommands.Count > 0);
+        }
+
+        [TestMethod]
+        public async Task CoordinatedApprove_RejectsMissingRevisionWithoutExecutingCad()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(
+                _repository,
+                new DeterministicCadPlanningProvider(),
+                executor,
+                new AgentSettings { AutoMode = false });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var create = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.\"}"),
+                CancellationToken.None);
+            var jobId = (string)JObject.Parse(create.JsonBody)["id"];
+
+            var approve = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs/" + jobId + "/approve", "{}"),
+                CancellationToken.None);
+
+            Assert.AreEqual(400, approve.StatusCode);
+            Assert.AreEqual("REVISION_REQUIRED", (string)JObject.Parse(approve.JsonBody)["error"]["code"]);
+            Assert.AreEqual(0, executor.ExecutedCommands.Count);
         }
 
         private sealed class FakeSolidWorksSession : ISolidWorksSession
