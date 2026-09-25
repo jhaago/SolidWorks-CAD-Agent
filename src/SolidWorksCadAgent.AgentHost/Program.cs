@@ -1,9 +1,14 @@
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Threading;
+using SolidWorksCadAgent.AgentHost.Ai;
 using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Persistence;
+using SolidWorksCadAgent.AgentHost.Security;
 using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.Core.Workspace;
+using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.AgentHost
@@ -20,9 +25,21 @@ namespace SolidWorksCadAgent.AgentHost
 
             using (var repository = new SqliteJobRepository(databasePath))
             using (var solidWorks = new SolidWorksSession())
+            using (var bridge = new SolidWorksBridgeFacade(
+                solidWorks,
+                new WorkspacePolicy(settings.WorkspaceRoot)))
+            using (var httpClient = new HttpClient())
             using (var server = new LocalHttpServer(
                 settings.HostPrefix,
-                new AgentRoutes(repository, solidWorks)))
+                AgentHostComposition.CreateRoutes(
+                    repository,
+                    solidWorks,
+                    new OpenAiCadPlanningProvider(
+                        httpClient,
+                        new WindowsCredentialStore(),
+                        settings.OpenAiModel),
+                    bridge,
+                    settings)))
             using (var shutdown = new CancellationTokenSource())
             {
                 repository.InitializeAsync().GetAwaiter().GetResult();
