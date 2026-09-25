@@ -10,11 +10,13 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Ai;
+using SolidWorksCadAgent.Core.Security;
 
 namespace SolidWorksCadAgent.AgentHost.Ai
 {
     public sealed class OpenAiCadPlanningProvider : ICadPlanningProvider
     {
+        public const string OpenAiCredentialTarget = "SolidWorksCadAgent/OpenAI";
         private static readonly Uri ResponsesEndpoint = new Uri("https://api.openai.com/v1/responses");
         private readonly HttpClient _httpClient;
         private readonly Func<string> _getApiKey;
@@ -27,6 +29,14 @@ namespace SolidWorksCadAgent.AgentHost.Ai
             _model = string.IsNullOrWhiteSpace(model)
                 ? throw new ArgumentException("An OpenAI model is required.", nameof(model))
                 : model;
+        }
+
+        public OpenAiCadPlanningProvider(HttpClient httpClient, ISecretStore secretStore, string model)
+            : this(
+                httpClient,
+                () => (secretStore ?? throw new ArgumentNullException(nameof(secretStore))).Get(OpenAiCredentialTarget),
+                model)
+        {
         }
 
         public async Task<CadPlanningResult> PlanAsync(
