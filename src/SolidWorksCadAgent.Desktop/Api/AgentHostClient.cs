@@ -29,6 +29,7 @@ namespace SolidWorksCadAgent.Desktop.Api
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _ownsClient = ownsClient;
             if (_httpClient.BaseAddress == null) _httpClient.BaseAddress = DefaultBaseAddress;
+            _httpClient.Timeout = Timeout.InfiniteTimeSpan;
         }
 
         public Task<HostHealthDto> GetHealthAsync(CancellationToken cancellationToken) =>

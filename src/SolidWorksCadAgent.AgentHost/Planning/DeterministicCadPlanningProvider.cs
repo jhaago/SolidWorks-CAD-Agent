@@ -47,11 +47,11 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                 {
                     Command(CadCommandNames.NewPart),
                     Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
-                    Command(CadCommandNames.AddRectangle, new { centreXmm = 0.0, centreYmm = 0.0, widthMm = 100.0, heightMm = 60.0 }),
+                    Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 100.0, heightMm = 60.0 }),
                     Command(CadCommandNames.ExitSketch),
                     Command(CadCommandNames.Extrude, new { depthMm = 10.0 }),
                     Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
-                    Command(CadCommandNames.AddCircle, new { centreXmm = 0.0, centreYmm = 0.0, diameterMm = 20.0 }),
+                    Command(CadCommandNames.AddCircle, new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 20.0 }),
                     Command(CadCommandNames.ExitSketch),
                     Command(CadCommandNames.CutExtrude, new { endCondition = "ThroughAll" }),
                     Command(CadCommandNames.Rebuild)

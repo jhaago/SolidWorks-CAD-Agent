@@ -48,7 +48,7 @@ The CI-compatible build path does not require SOLIDWORKS to be installed. Real C
    ```
 
 2. Create `C:\SolidWorks-CAD-Agent\Workspace` or change `AgentSettings.WorkspaceRoot` before building.
-3. In Windows **Credential Manager**, add a **Windows credential** for the target `SolidWorksCadAgent/OpenAI`. Store the OpenAI API key as the password. The key must not be placed in source files, JSON configuration, SQLite, screenshots, or logs.
+3. Add a **generic credential** under Windows Credential Manager's **Windows Credentials** section for the target `SolidWorksCadAgent/OpenAI`. Store the OpenAI API key as the credential secret. A normal domain-style “Windows credential” is a different credential type and will not be read by the Agent Host. The key must not be placed in source files, JSON configuration, SQLite, screenshots, or logs.
 
 ## Run
 
@@ -72,4 +72,4 @@ The expected cloud-planning state is `AwaitingApproval`. Inspect the proposed pl
 
 ## Current testing boundary
 
-GitHub Actions builds the Agent Host, desktop client, unit tests, and the integration-test contract. The remaining release gate is a physical run on the user's SOLIDWORKS 2020 SP0.0 PC, including attach/launch, native feature creation, save/reopen, verification, and three repeated acceptance runs.
+GitHub Actions builds the Agent Host, desktop client, unit tests, and the integration-test contract. Remaining software work includes persisted/navigable job history, editable Settings, and clarification revisions. The separate physical release gate is a run on the user's SOLIDWORKS 2020 SP0.0 PC, including attach/launch, native feature creation, save/reopen, verification, and three repeated acceptance runs.

@@ -1,4 +1,6 @@
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
 
 namespace SolidWorksCadAgent.Contracts.Cad
 {
@@ -13,7 +15,12 @@ namespace SolidWorksCadAgent.Contracts.Cad
             return new CadCommandResult
             {
                 Success = true,
-                Data = data == null ? new JObject() : JObject.FromObject(data)
+                Data = data == null
+                    ? new JObject()
+                    : JObject.FromObject(data, JsonSerializer.Create(new JsonSerializerSettings
+                    {
+                        ContractResolver = new CamelCasePropertyNamesContractResolver()
+                    }))
             };
         }
     }

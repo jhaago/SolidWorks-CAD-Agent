@@ -17,27 +17,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
 {
     public sealed class JobCoordinator
     {
-        private static readonly HashSet<string> AllowedPlanCommands = new HashSet<string>(StringComparer.Ordinal)
-        {
-            CadCommandNames.NewPart,
-            CadCommandNames.OpenPart,
-            CadCommandNames.SavePart,
-            CadCommandNames.CloseDocument,
-            CadCommandNames.CreateSketch,
-            CadCommandNames.AddRectangle,
-            CadCommandNames.AddCircle,
-            CadCommandNames.ExitSketch,
-            CadCommandNames.Extrude,
-            CadCommandNames.CutExtrude,
-            CadCommandNames.Rebuild
-        };
-
         private readonly SqliteJobRepository _repository;
         private readonly ICadPlanningProvider _planningProvider;
         private readonly ICadCommandExecutor _executor;
         private readonly AgentSettings _settings;
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
+        private readonly SemaphoreSlim _executionGate = new SemaphoreSlim(1, 1);
 
         public JobCoordinator(
             SqliteJobRepository repository,
@@ -104,6 +90,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var validationAmbiguities = ValidatePlan(plan);
             foreach (var ambiguity in validationAmbiguities)
                 plan.Ambiguities.Add(ambiguity);
+            job.OverwriteRequested = CadPlanningCommandContract.RequestsOverwrite(plan.ProposedCommands);
 
             var revision = new JobRevision
             {
@@ -158,6 +145,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 throw new JobCoordinatorException("STALE_PLAN", "The approved plan is no longer the current CAD job revision.");
             if (snapshot.Job.State != JobState.AwaitingApproval || !snapshot.Job.PlanValidated)
                 throw new JobCoordinatorException("INVALID_JOB_STATE", "The CAD job is not ready for approval.");
+            if (snapshot.Job.OverwriteRequested && !snapshot.Job.OverwriteAuthorized)
+                throw new JobCoordinatorException("OVERWRITE_AUTHORIZATION_REQUIRED", "The current plan requests overwrite permission that has not been explicitly authorized.");
 
             var plan = JsonConvert.DeserializeObject<CadPlanningResult>(revision.PlanJson);
             if (plan == null)
@@ -176,6 +165,26 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             CadPlanningResult plan,
             CancellationToken cancellationToken)
         {
+            await _executionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var current = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                if (current == null || current.State == JobState.Cancelled)
+                    return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                return await ExecuteApprovedWithinGateAsync(current, revision, plan, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _executionGate.Release();
+            }
+        }
+
+        private async Task<JobSnapshot> ExecuteApprovedWithinGateAsync(
+            CadJob job,
+            JobRevision revision,
+            CadPlanningResult plan,
+            CancellationToken cancellationToken)
+        {
             if (!ApprovalPolicy.CanExecute(job, _settings))
                 throw new JobCoordinatorException("APPROVAL_REQUIRED", "The CAD job has not passed the execution approval policy.");
             if (!await TransitionAsync(job, JobState.Executing, cancellationToken).ConfigureAwait(false))
@@ -188,7 +197,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 if (current == null || current.State == JobState.Cancelled)
                     return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 
-                var result = await ExecuteAndRecordAsync(job.Id, revision.RevisionNumber, ++sequence, command, cancellationToken)
+                var executableCommand = PrepareForExecution(current, command);
+                var result = await ExecuteAndRecordAsync(job.Id, revision.RevisionNumber, ++sequence, executableCommand, cancellationToken)
                     .ConfigureAwait(false);
                 if (!result.Success)
                 {
@@ -311,10 +321,18 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
             foreach (var command in plan.ProposedCommands)
             {
-                if (command == null || !AllowedPlanCommands.Contains(command.Command))
-                    errors.Add("The proposed CAD plan contains an unsupported command: " + (command?.Command ?? "<missing>"));
+                var error = CadPlanningCommandContract.Validate(command);
+                if (error != null) errors.Add(error);
             }
             return errors;
+        }
+
+        private static CadCommandEnvelope PrepareForExecution(CadJob job, CadCommandEnvelope command)
+        {
+            if (command.Command != CadCommandNames.SavePart) return command;
+            var parameters = command.Parameters == null ? new JObject() : (JObject)command.Parameters.DeepClone();
+            parameters["allowOverwrite"] = job.OverwriteAuthorized;
+            return new CadCommandEnvelope { Command = command.Command, Parameters = parameters };
         }
 
         private static CadPlanningResult NormalizePlan(CadPlanningResult plan)

@@ -11,6 +11,7 @@ using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Security;
+using SolidWorksCadAgent.Core.Commands;
 
 namespace SolidWorksCadAgent.AgentHost.Ai
 {
@@ -101,7 +102,7 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 ["model"] = _model,
                 ["store"] = false,
                 ["parallel_tool_calls"] = false,
-                ["instructions"] = "Interpret the engineering request into a safe proposed CAD plan. Do not claim the model has been built. List every unresolved ambiguity. Use millimetres. Return the plan only through propose_cad_plan.",
+                ["instructions"] = "Interpret the engineering request into a safe proposed CAD plan. Do not claim the model has been built. List every unresolved ambiguity. Use millimetres. Return the plan only through propose_cad_plan.\n\n" + CadPlanningCommandContract.ProtocolDescription,
                 ["input"] = input,
                 ["tools"] = new JArray(BuildPlanTool()),
                 ["tool_choice"] = new JObject
@@ -136,7 +137,11 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                                 ["type"] = "object",
                                 ["properties"] = new JObject
                                 {
-                                    ["command"] = new JObject { ["type"] = "string" },
+                                    ["command"] = new JObject
+                                    {
+                                        ["type"] = "string",
+                                        ["enum"] = new JArray(CadPlanningCommandContract.AllowedCommands)
+                                    },
                                     ["parameters_json"] = new JObject
                                     {
                                         ["type"] = "string",
