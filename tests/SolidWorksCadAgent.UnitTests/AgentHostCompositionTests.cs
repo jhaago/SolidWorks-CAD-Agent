@@ -1,0 +1,72 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost;
+using SolidWorksCadAgent.AgentHost.Host;
+using SolidWorksCadAgent.AgentHost.Persistence;
+using SolidWorksCadAgent.AgentHost.Planning;
+using SolidWorksCadAgent.AgentHost.Simulation;
+using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.SolidWorksBridge.Session;
+
+namespace SolidWorksCadAgent.UnitTests
+{
+    [TestClass]
+    public class AgentHostCompositionTests
+    {
+        [TestMethod]
+        public async Task CreateRoutes_ComposesPlannerCoordinatorAndExecutor()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-Composition-" + Guid.NewGuid().ToString("N") + ".db");
+            try
+            {
+                using (var repository = new SqliteJobRepository(path))
+                using (var session = new FakeSolidWorksSession())
+                {
+                    await repository.InitializeAsync();
+                    var routes = AgentHostComposition.CreateRoutes(
+                        repository,
+                        session,
+                        new DeterministicCadPlanningProvider(),
+                        new SimulatedCadCommandExecutor(),
+                        new AgentSettings { AutoMode = false });
+
+                    var response = await routes.HandleAsync(
+                        new AgentRequest(
+                            "POST",
+                            "/jobs",
+                            "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.\"}"),
+                        CancellationToken.None);
+
+                    Assert.AreEqual(201, response.StatusCode);
+                    Assert.AreEqual("AwaitingApproval", (string)JObject.Parse(response.JsonBody)["state"]);
+                }
+            }
+            finally
+            {
+                TryDelete(path);
+                TryDelete(path + "-wal");
+                TryDelete(path + "-shm");
+            }
+        }
+
+        private sealed class FakeSolidWorksSession : ISolidWorksSession
+        {
+            public Task<SolidWorksSessionStatus> GetStatusAsync(CancellationToken cancellationToken) =>
+                Task.FromResult(new SolidWorksSessionStatus());
+            public Task<SolidWorksSessionStatus> AttachAsync(CancellationToken cancellationToken) => GetStatusAsync(cancellationToken);
+            public Task<SolidWorksSessionStatus> LaunchAsync(CancellationToken cancellationToken) => GetStatusAsync(cancellationToken);
+            public Task<T> InvokeWithApplicationAsync<T>(Func<object, T> operation, CancellationToken cancellationToken) =>
+                throw new NotSupportedException();
+            public void Dispose() { }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+    }
+}
