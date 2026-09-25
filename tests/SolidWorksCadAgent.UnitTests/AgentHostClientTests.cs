@@ -60,6 +60,17 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public void Constructor_DisablesDefaultTimeoutForLongRunningLocalCadOperations()
+        {
+            var httpClient = new HttpClient(new QueueHandler("{}"));
+            using (var client = new AgentHostClient(httpClient))
+            {
+                Assert.AreEqual(Timeout.InfiniteTimeSpan, httpClient.Timeout);
+            }
+            httpClient.Dispose();
+        }
+
         private sealed class QueueHandler : HttpMessageHandler
         {
             private readonly string[] _responses;

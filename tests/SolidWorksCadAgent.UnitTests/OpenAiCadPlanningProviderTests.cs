@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -54,6 +55,10 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsTrue((bool)request["tools"][0]["strict"]);
             Assert.IsFalse((bool)request["tools"][0]["parameters"]["additionalProperties"]);
             Assert.AreEqual("propose_cad_plan", (string)request["tool_choice"]["name"]);
+            var commandSchema = request["tools"][0]["parameters"]["properties"]["commands"]["items"]["properties"]["command"];
+            CollectionAssert.Contains(commandSchema["enum"].Values<string>().ToArray(), CadCommandNames.AddRectangle);
+            StringAssert.Contains((string)request["instructions"], "widthMm");
+            StringAssert.Contains((string)request["instructions"], "ThroughAll");
         }
 
         [TestMethod]

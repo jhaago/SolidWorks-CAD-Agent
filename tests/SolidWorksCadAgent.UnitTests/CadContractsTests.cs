@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SolidWorksCadAgent.Contracts.Cad;
 
 namespace SolidWorksCadAgent.UnitTests
 {
@@ -34,6 +35,16 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual("Newtonsoft.Json.Linq.JObject", resultType.GetProperty("Data")?.PropertyType.FullName);
             Assert.AreEqual(errorType, resultType.GetProperty("Error")?.PropertyType);
             Assert.IsNotNull(resultType.GetMethod("Ok", new[] { typeof(object) }));
+        }
+
+        [TestMethod]
+        public void CadCommandResult_OkSerializesBridgeDtosWithCamelCaseContractNames()
+        {
+            var result = CadCommandResult.Ok(new { SizeXmm = 100.0, HasErrors = false });
+
+            Assert.AreEqual(100.0, (double)result.Data["sizeXmm"]);
+            Assert.AreEqual(false, (bool)result.Data["hasErrors"]);
+            Assert.IsNull(result.Data["SizeXmm"]);
         }
 
         [TestMethod]
