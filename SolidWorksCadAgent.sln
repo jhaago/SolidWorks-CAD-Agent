@@ -8,6 +8,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.Core", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.UnitTests", "tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj", "{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.SolidWorksBridge", "src\SolidWorksCadAgent.SolidWorksBridge\SolidWorksCadAgent.SolidWorksBridge.csproj", "{258D5B11-685E-4CB6-9FA9-B949DF8B246A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.AgentHost", "src\SolidWorksCadAgent.AgentHost\SolidWorksCadAgent.AgentHost.csproj", "{8054B030-D686-4922-BAB2-E61DE0484D62}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.Desktop", "src\SolidWorksCadAgent.Desktop\SolidWorksCadAgent.Desktop.csproj", "{92C3B68D-80F4-4643-B5F2-5DEEE734BD79}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidWorksCadAgent.IntegrationTests", "tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj", "{F06E18D6-8FD9-4B88-A78C-F7B804072C01}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +34,21 @@ Global
 		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B0D8DA54-BBBA-4F5F-8AE8-E19F8A1B7B64}.Release|Any CPU.Build.0 = Release|Any CPU
+		{258D5B11-685E-4CB6-9FA9-B949DF8B246A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{258D5B11-685E-4CB6-9FA9-B949DF8B246A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{258D5B11-685E-4CB6-9FA9-B949DF8B246A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{258D5B11-685E-4CB6-9FA9-B949DF8B246A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8054B030-D686-4922-BAB2-E61DE0484D62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8054B030-D686-4922-BAB2-E61DE0484D62}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8054B030-D686-4922-BAB2-E61DE0484D62}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8054B030-D686-4922-BAB2-E61DE0484D62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{92C3B68D-80F4-4643-B5F2-5DEEE734BD79}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{92C3B68D-80F4-4643-B5F2-5DEEE734BD79}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{92C3B68D-80F4-4643-B5F2-5DEEE734BD79}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{92C3B68D-80F4-4643-B5F2-5DEEE734BD79}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F06E18D6-8FD9-4B88-A78C-F7B804072C01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F06E18D6-8FD9-4B88-A78C-F7B804072C01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F06E18D6-8FD9-4B88-A78C-F7B804072C01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F06E18D6-8FD9-4B88-A78C-F7B804072C01}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

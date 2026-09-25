@@ -15,6 +15,14 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Restore complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /t:Restore /p:Configuration=Debug
+
+      - name: Build complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /p:Configuration=Debug /p:Restore=false
+
       - name: Restore unit-test dependencies
         shell: pwsh
         run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /t:Restore /p:Configuration=Debug
