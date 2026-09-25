@@ -130,6 +130,35 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task CreateAndPlanAsync_InvalidCommandParameters_RequiresClarificationBeforeApproval()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "Rectangle with a misspelled private parameter.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.AddRectangle,
+                        Parameters = JObject.FromObject(new { centreXmm = 0.0, centerYmm = 0.0, widthMm = 100.0, heightMm = 60.0 })
+                    }
+                }
+            };
+            var coordinator = new JobCoordinator(
+                _repository,
+                new FixedPlanningProvider(plan),
+                executor,
+                new AgentSettings { AutoMode = false });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Create a rectangle", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.IsTrue(snapshot.Job.HasUnresolvedAmbiguity);
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
         public async Task ApproveAndExecuteAsync_TwoJobs_NeverExecuteCadCommandsConcurrently()
         {
             var executor = new BlockingSuccessfulExecutor();
