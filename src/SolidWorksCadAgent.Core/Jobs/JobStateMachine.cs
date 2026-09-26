@@ -39,6 +39,7 @@ namespace SolidWorksCadAgent.Core.Jobs
                 },
                 [JobState.AwaitingApproval] = new HashSet<JobState>
                 {
+                    JobState.Interpreting,
                     JobState.Approved,
                     JobState.Failed
                 },
