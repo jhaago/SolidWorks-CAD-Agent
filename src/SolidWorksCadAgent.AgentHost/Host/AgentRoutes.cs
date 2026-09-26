@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -87,6 +88,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return await CreateJobAsync(request.Body, cancellationToken).ConfigureAwait(false);
             }
 
+            if (method == "GET" && path == "/jobs")
+            {
+                return await ListJobsAsync(request.Path, cancellationToken).ConfigureAwait(false);
+            }
+
             if (TryParseJobPath(path, out var jobId, out var action))
             {
                 if (method == "GET" && action == null)
@@ -110,8 +116,62 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
         private async Task<AgentResponse> GetJobAsync(Guid id, CancellationToken cancellationToken)
         {
-            var job = await _repository.GetAsync(id, cancellationToken).ConfigureAwait(false);
-            return job == null ? JobNotFound() : JobResponse(200, job);
+            var snapshot = await _repository.GetSnapshotAsync(id, cancellationToken).ConfigureAwait(false);
+            if (snapshot == null) return JobNotFound();
+            try
+            {
+                return SnapshotResponse(200, snapshot);
+            }
+            catch (JsonException)
+            {
+                return Error(500, "CORRUPT_JOB_SNAPSHOT", "The persisted CAD job contains invalid JSON.");
+            }
+        }
+
+        private async Task<AgentResponse> ListJobsAsync(string rawPath, CancellationToken cancellationToken)
+        {
+            int limit;
+            string cursor;
+            try
+            {
+                var limitText = GetQueryValue(rawPath, "limit");
+                if (string.IsNullOrWhiteSpace(limitText))
+                {
+                    limit = 25;
+                }
+                else if (!int.TryParse(limitText, NumberStyles.None, CultureInfo.InvariantCulture, out limit) || limit < 1)
+                {
+                    return Error(400, "INVALID_LIMIT", "The job page limit must be a positive integer.");
+                }
+                limit = Math.Min(limit, 100);
+                cursor = GetQueryValue(rawPath, "cursor");
+            }
+            catch (UriFormatException)
+            {
+                return Error(400, "INVALID_CURSOR", "The job cursor is invalid.");
+            }
+
+            try
+            {
+                var page = await _repository.ListAsync(limit, cursor, cancellationToken).ConfigureAwait(false);
+                return Json(200, new
+                {
+                    items = page.Items.Select(item => new
+                    {
+                        id = item.Id,
+                        prompt = item.Prompt,
+                        state = item.State.ToString(),
+                        isSimulated = item.IsSimulated,
+                        createdUtc = item.CreatedUtc,
+                        updatedUtc = item.UpdatedUtc
+                    }),
+                    nextCursor = page.NextCursor
+                });
+            }
+            catch (ArgumentException)
+            {
+                return Error(400, "INVALID_CURSOR", "The job cursor is invalid.");
+            }
         }
 
         private async Task<AgentResponse> ApproveJobAsync(Guid id, string body, CancellationToken cancellationToken)
@@ -262,6 +322,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 ambiguityMessage = job.AmbiguityMessage,
                 overwriteRequested = job.OverwriteRequested,
                 overwriteAuthorized = job.OverwriteAuthorized,
+                isSimulated = job.IsSimulated,
                 outputPath = job.OutputPath,
                 createdUtc = job.CreatedUtc,
                 updatedUtc = job.UpdatedUtc
@@ -281,12 +342,67 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 planValidated = job.PlanValidated,
                 hasUnresolvedAmbiguity = job.HasUnresolvedAmbiguity,
                 ambiguityMessage = job.AmbiguityMessage,
+                overwriteRequested = job.OverwriteRequested,
+                overwriteAuthorized = job.OverwriteAuthorized,
+                isSimulated = job.IsSimulated,
+                outputPath = job.OutputPath,
+                createdUtc = job.CreatedUtc,
+                updatedUtc = job.UpdatedUtc,
                 currentRevisionId = revision?.Id,
                 currentRevisionNumber = revision?.RevisionNumber,
-                plan = revision == null ? null : JToken.Parse(revision.PlanJson),
+                plan = revision == null ? null : ParseOptionalJson(revision.PlanJson),
                 commandCount = snapshot.Commands?.Count ?? 0,
-                verifications = snapshot.Verifications
+                revisions = (snapshot.Revisions ?? new JobRevision[0]).Select(item => new
+                {
+                    id = item.Id,
+                    jobId = item.JobId,
+                    revisionNumber = item.RevisionNumber,
+                    prompt = item.Prompt,
+                    interpretation = ParseOptionalJson(item.InterpretationJson),
+                    plan = ParseOptionalJson(item.PlanJson),
+                    createdUtc = item.CreatedUtc
+                }),
+                commands = (snapshot.Commands ?? new CommandExecutionRecord[0]).Select(item => new
+                {
+                    id = item.Id,
+                    jobId = item.JobId,
+                    revisionNumber = item.RevisionNumber,
+                    sequenceNumber = item.SequenceNumber,
+                    commandName = item.CommandName,
+                    parameters = ParseOptionalJson(item.ParametersJson),
+                    success = item.Success,
+                    result = ParseOptionalJson(item.ResultJson),
+                    errorCode = item.ErrorCode,
+                    errorMessage = item.ErrorMessage,
+                    startedUtc = item.StartedUtc,
+                    completedUtc = item.CompletedUtc
+                }),
+                verifications = (snapshot.Verifications ?? new VerificationResultRecord[0]).Select(item => new
+                {
+                    id = item.Id,
+                    jobId = item.JobId,
+                    revisionNumber = item.RevisionNumber,
+                    checkName = item.CheckName,
+                    passed = item.Passed,
+                    expected = ParseOptionalJson(item.ExpectedJson),
+                    actual = ParseOptionalJson(item.ActualJson),
+                    createdUtc = item.CreatedUtc
+                }),
+                attachments = (snapshot.Attachments ?? new AttachmentRecord[0]).Select(item => new
+                {
+                    id = item.Id,
+                    jobId = item.JobId,
+                    revisionNumber = item.RevisionNumber,
+                    kind = item.Kind,
+                    path = item.Path,
+                    createdUtc = item.CreatedUtc
+                })
             });
+        }
+
+        private static JToken ParseOptionalJson(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : JToken.Parse(value);
         }
 
         private static AgentResponse JobNotFound()
@@ -310,6 +426,24 @@ namespace SolidWorksCadAgent.AgentHost.Host
             var queryIndex = path.IndexOf('?');
             var normalized = queryIndex >= 0 ? path.Substring(0, queryIndex) : path;
             return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
+        }
+
+        private static string GetQueryValue(string path, string name)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            var queryIndex = path.IndexOf('?');
+            if (queryIndex < 0 || queryIndex == path.Length - 1) return null;
+
+            foreach (var pair in path.Substring(queryIndex + 1).Split('&'))
+            {
+                var separator = pair.IndexOf('=');
+                var rawKey = separator < 0 ? pair : pair.Substring(0, separator);
+                var rawValue = separator < 0 ? string.Empty : pair.Substring(separator + 1);
+                var key = Uri.UnescapeDataString(rawKey.Replace("+", " "));
+                if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+                    return Uri.UnescapeDataString(rawValue.Replace("+", " "));
+            }
+            return null;
         }
 
         private static bool TryParseJobPath(string path, out Guid id, out string action)
