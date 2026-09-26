@@ -159,6 +159,98 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             return await ExecuteApprovedAsync(snapshot.Job, revision, plan, cancellationToken).ConfigureAwait(false);
         }
 
+        public async Task<JobSnapshot> RequestChangesAsync(
+            Guid jobId,
+            Guid expectedRevisionId,
+            string instructions,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(instructions))
+                throw new JobCoordinatorException("INSTRUCTIONS_REQUIRED", "Change instructions are required.");
+
+            var snapshot = await SnapshotAsync(jobId, cancellationToken).ConfigureAwait(false);
+            if (snapshot == null)
+                throw new JobCoordinatorException("JOB_NOT_FOUND", "The requested CAD job does not exist.");
+
+            var currentRevision = snapshot.Revisions.OrderBy(item => item.RevisionNumber).LastOrDefault();
+            if (currentRevision == null || currentRevision.Id != expectedRevisionId)
+                throw new JobCoordinatorException("STALE_PLAN", "The requested changes do not target the current CAD job revision.");
+            if (snapshot.Job.State != JobState.AwaitingApproval && snapshot.Job.State != JobState.AwaitingClarification)
+                throw new JobCoordinatorException("INVALID_JOB_STATE", "Changes can only be requested before CAD execution.");
+
+            var expectedState = snapshot.Job.State;
+            var trimmedInstructions = instructions.Trim();
+            var clarifications = snapshot.Revisions
+                .OrderBy(item => item.RevisionNumber)
+                .Skip(1)
+                .Select(item => item.Prompt)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Concat(new[] { trimmedInstructions })
+                .ToList();
+
+            CadPlanningResult plan;
+            try
+            {
+                plan = await _planningProvider.PlanAsync(new CadPlanningRequest
+                {
+                    Prompt = snapshot.Job.Prompt,
+                    Clarifications = clarifications
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                await FailIfCurrentAsync(jobId, expectedState, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
+
+            plan = NormalizePlan(plan);
+            foreach (var ambiguity in ValidatePlan(plan))
+                plan.Ambiguities.Add(ambiguity);
+
+            var job = snapshot.Job;
+            _stateMachine.Transition(job, JobState.Interpreting);
+            job.PlanValidated = plan.Ambiguities.Count == 0 && plan.ProposedCommands.Count > 0;
+            job.HasUnresolvedAmbiguity = plan.Ambiguities.Count > 0;
+            job.AmbiguityMessage = job.HasUnresolvedAmbiguity ? string.Join(Environment.NewLine, plan.Ambiguities) : null;
+            job.OverwriteRequested = CadPlanningCommandContract.RequestsOverwrite(plan.ProposedCommands);
+            job.OverwriteAuthorized = false;
+            _stateMachine.Transition(
+                job,
+                job.HasUnresolvedAmbiguity || !job.PlanValidated
+                    ? JobState.AwaitingClarification
+                    : JobState.AwaitingApproval);
+
+            var revision = new JobRevision
+            {
+                Id = Guid.NewGuid(),
+                JobId = job.Id,
+                RevisionNumber = currentRevision.RevisionNumber + 1,
+                Prompt = trimmedInstructions,
+                InterpretationJson = JsonConvert.SerializeObject(new
+                {
+                    plan.Summary,
+                    plan.Assumptions,
+                    plan.Ambiguities,
+                    plan.Provider,
+                    plan.Model,
+                    plan.Usage
+                }),
+                PlanJson = JsonConvert.SerializeObject(plan),
+                CreatedUtc = _utcNow()
+            };
+
+            var appended = await _repository.TryAppendRevisionAsync(
+                job,
+                expectedState,
+                expectedRevisionId,
+                revision,
+                cancellationToken).ConfigureAwait(false);
+            if (!appended)
+                throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while the revision was being planned.");
+
+            return await SnapshotAsync(jobId, cancellationToken).ConfigureAwait(false);
+        }
+
         private async Task<JobSnapshot> ExecuteApprovedAsync(
             CadJob job,
             JobRevision revision,
