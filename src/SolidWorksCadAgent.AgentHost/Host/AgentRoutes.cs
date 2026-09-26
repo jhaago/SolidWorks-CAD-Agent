@@ -5,9 +5,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Jobs;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
@@ -20,9 +22,10 @@ namespace SolidWorksCadAgent.AgentHost.Host
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
         private readonly JobCoordinator _coordinator;
+        private readonly AgentSettingsService _settingsService;
 
         public AgentRoutes(SqliteJobRepository repository, ISolidWorksSession solidWorks)
-            : this(repository, solidWorks, null, () => DateTime.UtcNow)
+            : this(repository, solidWorks, null, null, () => DateTime.UtcNow)
         {
         }
 
@@ -30,7 +33,16 @@ namespace SolidWorksCadAgent.AgentHost.Host
             SqliteJobRepository repository,
             ISolidWorksSession solidWorks,
             JobCoordinator coordinator)
-            : this(repository, solidWorks, coordinator, () => DateTime.UtcNow)
+            : this(repository, solidWorks, coordinator, null, () => DateTime.UtcNow)
+        {
+        }
+
+        public AgentRoutes(
+            SqliteJobRepository repository,
+            ISolidWorksSession solidWorks,
+            JobCoordinator coordinator,
+            AgentSettingsService settingsService)
+            : this(repository, solidWorks, coordinator, settingsService, () => DateTime.UtcNow)
         {
         }
 
@@ -38,7 +50,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             SqliteJobRepository repository,
             ISolidWorksSession solidWorks,
             Func<DateTime> utcNow)
-            : this(repository, solidWorks, null, utcNow)
+            : this(repository, solidWorks, null, null, utcNow)
         {
         }
 
@@ -47,12 +59,23 @@ namespace SolidWorksCadAgent.AgentHost.Host
             ISolidWorksSession solidWorks,
             JobCoordinator coordinator,
             Func<DateTime> utcNow)
+            : this(repository, solidWorks, coordinator, null, utcNow)
+        {
+        }
+
+        internal AgentRoutes(
+            SqliteJobRepository repository,
+            ISolidWorksSession solidWorks,
+            JobCoordinator coordinator,
+            AgentSettingsService settingsService,
+            Func<DateTime> utcNow)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _solidWorks = solidWorks ?? throw new ArgumentNullException(nameof(solidWorks));
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
             _stateMachine = new JobStateMachine(_utcNow);
             _coordinator = coordinator;
+            _settingsService = settingsService;
         }
 
         public async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
@@ -81,6 +104,19 @@ namespace SolidWorksCadAgent.AgentHost.Host
             if (method == "POST" && path == "/solidworks/launch")
             {
                 return SolidWorksStatus(await _solidWorks.LaunchAsync(cancellationToken).ConfigureAwait(false));
+            }
+
+            if (path == "/settings")
+            {
+                if (method == "GET") return GetSettings();
+                if (method == "PUT") return await UpdateSettingsAsync(request.Body, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (path == "/credentials/openai")
+            {
+                if (method == "GET") return CredentialStatus();
+                if (method == "PUT") return SetCredential(request.Body);
+                if (method == "DELETE") return DeleteCredential();
             }
 
             if (method == "POST" && path == "/jobs")
@@ -131,6 +167,89 @@ namespace SolidWorksCadAgent.AgentHost.Host
             {
                 return Error(500, "CORRUPT_JOB_SNAPSHOT", "The persisted CAD job contains invalid JSON.");
             }
+        }
+
+        private AgentResponse GetSettings()
+        {
+            if (_settingsService == null)
+                return Error(409, "SETTINGS_NOT_CONFIGURED", "Settings controls are not configured for this Host.");
+            return Json(200, new { settings = SettingsProjection(_settingsService.Current) });
+        }
+
+        private async Task<AgentResponse> UpdateSettingsAsync(string body, CancellationToken cancellationToken)
+        {
+            if (_settingsService == null)
+                return Error(409, "SETTINGS_NOT_CONFIGURED", "Settings controls are not configured for this Host.");
+            try
+            {
+                var candidate = JsonConvert.DeserializeObject<AgentSettings>(body ?? string.Empty);
+                if (candidate == null) return Error(400, "INVALID_SETTINGS", "A settings object is required.");
+                var result = await _settingsService.UpdateAsync(candidate, cancellationToken).ConfigureAwait(false);
+                return Json(200, new
+                {
+                    settings = SettingsProjection(result.Settings),
+                    restartRequired = result.RestartRequired
+                });
+            }
+            catch (JsonException)
+            {
+                return Error(400, "INVALID_JSON", "The request body is not valid JSON.");
+            }
+            catch (ArgumentException ex)
+            {
+                return Error(400, "INVALID_SETTINGS", ex.Message);
+            }
+            catch (AgentSettingsServiceException ex)
+            {
+                return Error(409, ex.Code, ex.Message);
+            }
+        }
+
+        private AgentResponse CredentialStatus()
+        {
+            if (_settingsService == null)
+                return Error(409, "SETTINGS_NOT_CONFIGURED", "Credential controls are not configured for this Host.");
+            return Json(200, new { configured = _settingsService.IsOpenAiCredentialConfigured() });
+        }
+
+        private AgentResponse SetCredential(string body)
+        {
+            if (_settingsService == null)
+                return Error(409, "SETTINGS_NOT_CONFIGURED", "Credential controls are not configured for this Host.");
+            try
+            {
+                var request = JObject.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+                var apiKey = (string)request["apiKey"];
+                if (string.IsNullOrWhiteSpace(apiKey))
+                    return Error(400, "API_KEY_REQUIRED", "A non-empty OpenAI API key is required.");
+                _settingsService.SetOpenAiCredential(apiKey);
+                return Json(200, new { configured = true });
+            }
+            catch (JsonException)
+            {
+                return Error(400, "INVALID_JSON", "The request body is not valid JSON.");
+            }
+        }
+
+        private AgentResponse DeleteCredential()
+        {
+            if (_settingsService == null)
+                return Error(409, "SETTINGS_NOT_CONFIGURED", "Credential controls are not configured for this Host.");
+            _settingsService.DeleteOpenAiCredential();
+            return Json(200, new { configured = false });
+        }
+
+        private static object SettingsProjection(AgentSettings settings)
+        {
+            return new
+            {
+                workspaceRoot = settings.WorkspaceRoot,
+                autoMode = settings.AutoMode,
+                openAiModel = settings.OpenAiModel,
+                solidWorksExecutablePath = settings.SolidWorksExecutablePath,
+                loggingLevel = settings.LoggingLevel,
+                executionMode = settings.ExecutionMode.ToString()
+            };
         }
 
         private async Task<AgentResponse> ListJobsAsync(string rawPath, CancellationToken cancellationToken)
