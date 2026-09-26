@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Data.SQLite;
+using System.Collections;
+using System.Reflection;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 
@@ -306,6 +308,96 @@ PRAGMA user_version = 1;";
                     await reopened.InitializeAsync();
                     var loaded = await reopened.GetAsync(jobId);
                     Assert.IsTrue((bool)loaded.GetType().GetProperty("IsSimulated").GetValue(loaded));
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
+        [TestMethod]
+        public async Task ListAsync_PagesNewestFirstWithoutDuplicatesWhenTimestampsTie()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-Paging-" + Guid.NewGuid().ToString("N") + ".db");
+            var tied = new DateTime(2026, 9, 26, 12, 0, 0, DateTimeKind.Utc);
+            var ids = new[]
+            {
+                Guid.Parse("00000000-0000-0000-0000-000000000004"),
+                Guid.Parse("00000000-0000-0000-0000-000000000003"),
+                Guid.Parse("00000000-0000-0000-0000-000000000002"),
+                Guid.Parse("00000000-0000-0000-0000-000000000001")
+            };
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                {
+                    await repository.InitializeAsync();
+                    foreach (var id in ids)
+                    {
+                        await repository.CreateAsync(new CadJob
+                        {
+                            Id = id,
+                            Prompt = "Job " + id,
+                            State = JobState.New,
+                            CreatedUtc = tied,
+                            UpdatedUtc = tied
+                        });
+                    }
+                }
+
+                using (var reopened = new SqliteJobRepository(databasePath))
+                {
+                    await reopened.InitializeAsync();
+                    var method = typeof(SqliteJobRepository).GetMethod("ListAsync");
+                    Assert.IsNotNull(method, "SqliteJobRepository.ListAsync must exist.");
+
+                    dynamic firstTask = method.Invoke(reopened, new object[] { 2, null, default(System.Threading.CancellationToken) });
+                    dynamic first = await firstTask;
+                    var firstItems = ((IEnumerable)first.Items).Cast<object>().ToList();
+                    Assert.AreEqual(2, firstItems.Count);
+                    Assert.AreEqual(ids[0], (Guid)firstItems[0].GetType().GetProperty("Id").GetValue(firstItems[0]));
+                    Assert.AreEqual(ids[1], (Guid)firstItems[1].GetType().GetProperty("Id").GetValue(firstItems[1]));
+                    Assert.IsFalse(string.IsNullOrWhiteSpace((string)first.NextCursor));
+
+                    dynamic secondTask = method.Invoke(reopened, new object[] { 2, (string)first.NextCursor, default(System.Threading.CancellationToken) });
+                    dynamic second = await secondTask;
+                    var secondItems = ((IEnumerable)second.Items).Cast<object>().ToList();
+                    Assert.AreEqual(2, secondItems.Count);
+                    Assert.AreEqual(ids[2], (Guid)secondItems[0].GetType().GetProperty("Id").GetValue(secondItems[0]));
+                    Assert.AreEqual(ids[3], (Guid)secondItems[1].GetType().GetProperty("Id").GetValue(secondItems[1]));
+                    Assert.IsNull(second.NextCursor);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
+        [TestMethod]
+        public async Task ListAsync_RejectsInvalidLimitAndCursor()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-PagingValidation-" + Guid.NewGuid().ToString("N") + ".db");
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                {
+                    await repository.InitializeAsync();
+                    var method = typeof(SqliteJobRepository).GetMethod("ListAsync");
+                    Assert.IsNotNull(method, "SqliteJobRepository.ListAsync must exist.");
+
+                    var badLimit = Assert.ThrowsException<TargetInvocationException>(() =>
+                        method.Invoke(repository, new object[] { 0, null, default(System.Threading.CancellationToken) }));
+                    Assert.IsInstanceOfType(badLimit.InnerException, typeof(ArgumentOutOfRangeException));
+
+                    var badCursor = Assert.ThrowsException<TargetInvocationException>(() =>
+                        method.Invoke(repository, new object[] { 10, "not-a-cursor", default(System.Threading.CancellationToken) }));
+                    Assert.IsInstanceOfType(badCursor.InnerException, typeof(ArgumentException));
                 }
             }
             finally
