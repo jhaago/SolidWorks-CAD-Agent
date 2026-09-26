@@ -41,6 +41,20 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public void RequestChanges_FromEitherPreExecutionReviewState_ReturnsToInterpreting()
+        {
+            foreach (var state in new[] { JobState.AwaitingApproval, JobState.AwaitingClarification })
+            {
+                var job = CreateJob();
+                job.State = state;
+
+                new JobStateMachine().Transition(job, JobState.Interpreting);
+
+                Assert.AreEqual(JobState.Interpreting, job.State);
+            }
+        }
+
+        [TestMethod]
         public void Cancel_FromEveryNonTerminalState_IsAllowed()
         {
             foreach (JobState state in Enum.GetValues(typeof(JobState)))
