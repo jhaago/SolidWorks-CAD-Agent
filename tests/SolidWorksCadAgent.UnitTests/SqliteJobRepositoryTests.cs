@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Data.SQLite;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 
@@ -210,6 +211,99 @@ namespace SolidWorksCadAgent.UnitTests
                     Assert.IsTrue(await repository.TryUpdateFromStateAsync(approval, JobState.AwaitingApproval));
                     Assert.IsFalse(await repository.TryUpdateFromStateAsync(cancellation, JobState.AwaitingApproval));
                     Assert.AreEqual(JobState.Approved, (await repository.GetAsync(jobId)).State);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
+        [TestMethod]
+        public async Task InitializeAsync_MigratesVersionOneDatabaseWithoutLosingJobs()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-Migration-" + Guid.NewGuid().ToString("N") + ".db");
+            var jobId = Guid.NewGuid();
+            try
+            {
+                SQLiteConnection.CreateFile(databasePath);
+                using (var connection = new SQLiteConnection("Data Source=" + databasePath + ";Version=3;"))
+                {
+                    connection.Open();
+                    using (var command = connection.CreateCommand())
+                    {
+                        command.CommandText = @"
+CREATE TABLE Jobs (
+    Id TEXT PRIMARY KEY NOT NULL, Prompt TEXT NOT NULL, State INTEGER NOT NULL,
+    PlanValidated INTEGER NOT NULL, HasUnresolvedAmbiguity INTEGER NOT NULL,
+    AmbiguityMessage TEXT NULL, OverwriteRequested INTEGER NOT NULL,
+    OverwriteAuthorized INTEGER NOT NULL, OutputPath TEXT NULL,
+    CreatedUtc TEXT NOT NULL, UpdatedUtc TEXT NOT NULL);
+INSERT INTO Jobs VALUES (@Id, 'Existing job', 0, 0, 0, NULL, 0, 0, NULL,
+    '2026-09-22T00:00:00.0000000Z', '2026-09-22T00:00:00.0000000Z');
+PRAGMA user_version = 1;";
+                        command.Parameters.AddWithValue("@Id", jobId.ToString("D"));
+                        command.ExecuteNonQuery();
+                    }
+                }
+
+                using (var repository = new SqliteJobRepository(databasePath))
+                {
+                    await repository.InitializeAsync();
+                    var existing = await repository.GetAsync(jobId);
+                    Assert.IsNotNull(existing);
+                    Assert.IsFalse((bool)existing.GetType().GetProperty("IsSimulated").GetValue(existing));
+                }
+
+                using (var connection = new SQLiteConnection("Data Source=" + databasePath + ";Version=3;"))
+                {
+                    connection.Open();
+                    using (var command = connection.CreateCommand())
+                    {
+                        command.CommandText = "PRAGMA user_version;";
+                        Assert.AreEqual(2L, Convert.ToInt64(command.ExecuteScalar()));
+                    }
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
+        [TestMethod]
+        public async Task IsSimulated_RoundTripsAcrossRepositoryReopen()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-SimulationMarker-" + Guid.NewGuid().ToString("N") + ".db");
+            var jobId = Guid.NewGuid();
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                {
+                    await repository.InitializeAsync();
+                    var job = new CadJob
+                    {
+                        Id = jobId,
+                        Prompt = "Simulated plate",
+                        State = JobState.New,
+                        CreatedUtc = DateTime.UtcNow,
+                        UpdatedUtc = DateTime.UtcNow
+                    };
+                    var marker = job.GetType().GetProperty("IsSimulated");
+                    Assert.IsNotNull(marker, "CadJob.IsSimulated must exist.");
+                    marker.SetValue(job, true);
+                    await repository.CreateAsync(job);
+                }
+
+                using (var reopened = new SqliteJobRepository(databasePath))
+                {
+                    await reopened.InitializeAsync();
+                    var loaded = await reopened.GetAsync(jobId);
+                    Assert.IsTrue((bool)loaded.GetType().GetProperty("IsSimulated").GetValue(loaded));
                 }
             }
             finally
