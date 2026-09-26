@@ -244,6 +244,101 @@ VALUES
             return Task.CompletedTask;
         }
 
+        public Task<bool> TryAppendRevisionAsync(
+            CadJob job,
+            JobState expectedState,
+            Guid expectedRevisionId,
+            JobRevision revision,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateJob(job);
+            if (expectedRevisionId == Guid.Empty) throw new ArgumentException("The expected revision ID is required.", nameof(expectedRevisionId));
+            if (revision == null) throw new ArgumentNullException(nameof(revision));
+            if (revision.JobId != job.Id) throw new ArgumentException("The revision must belong to the job being updated.", nameof(revision));
+            if (revision.RevisionNumber < 1) throw new ArgumentException("The revision number must be positive.", nameof(revision));
+
+            using (var connection = OpenConnection())
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                JobState actualState;
+                Guid actualRevisionId;
+                using (var current = connection.CreateCommand())
+                {
+                    current.Transaction = transaction;
+                    current.CommandText = @"
+SELECT State,
+       (SELECT Id FROM Revisions WHERE JobId = Jobs.Id ORDER BY RevisionNumber DESC LIMIT 1)
+FROM Jobs WHERE Id = @Id;";
+                    Add(current, "@Id", GuidText(job.Id));
+                    using (var reader = current.ExecuteReader())
+                    {
+                        if (!reader.Read() || reader.IsDBNull(1))
+                        {
+                            transaction.Rollback();
+                            return Task.FromResult(false);
+                        }
+                        actualState = (JobState)reader.GetInt32(0);
+                        actualRevisionId = Guid.Parse(reader.GetString(1));
+                    }
+                }
+
+                if (actualState != expectedState || actualRevisionId != expectedRevisionId)
+                {
+                    transaction.Rollback();
+                    return Task.FromResult(false);
+                }
+
+                using (var insert = connection.CreateCommand())
+                {
+                    insert.Transaction = transaction;
+                    insert.CommandText = @"
+INSERT INTO Revisions
+(Id, JobId, RevisionNumber, Prompt, InterpretationJson, PlanJson, CreatedUtc)
+VALUES
+(@RevisionId, @JobId, @RevisionNumber, @RevisionPrompt, @InterpretationJson, @PlanJson, @RevisionCreatedUtc);";
+                    Add(insert, "@RevisionId", GuidText(revision.Id));
+                    Add(insert, "@JobId", GuidText(revision.JobId));
+                    Add(insert, "@RevisionNumber", revision.RevisionNumber);
+                    Add(insert, "@RevisionPrompt", revision.Prompt);
+                    Add(insert, "@InterpretationJson", revision.InterpretationJson);
+                    Add(insert, "@PlanJson", revision.PlanJson);
+                    Add(insert, "@RevisionCreatedUtc", DateText(revision.CreatedUtc));
+                    insert.ExecuteNonQuery();
+                }
+
+                using (var update = connection.CreateCommand())
+                {
+                    update.Transaction = transaction;
+                    update.CommandText = @"
+UPDATE Jobs SET
+    Prompt = @Prompt,
+    State = @State,
+    PlanValidated = @PlanValidated,
+    HasUnresolvedAmbiguity = @HasUnresolvedAmbiguity,
+    AmbiguityMessage = @AmbiguityMessage,
+    OverwriteRequested = @OverwriteRequested,
+    OverwriteAuthorized = @OverwriteAuthorized,
+    IsSimulated = @IsSimulated,
+    OutputPath = @OutputPath,
+    CreatedUtc = @CreatedUtc,
+    UpdatedUtc = @UpdatedUtc
+WHERE Id = @Id AND State = @ExpectedState;";
+                    BindJob(update, job);
+                    Add(update, "@ExpectedState", (int)expectedState);
+                    if (update.ExecuteNonQuery() != 1)
+                    {
+                        transaction.Rollback();
+                        return Task.FromResult(false);
+                    }
+                }
+
+                transaction.Commit();
+                return Task.FromResult(true);
+            }
+        }
+
         public Task AppendCommandAsync(CommandExecutionRecord record, CancellationToken cancellationToken = default(CancellationToken))
         {
             ThrowIfDisposed();
