@@ -57,6 +57,25 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task PlanAsync_M8ClearanceClarification_ProducesResolvedThroughHolePlan()
+        {
+            ICadPlanningProvider provider = new DeterministicCadPlanningProvider();
+
+            var result = await provider.PlanAsync(
+                new CadPlanningRequest
+                {
+                    Prompt = "Create a 100 x 60 x 10 mm rectangular plate with one centred M8 hole.",
+                    Clarifications = new[] { "Use a 9 mm diameter clearance through-hole." }
+                },
+                CancellationToken.None);
+
+            Assert.AreEqual(0, result.Ambiguities.Count);
+            var circle = result.ProposedCommands.Single(command => command.Command == CadCommandNames.AddCircle);
+            Assert.AreEqual(9.0, (double)circle.Parameters["diameterMm"]);
+            Assert.IsTrue(result.ProposedCommands.Any(command => command.Command == CadCommandNames.CutExtrude));
+        }
+
+        [TestMethod]
         public async Task PlanAsync_UnsupportedPrompt_RequestsClarificationInsteadOfGuessing()
         {
             ICadPlanningProvider provider = new DeterministicCadPlanningProvider();
