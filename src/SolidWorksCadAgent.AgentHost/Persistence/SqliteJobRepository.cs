@@ -47,6 +47,7 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                 command.CommandText = LoadSchema();
                 command.ExecuteNonQuery();
             }
+            EnsureSchemaVersion(connection);
 
             return Task.CompletedTask;
         }
@@ -63,10 +64,10 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                 command.CommandText = @"
 INSERT INTO Jobs
 (Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
- OverwriteRequested, OverwriteAuthorized, OutputPath, CreatedUtc, UpdatedUtc)
+ OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc)
 VALUES
 (@Id, @Prompt, @State, @PlanValidated, @HasUnresolvedAmbiguity, @AmbiguityMessage,
- @OverwriteRequested, @OverwriteAuthorized, @OutputPath, @CreatedUtc, @UpdatedUtc);";
+ @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc);";
                 BindJob(command, job);
                 command.ExecuteNonQuery();
             }
@@ -103,6 +104,7 @@ UPDATE Jobs SET
     AmbiguityMessage = @AmbiguityMessage,
     OverwriteRequested = @OverwriteRequested,
     OverwriteAuthorized = @OverwriteAuthorized,
+    IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
     UpdatedUtc = @UpdatedUtc
@@ -135,6 +137,7 @@ UPDATE Jobs SET
     AmbiguityMessage = @AmbiguityMessage,
     OverwriteRequested = @OverwriteRequested,
     OverwriteAuthorized = @OverwriteAuthorized,
+    IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
     UpdatedUtc = @UpdatedUtc
@@ -267,6 +270,7 @@ UPDATE Jobs SET
     AmbiguityMessage = @AmbiguityMessage,
     OverwriteRequested = @OverwriteRequested,
     OverwriteAuthorized = @OverwriteAuthorized,
+    IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
     UpdatedUtc = @UpdatedUtc
@@ -334,7 +338,7 @@ WHERE Id = @Id;";
                 command.Transaction = transaction;
                 command.CommandText = @"
 SELECT Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
-       OverwriteRequested, OverwriteAuthorized, OutputPath, CreatedUtc, UpdatedUtc
+       OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc
 FROM Jobs WHERE Id = @Id;";
                 Add(command, "@Id", GuidText(id));
 
@@ -351,9 +355,10 @@ FROM Jobs WHERE Id = @Id;";
                         AmbiguityMessage = NullableString(reader, 5),
                         OverwriteRequested = reader.GetInt32(6) != 0,
                         OverwriteAuthorized = reader.GetInt32(7) != 0,
-                        OutputPath = NullableString(reader, 8),
-                        CreatedUtc = ParseDate(reader.GetString(9)),
-                        UpdatedUtc = ParseDate(reader.GetString(10))
+                        IsSimulated = reader.GetInt32(8) != 0,
+                        OutputPath = NullableString(reader, 9),
+                        CreatedUtc = ParseDate(reader.GetString(10)),
+                        UpdatedUtc = ParseDate(reader.GetString(11))
                     };
                 }
             }
@@ -523,6 +528,7 @@ VALUES
             Add(command, "@AmbiguityMessage", job.AmbiguityMessage);
             Add(command, "@OverwriteRequested", job.OverwriteRequested ? 1 : 0);
             Add(command, "@OverwriteAuthorized", job.OverwriteAuthorized ? 1 : 0);
+            Add(command, "@IsSimulated", job.IsSimulated ? 1 : 0);
             Add(command, "@OutputPath", job.OutputPath);
             Add(command, "@CreatedUtc", DateText(job.CreatedUtc));
             Add(command, "@UpdatedUtc", DateText(job.UpdatedUtc));
@@ -586,6 +592,40 @@ VALUES
             {
                 return reader.ReadToEnd();
             }
+        }
+
+        private static void EnsureSchemaVersion(SQLiteConnection connection)
+        {
+            if (!HasColumn(connection, "Jobs", "IsSimulated"))
+            {
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "ALTER TABLE Jobs ADD COLUMN IsSimulated INTEGER NOT NULL DEFAULT 0;";
+                    command.ExecuteNonQuery();
+                }
+            }
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "PRAGMA user_version = 2;";
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private static bool HasColumn(SQLiteConnection connection, string table, string column)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "PRAGMA table_info(" + table + ");";
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return true;
+                    }
+                }
+            }
+            return false;
         }
 
         private void ThrowIfDisposed()
