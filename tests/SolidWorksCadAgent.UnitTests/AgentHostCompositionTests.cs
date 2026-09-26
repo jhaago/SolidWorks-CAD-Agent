@@ -5,11 +5,16 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost;
+using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.AgentHost.Simulation;
 using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.Core.Ai;
+using SolidWorksCadAgent.Core.Commands;
+using SolidWorksCadAgent.Core.Security;
+using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.UnitTests
@@ -53,6 +58,52 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public async Task SimulationComposition_NeverInvokesRealFactoriesAndLabelsHealthAndJobs()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-SimulationComposition-" + Guid.NewGuid().ToString("N") + ".db");
+            var settingsPath = path + ".settings.json";
+            try
+            {
+                using (var repository = new SqliteJobRepository(path))
+                {
+                    await repository.InitializeAsync();
+                    var settings = new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Simulation };
+                    var realFactoryCalls = 0;
+                    Func<ISolidWorksSession> sessionFactory = () => { realFactoryCalls++; throw new AssertFailedException("Real session factory was invoked."); };
+                    Func<ICadPlanningProvider> plannerFactory = () => { realFactoryCalls++; throw new AssertFailedException("Real planner factory was invoked."); };
+                    Func<ISolidWorksSession, ICadCommandExecutor> executorFactory = session => { realFactoryCalls++; throw new AssertFailedException("Real executor factory was invoked."); };
+
+                    var routes = AgentHostComposition.CreateRoutesForMode(
+                        repository,
+                        settings,
+                        new JsonAgentSettingsStore(settingsPath),
+                        new FakeSecretStore(),
+                        sessionFactory,
+                        plannerFactory,
+                        executorFactory);
+
+                    var health = JObject.Parse((await routes.HandleAsync(
+                        new AgentRequest("GET", "/health", null), CancellationToken.None)).JsonBody);
+                    Assert.AreEqual("Simulation", (string)health["executionMode"]);
+                    Assert.AreEqual(BridgeBuildCapabilities.Capability, (string)health["bridgeCapability"]);
+
+                    var job = JObject.Parse((await routes.HandleAsync(
+                        new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.\"}"),
+                        CancellationToken.None)).JsonBody);
+                    Assert.IsTrue((bool)job["isSimulated"]);
+                    Assert.AreEqual(0, realFactoryCalls);
+                }
+            }
+            finally
+            {
+                TryDelete(path);
+                TryDelete(path + "-wal");
+                TryDelete(path + "-shm");
+                TryDelete(settingsPath);
+            }
+        }
+
         private sealed class FakeSolidWorksSession : ISolidWorksSession
         {
             public Task<SolidWorksSessionStatus> GetStatusAsync(CancellationToken cancellationToken) =>
@@ -62,6 +113,14 @@ namespace SolidWorksCadAgent.UnitTests
             public Task<T> InvokeWithApplicationAsync<T>(Func<object, T> operation, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
             public void Dispose() { }
+        }
+
+        private sealed class FakeSecretStore : ISecretStore
+        {
+            public void Set(string target, string secret) { }
+            public string Get(string target) => null;
+            public bool Exists(string target) => false;
+            public void Delete(string target) { }
         }
 
         private static void TryDelete(string path)
