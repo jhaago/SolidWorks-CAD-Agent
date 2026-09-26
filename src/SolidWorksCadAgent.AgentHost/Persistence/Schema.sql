@@ -76,3 +76,5 @@ CREATE INDEX IF NOT EXISTS IX_VerificationResults_JobId_Revision
     ON VerificationResults(JobId, RevisionNumber);
 CREATE INDEX IF NOT EXISTS IX_Attachments_JobId_Revision
     ON Attachments(JobId, RevisionNumber);
+CREATE INDEX IF NOT EXISTS IX_Jobs_UpdatedUtc_Id
+    ON Jobs(UpdatedUtc DESC, Id DESC);
