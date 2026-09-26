@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SolidWorksCadAgent.Contracts.Jobs;
@@ -86,6 +87,72 @@ VALUES
             {
                 return Task.FromResult(ReadJob(connection, null, id));
             }
+        }
+
+        public Task<JobPageDto> ListAsync(
+            int limit,
+            string cursor,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (limit < 1 || limit > 100)
+                throw new ArgumentOutOfRangeException(nameof(limit), "The page size must be between 1 and 100.");
+
+            DateTime cursorUpdatedUtc;
+            Guid cursorId;
+            var hasCursor = !string.IsNullOrWhiteSpace(cursor);
+            if (hasCursor)
+                DecodeCursor(cursor, out cursorUpdatedUtc, out cursorId);
+            else
+            {
+                cursorUpdatedUtc = default(DateTime);
+                cursorId = Guid.Empty;
+            }
+
+            var items = new List<JobSummaryDto>();
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+SELECT Id, Prompt, State, IsSimulated, CreatedUtc, UpdatedUtc
+FROM Jobs
+WHERE @HasCursor = 0
+   OR UpdatedUtc < @CursorUpdatedUtc
+   OR (UpdatedUtc = @CursorUpdatedUtc AND Id < @CursorId)
+ORDER BY UpdatedUtc DESC, Id DESC
+LIMIT @Take;";
+                Add(command, "@HasCursor", hasCursor ? 1 : 0);
+                Add(command, "@CursorUpdatedUtc", hasCursor ? DateText(cursorUpdatedUtc) : string.Empty);
+                Add(command, "@CursorId", hasCursor ? GuidText(cursorId) : string.Empty);
+                Add(command, "@Take", limit + 1);
+
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        items.Add(new JobSummaryDto
+                        {
+                            Id = Guid.Parse(reader.GetString(0)),
+                            Prompt = reader.GetString(1),
+                            State = (JobState)reader.GetInt32(2),
+                            IsSimulated = reader.GetInt32(3) != 0,
+                            CreatedUtc = ParseDate(reader.GetString(4)),
+                            UpdatedUtc = ParseDate(reader.GetString(5))
+                        });
+                    }
+                }
+            }
+
+            string nextCursor = null;
+            if (items.Count > limit)
+            {
+                items.RemoveAt(items.Count - 1);
+                var last = items[items.Count - 1];
+                nextCursor = EncodeCursor(last.UpdatedUtc, last.Id);
+            }
+
+            return Task.FromResult(new JobPageDto { Items = items, NextCursor = nextCursor });
         }
 
         public Task UpdateAsync(CadJob job, CancellationToken cancellationToken = default(CancellationToken))
@@ -567,6 +634,33 @@ VALUES
         {
             var parsed = DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
             return parsed.Kind == DateTimeKind.Utc ? parsed : parsed.ToUniversalTime();
+        }
+
+        private static string EncodeCursor(DateTime updatedUtc, Guid id)
+        {
+            var bytes = Encoding.UTF8.GetBytes(DateText(updatedUtc) + "|" + GuidText(id));
+            return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+
+        private static void DecodeCursor(string cursor, out DateTime updatedUtc, out Guid id)
+        {
+            try
+            {
+                var encoded = cursor.Replace('-', '+').Replace('_', '/');
+                encoded = encoded.PadRight(encoded.Length + ((4 - encoded.Length % 4) % 4), '=');
+                var value = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+                var separator = value.IndexOf('|');
+                if (separator <= 0 || separator == value.Length - 1)
+                    throw new FormatException("The cursor payload is incomplete.");
+
+                updatedUtc = ParseDate(value.Substring(0, separator));
+                id = Guid.Parse(value.Substring(separator + 1));
+                if (id == Guid.Empty) throw new FormatException("The cursor ID is empty.");
+            }
+            catch (Exception ex) when (ex is FormatException || ex is ArgumentException)
+            {
+                throw new ArgumentException("The job cursor is invalid.", nameof(cursor), ex);
+            }
         }
 
         private static void ValidateJob(CadJob job)
