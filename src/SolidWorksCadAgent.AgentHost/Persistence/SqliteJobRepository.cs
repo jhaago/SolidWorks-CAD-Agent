@@ -42,12 +42,14 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                 Directory.CreateDirectory(directory);
 
             using (var connection = OpenConnection())
-            using (var command = connection.CreateCommand())
             {
-                command.CommandText = LoadSchema();
-                command.ExecuteNonQuery();
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = LoadSchema();
+                    command.ExecuteNonQuery();
+                }
+                EnsureSchemaVersion(connection);
             }
-            EnsureSchemaVersion(connection);
 
             return Task.CompletedTask;
         }
