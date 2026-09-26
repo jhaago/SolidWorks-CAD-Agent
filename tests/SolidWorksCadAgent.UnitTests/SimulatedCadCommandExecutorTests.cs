@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,6 +62,33 @@ namespace SolidWorksCadAgent.UnitTests
 
             Assert.IsFalse(result.Success);
             Assert.AreEqual("UNSUPPORTED_COMMAND", result.Error.Code);
+        }
+
+        [TestMethod]
+        public async Task SavePart_RejectsNativeSolidWorksExtensionInSimulation()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            await executor.ExecuteAsync(Command(CadCommandNames.NewPart), CancellationToken.None);
+
+            var result = await executor.ExecuteAsync(
+                Command(CadCommandNames.SavePart, new { path = @"C:\Cad\simulated.SLDPRT" }),
+                CancellationToken.None);
+
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("SIMULATION_NATIVE_FORMAT_NOT_ALLOWED", result.Error.Code);
+        }
+
+        [TestMethod]
+        public async Task SimulatedSession_StatusIsExplicitAndNeverRequiresCom()
+        {
+            using (var session = new SimulatedSolidWorksSession())
+            {
+                var status = await session.GetStatusAsync(CancellationToken.None);
+
+                Assert.IsTrue(status.IsConnected);
+                Assert.IsTrue(status.IsRunning);
+                StringAssert.Contains(status.RuntimeInfo.DisplayVersion, "SIMULATION");
+            }
         }
 
         private static IEnumerable<CadCommandEnvelope> AcceptancePlateCommands()
