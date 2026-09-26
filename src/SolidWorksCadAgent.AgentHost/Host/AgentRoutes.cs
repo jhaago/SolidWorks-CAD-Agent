@@ -109,6 +109,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 {
                     return await ApproveJobAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
                 }
+
+                if (method == "POST" && action == "request-changes")
+                {
+                    return await RequestChangesAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             return Error(404, "ROUTE_NOT_FOUND", "The requested Agent Host route does not exist.");
@@ -211,6 +216,39 @@ namespace SolidWorksCadAgent.AgentHost.Host
             }
 
             return await TransitionAndSaveAsync(job, JobState.Approved, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<AgentResponse> RequestChangesAsync(Guid id, string body, CancellationToken cancellationToken)
+        {
+            if (_coordinator == null)
+                return Error(409, "PLANNING_NOT_CONFIGURED", "Request Changes requires a configured planning coordinator.");
+
+            JObject request;
+            try
+            {
+                request = JObject.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+            }
+            catch (JsonException)
+            {
+                return Error(400, "INVALID_JSON", "The request body is not valid JSON.");
+            }
+
+            if (!Guid.TryParse((string)request["revisionId"], out var revisionId))
+                return Error(400, "REVISION_REQUIRED", "Request Changes requires the current revisionId.");
+            var instructions = (string)request["instructions"];
+            if (string.IsNullOrWhiteSpace(instructions))
+                return Error(400, "INSTRUCTIONS_REQUIRED", "Change instructions are required.");
+
+            try
+            {
+                var snapshot = await _coordinator.RequestChangesAsync(id, revisionId, instructions, cancellationToken)
+                    .ConfigureAwait(false);
+                return SnapshotResponse(200, snapshot);
+            }
+            catch (JobCoordinatorException ex)
+            {
+                return Error(ex.Code == "JOB_NOT_FOUND" ? 404 : 409, ex.Code, ex.Message);
+            }
         }
 
         private async Task<AgentResponse> TransitionJobAsync(
