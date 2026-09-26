@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using SolidWorksCadAgent.AgentHost.Ai;
+using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.AgentHost.Security;
@@ -17,11 +18,13 @@ namespace SolidWorksCadAgent.AgentHost
     {
         private static int Main()
         {
-            var settings = new AgentSettings();
             var dataDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SolidWorksCadAgent");
             var databasePath = Path.Combine(dataDirectory, "jobs.db");
+            var settingsStore = new JsonAgentSettingsStore(Path.Combine(dataDirectory, "settings.json"));
+            var settings = settingsStore.Load();
+            var secretStore = new WindowsCredentialStore();
 
             using (var repository = new SqliteJobRepository(databasePath))
             using (var solidWorks = new SolidWorksSession())
@@ -36,10 +39,12 @@ namespace SolidWorksCadAgent.AgentHost
                     solidWorks,
                     new OpenAiCadPlanningProvider(
                         httpClient,
-                        new WindowsCredentialStore(),
+                        secretStore,
                         settings.OpenAiModel),
                     bridge,
-                    settings)))
+                    settings,
+                    settingsStore,
+                    secretStore)))
             using (var shutdown = new CancellationTokenSource())
             {
                 repository.InitializeAsync().GetAwaiter().GetResult();
