@@ -254,7 +254,9 @@ PRAGMA user_version = 1;";
                     await repository.InitializeAsync();
                     var existing = await repository.GetAsync(jobId);
                     Assert.IsNotNull(existing);
-                    Assert.IsFalse((bool)existing.GetType().GetProperty("IsSimulated").GetValue(existing));
+                    var marker = existing.GetType().GetProperty("IsSimulated");
+                    Assert.IsNotNull(marker, "CadJob.IsSimulated must exist after migration.");
+                    Assert.IsFalse((bool)marker.GetValue(existing));
                 }
 
                 using (var connection = new SQLiteConnection("Data Source=" + databasePath + ";Version=3;"))
