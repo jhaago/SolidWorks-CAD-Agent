@@ -89,6 +89,25 @@ VALUES
             }
         }
 
+        public Task<bool> HasNonTerminalJobsAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+SELECT EXISTS(
+    SELECT 1 FROM Jobs
+    WHERE State NOT IN (@Completed, @Failed, @Cancelled)
+);";
+                Add(command, "@Completed", (int)JobState.Completed);
+                Add(command, "@Failed", (int)JobState.Failed);
+                Add(command, "@Cancelled", (int)JobState.Cancelled);
+                return Task.FromResult(Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0);
+            }
+        }
+
         public Task<JobPageDto> ListAsync(
             int limit,
             string cursor,
