@@ -12,6 +12,7 @@ namespace SolidWorksCadAgent.Contracts.Jobs
         public string AmbiguityMessage { get; set; }
         public bool OverwriteRequested { get; set; }
         public bool OverwriteAuthorized { get; set; }
+        public bool IsSimulated { get; set; }
         public string OutputPath { get; set; }
         public DateTime CreatedUtc { get; set; }
         public DateTime UpdatedUtc { get; set; }
