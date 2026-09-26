@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
@@ -12,6 +13,7 @@ using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.AgentHost.Simulation;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.Core.Security;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.UnitTests
@@ -431,6 +433,97 @@ namespace SolidWorksCadAgent.UnitTests
                 .Contains((string)JObject.Parse(conflict.JsonBody)["error"]["code"]));
         }
 
+        [TestMethod]
+        public async Task Settings_RoundTripPersistsValidatedValuesAndRejectsModeChangeWithActiveJob()
+        {
+            var settingsPath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-SettingsRoutes-" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                var settings = new AgentSettings();
+                var store = new JsonAgentSettingsStore(settingsPath);
+                var service = new AgentSettingsService(settings, store, new FakeSecretStore(), _repository);
+                var routes = new AgentRoutes(_repository, _solidWorks, null, service);
+
+                var update = await routes.HandleAsync(
+                    new AgentRequest("PUT", "/settings",
+                        "{\"workspaceRoot\":\"C:\\\\CadWorkspace\",\"autoMode\":true,\"openAiModel\":\"gpt-test\",\"solidWorksExecutablePath\":\"C:\\\\Program Files\\\\SOLIDWORKS.exe\",\"loggingLevel\":\"Debug\",\"executionMode\":\"Simulation\"}"),
+                    CancellationToken.None);
+
+                Assert.AreEqual(200, update.StatusCode);
+                var updated = JObject.Parse(update.JsonBody);
+                Assert.IsTrue((bool)updated["restartRequired"]);
+                Assert.AreEqual("Simulation", (string)updated["settings"]["executionMode"]);
+                Assert.IsTrue(settings.AutoMode);
+                Assert.AreEqual(ExecutionMode.Simulation, store.Load().ExecutionMode);
+
+                await _repository.CreateAsync(new CadJob
+                {
+                    Id = Guid.NewGuid(), Prompt = "Active", State = JobState.AwaitingApproval,
+                    CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow
+                });
+                var blocked = await routes.HandleAsync(
+                    new AgentRequest("PUT", "/settings",
+                        "{\"workspaceRoot\":\"C:\\\\CadWorkspace\",\"autoMode\":true,\"openAiModel\":\"gpt-test\",\"loggingLevel\":\"Debug\",\"executionMode\":\"Real\"}"),
+                    CancellationToken.None);
+                Assert.AreEqual(409, blocked.StatusCode);
+                Assert.AreEqual("ACTIVE_JOBS_BLOCK_MODE_CHANGE", (string)JObject.Parse(blocked.JsonBody)["error"]["code"]);
+                Assert.AreEqual(ExecutionMode.Simulation, settings.ExecutionMode);
+            }
+            finally
+            {
+                TryDelete(settingsPath);
+                TryDelete(settingsPath + ".bak");
+                TryDelete(settingsPath + ".tmp");
+            }
+        }
+
+        [TestMethod]
+        public async Task Settings_InvalidUpdateIsAtomicAndCredentialRoutesNeverReadBackSecret()
+        {
+            var settingsPath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-CredentialRoutes-" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                var settings = new AgentSettings();
+                var secrets = new FakeSecretStore();
+                var service = new AgentSettingsService(settings, new JsonAgentSettingsStore(settingsPath), secrets, _repository);
+                var routes = new AgentRoutes(_repository, _solidWorks, null, service);
+
+                var invalid = await routes.HandleAsync(
+                    new AgentRequest("PUT", "/settings",
+                        "{\"workspaceRoot\":\"relative\",\"autoMode\":true,\"openAiModel\":\"gpt-test\",\"loggingLevel\":\"Debug\",\"executionMode\":\"Real\"}"),
+                    CancellationToken.None);
+                Assert.AreEqual(400, invalid.StatusCode);
+                Assert.IsFalse(settings.AutoMode);
+                Assert.AreEqual(@"C:\SolidWorks-CAD-Agent\Workspace", settings.WorkspaceRoot);
+
+                const string apiKey = "sk-test-secret-value";
+                var set = await routes.HandleAsync(
+                    new AgentRequest("PUT", "/credentials/openai", "{\"apiKey\":\"" + apiKey + "\"}"),
+                    CancellationToken.None);
+                var status = await routes.HandleAsync(
+                    new AgentRequest("GET", "/credentials/openai", null),
+                    CancellationToken.None);
+                var deleted = await routes.HandleAsync(
+                    new AgentRequest("DELETE", "/credentials/openai", null),
+                    CancellationToken.None);
+
+                Assert.AreEqual(200, set.StatusCode);
+                Assert.AreEqual(200, status.StatusCode);
+                Assert.IsTrue((bool)JObject.Parse(status.JsonBody)["configured"]);
+                Assert.IsFalse(set.JsonBody.Contains(apiKey));
+                Assert.IsFalse(status.JsonBody.Contains(apiKey));
+                Assert.AreEqual(0, secrets.GetCalls);
+                Assert.AreEqual(200, deleted.StatusCode);
+                Assert.IsFalse((bool)JObject.Parse(deleted.JsonBody)["configured"]);
+            }
+            finally
+            {
+                TryDelete(settingsPath);
+                TryDelete(settingsPath + ".bak");
+                TryDelete(settingsPath + ".tmp");
+            }
+        }
+
         private sealed class FakeSolidWorksSession : ISolidWorksSession
         {
             public int AttachCalls { get; private set; }
@@ -475,6 +568,16 @@ namespace SolidWorksCadAgent.UnitTests
                     }
                 };
             }
+        }
+
+        private sealed class FakeSecretStore : ISecretStore
+        {
+            private string _secret;
+            public int GetCalls { get; private set; }
+            public void Set(string target, string secret) { _secret = secret; }
+            public string Get(string target) { GetCalls++; return _secret; }
+            public bool Exists(string target) { return _secret != null; }
+            public void Delete(string target) { _secret = null; }
         }
 
         private async Task<Guid> CreateStoredJobAsync(string prompt, DateTime updatedUtc)
