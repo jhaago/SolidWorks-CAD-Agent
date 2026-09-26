@@ -19,30 +19,40 @@ namespace SolidWorksCadAgent.AgentHost.Planning
             if (string.IsNullOrWhiteSpace(request.Prompt)) throw new ArgumentException("A CAD prompt is required.", nameof(request));
 
             var prompt = request.Prompt;
+            var clarifications = request.Clarifications == null
+                ? string.Empty
+                : string.Join(" ", request.Clarifications);
             if (prompt.IndexOf("M8", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                prompt.IndexOf("tapped", StringComparison.OrdinalIgnoreCase) < 0 &&
-                prompt.IndexOf("clearance", StringComparison.OrdinalIgnoreCase) < 0)
+                !Contains(prompt + " " + clarifications, "tapped") &&
+                !Contains(prompt + " " + clarifications, "clearance"))
             {
                 return Task.FromResult(Clarification(
                     "Specify whether the M8 hole is tapped or clearance, including the required fit if clearance."));
             }
 
+            if (Contains(prompt, "M8") && Contains(clarifications, "clearance") &&
+                (Contains(clarifications, "9 mm") || Contains(clarifications, "9mm")) &&
+                Contains(prompt, "100") && Contains(prompt, "60") && Contains(prompt, "10"))
+            {
+                return Task.FromResult(PlateWithHole(9.0, "M8 clearance"));
+            }
+
             if (IsAcceptancePlate(prompt))
             {
-                return Task.FromResult(AcceptancePlate());
+                return Task.FromResult(PlateWithHole(20.0, "Ø20"));
             }
 
             return Task.FromResult(Clarification(
                 "The deterministic planner only recognises the V1 acceptance plate. Provide explicit dimensions and feature intent or use a configured cloud planner."));
         }
 
-        private static CadPlanningResult AcceptancePlate()
+        private static CadPlanningResult PlateWithHole(double diameterMm, string holeDescription)
         {
             return new CadPlanningResult
             {
                 Provider = "deterministic",
                 Model = "v1-rules",
-                Summary = "Create a native 100 × 60 × 10 mm rectangular plate with a centred Ø20 through-hole.",
+                Summary = "Create a native 100 × 60 × 10 mm rectangular plate with a centred " + holeDescription + " through-hole.",
                 ProposedCommands = new List<CadCommandEnvelope>
                 {
                     Command(CadCommandNames.NewPart),
@@ -51,7 +61,7 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     Command(CadCommandNames.ExitSketch),
                     Command(CadCommandNames.Extrude, new { depthMm = 10.0 }),
                     Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
-                    Command(CadCommandNames.AddCircle, new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 20.0 }),
+                    Command(CadCommandNames.AddCircle, new { centerXmm = 0.0, centerYmm = 0.0, diameterMm }),
                     Command(CadCommandNames.ExitSketch),
                     Command(CadCommandNames.CutExtrude, new { endCondition = "ThroughAll" }),
                     Command(CadCommandNames.Rebuild)
