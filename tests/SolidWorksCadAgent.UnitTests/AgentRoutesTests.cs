@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -145,6 +146,122 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task ListJobs_ReturnsBoundedNewestFirstPageWithCursor()
+        {
+            var first = await CreateStoredJobAsync("Old", new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc));
+            var second = await CreateStoredJobAsync("Middle", new DateTime(2026, 9, 26, 11, 0, 0, DateTimeKind.Utc));
+            var third = await CreateStoredJobAsync("Newest", new DateTime(2026, 9, 26, 12, 0, 0, DateTimeKind.Utc));
+
+            var response = await _routes.HandleAsync(
+                new AgentRequest("GET", "/jobs?limit=2", null),
+                CancellationToken.None);
+
+            Assert.AreEqual(200, response.StatusCode);
+            var body = JObject.Parse(response.JsonBody);
+            Assert.AreEqual(third, (Guid)body["items"][0]["id"]);
+            Assert.AreEqual(second, (Guid)body["items"][1]["id"]);
+            Assert.IsFalse(string.IsNullOrWhiteSpace((string)body["nextCursor"]));
+            Assert.AreNotEqual(first, (Guid)body["items"][1]["id"]);
+        }
+
+        [TestMethod]
+        public async Task ListJobs_InvalidCursorReturnsStructuredBadRequest()
+        {
+            var response = await _routes.HandleAsync(
+                new AgentRequest("GET", "/jobs?limit=25&cursor=not-a-cursor", null),
+                CancellationToken.None);
+
+            Assert.AreEqual(400, response.StatusCode);
+            Assert.AreEqual("INVALID_CURSOR", (string)JObject.Parse(response.JsonBody)["error"]["code"]);
+        }
+
+        [TestMethod]
+        public async Task GetJob_ReturnsCompletePersistedSnapshot()
+        {
+            var created = new DateTime(2026, 9, 26, 13, 0, 0, DateTimeKind.Utc);
+            var jobId = Guid.NewGuid();
+            var revisionId = Guid.NewGuid();
+            await _repository.CreateAsync(new CadJob
+            {
+                Id = jobId,
+                Prompt = "Complete snapshot",
+                State = JobState.ReadyForReview,
+                PlanValidated = true,
+                IsSimulated = true,
+                OutputPath = @"C:\SolidWorks-CAD-Agent\Workspace\simulation.json",
+                CreatedUtc = created,
+                UpdatedUtc = created.AddMinutes(4)
+            });
+            await _repository.AppendRevisionAsync(new JobRevision
+            {
+                Id = revisionId,
+                JobId = jobId,
+                RevisionNumber = 1,
+                Prompt = "Complete snapshot",
+                InterpretationJson = "{\"summary\":\"plate\"}",
+                PlanJson = "{\"summary\":\"plan\",\"proposedCommands\":[]}",
+                CreatedUtc = created.AddMinutes(1)
+            });
+            await _repository.AppendCommandAsync(new CommandExecutionRecord
+            {
+                Id = Guid.NewGuid(), JobId = jobId, RevisionNumber = 1, SequenceNumber = 1,
+                CommandName = "NewPart", ParametersJson = "{}", Success = true, ResultJson = "{\"ok\":true}",
+                StartedUtc = created.AddMinutes(2), CompletedUtc = created.AddMinutes(2).AddSeconds(1)
+            });
+            await _repository.AppendVerificationAsync(new VerificationResultRecord
+            {
+                Id = Guid.NewGuid(), JobId = jobId, RevisionNumber = 1, CheckName = "BodyCount",
+                Passed = true, ExpectedJson = "{\"bodyCount\":1}", ActualJson = "{\"bodyCount\":1}",
+                CreatedUtc = created.AddMinutes(3)
+            });
+            await _repository.AddAttachmentAsync(new AttachmentRecord
+            {
+                Id = Guid.NewGuid(), JobId = jobId, RevisionNumber = 1, Kind = "SimulationReport",
+                Path = @"C:\SolidWorks-CAD-Agent\Workspace\simulation.json", CreatedUtc = created.AddMinutes(3)
+            });
+
+            var response = await _routes.HandleAsync(
+                new AgentRequest("GET", "/jobs/" + jobId.ToString("D"), null),
+                CancellationToken.None);
+
+            Assert.AreEqual(200, response.StatusCode);
+            var body = JObject.Parse(response.JsonBody);
+            Assert.AreEqual(revisionId, (Guid)body["currentRevisionId"]);
+            Assert.AreEqual(1, body["revisions"].Count());
+            Assert.AreEqual(1, body["commands"].Count());
+            Assert.AreEqual(1, body["verifications"].Count());
+            Assert.AreEqual(1, body["attachments"].Count());
+            Assert.IsTrue((bool)body["isSimulated"]);
+            Assert.AreEqual(@"C:\SolidWorks-CAD-Agent\Workspace\simulation.json", (string)body["outputPath"]);
+            Assert.AreEqual(created, (DateTime)body["createdUtc"]);
+            Assert.AreEqual(created.AddMinutes(4), (DateTime)body["updatedUtc"]);
+        }
+
+        [TestMethod]
+        public async Task GetJob_CorruptPlanReturnsStructuredServerError()
+        {
+            var created = DateTime.UtcNow;
+            var jobId = Guid.NewGuid();
+            await _repository.CreateAsync(new CadJob
+            {
+                Id = jobId, Prompt = "Corrupt snapshot", State = JobState.AwaitingApproval,
+                CreatedUtc = created, UpdatedUtc = created
+            });
+            await _repository.AppendRevisionAsync(new JobRevision
+            {
+                Id = Guid.NewGuid(), JobId = jobId, RevisionNumber = 1, Prompt = "Corrupt snapshot",
+                PlanJson = "{ invalid", CreatedUtc = created
+            });
+
+            var response = await _routes.HandleAsync(
+                new AgentRequest("GET", "/jobs/" + jobId.ToString("D"), null),
+                CancellationToken.None);
+
+            Assert.AreEqual(500, response.StatusCode);
+            Assert.AreEqual("CORRUPT_JOB_SNAPSHOT", (string)JObject.Parse(response.JsonBody)["error"]["code"]);
+        }
+
+        [TestMethod]
         public async Task CancelJob_MakesThePersistedJobTerminal()
         {
             var create = await _routes.HandleAsync(
@@ -278,6 +395,20 @@ namespace SolidWorksCadAgent.UnitTests
                     }
                 };
             }
+        }
+
+        private async Task<Guid> CreateStoredJobAsync(string prompt, DateTime updatedUtc)
+        {
+            var id = Guid.NewGuid();
+            await _repository.CreateAsync(new CadJob
+            {
+                Id = id,
+                Prompt = prompt,
+                State = JobState.New,
+                CreatedUtc = updatedUtc,
+                UpdatedUtc = updatedUtc
+            });
+            return id;
         }
 
         private static void TryDelete(string path)
