@@ -351,6 +351,86 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(0, executor.ExecutedCommands.Count);
         }
 
+        [TestMethod]
+        public async Task RequestChanges_AppendsRevisionAndInvalidatesOldApproval()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(
+                _repository,
+                new DeterministicCadPlanningProvider(),
+                executor,
+                new AgentSettings { AutoMode = false });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var create = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred M8 hole.\"}"),
+                CancellationToken.None);
+            var created = JObject.Parse(create.JsonBody);
+            var jobId = (Guid)created["id"];
+            var originalRevisionId = (Guid)created["currentRevisionId"];
+            Assert.AreEqual("AwaitingClarification", (string)created["state"]);
+
+            var changed = await routes.HandleAsync(
+                new AgentRequest(
+                    "POST",
+                    "/jobs/" + jobId.ToString("D") + "/request-changes",
+                    "{\"revisionId\":\"" + originalRevisionId.ToString("D") + "\",\"instructions\":\"Use a 9 mm diameter clearance through-hole.\"}"),
+                CancellationToken.None);
+
+            Assert.AreEqual(200, changed.StatusCode);
+            var body = JObject.Parse(changed.JsonBody);
+            Assert.AreEqual("AwaitingApproval", (string)body["state"]);
+            Assert.AreEqual(2, (int)body["currentRevisionNumber"]);
+            Assert.AreEqual(2, body["revisions"].Count());
+            Assert.AreEqual("Use a 9 mm diameter clearance through-hole.", (string)body["revisions"][1]["prompt"]);
+
+            var staleApproval = await routes.HandleAsync(
+                new AgentRequest(
+                    "POST",
+                    "/jobs/" + jobId.ToString("D") + "/approve",
+                    "{\"revisionId\":\"" + originalRevisionId.ToString("D") + "\"}"),
+                CancellationToken.None);
+            Assert.AreEqual(409, staleApproval.StatusCode);
+            Assert.AreEqual("STALE_PLAN", (string)JObject.Parse(staleApproval.JsonBody)["error"]["code"]);
+            Assert.AreEqual(0, executor.ExecutedCommands.Count);
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_RejectsBlankInstructionsAndStaleOrConcurrentRevision()
+        {
+            var coordinator = new JobCoordinator(
+                _repository,
+                new DeterministicCadPlanningProvider(),
+                new SimulatedCadCommandExecutor(),
+                new AgentSettings { AutoMode = false });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var create = JObject.Parse((await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a 100 x 60 x 10 mm rectangular plate with one centred M8 hole.\"}"),
+                CancellationToken.None)).JsonBody);
+            var jobId = (Guid)create["id"];
+            var revisionId = (Guid)create["currentRevisionId"];
+
+            var blank = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs/" + jobId.ToString("D") + "/request-changes",
+                    "{\"revisionId\":\"" + revisionId.ToString("D") + "\",\"instructions\":\"   \"}"),
+                CancellationToken.None);
+            Assert.AreEqual(400, blank.StatusCode);
+            Assert.AreEqual("INSTRUCTIONS_REQUIRED", (string)JObject.Parse(blank.JsonBody)["error"]["code"]);
+
+            var requestBody = "{\"revisionId\":\"" + revisionId.ToString("D") + "\",\"instructions\":\"Use a 9 mm diameter clearance through-hole.\"}";
+            var requests = new[]
+            {
+                routes.HandleAsync(new AgentRequest("POST", "/jobs/" + jobId.ToString("D") + "/request-changes", requestBody), CancellationToken.None),
+                routes.HandleAsync(new AgentRequest("POST", "/jobs/" + jobId.ToString("D") + "/request-changes", requestBody), CancellationToken.None)
+            };
+            var responses = await Task.WhenAll(requests);
+
+            CollectionAssert.AreEquivalent(new[] { 200, 409 }, responses.Select(item => item.StatusCode).ToArray());
+            Assert.AreEqual(2, (await _repository.GetSnapshotAsync(jobId)).Revisions.Count);
+            var conflict = responses.Single(item => item.StatusCode == 409);
+            Assert.IsTrue(new[] { "STALE_PLAN", "CONCURRENT_JOB_UPDATE" }
+                .Contains((string)JObject.Parse(conflict.JsonBody)["error"]["code"]));
+        }
+
         private sealed class FakeSolidWorksSession : ISolidWorksSession
         {
             public int AttachCalls { get; private set; }
