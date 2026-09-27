@@ -26,6 +26,7 @@ namespace SolidWorksCadAgent.AgentHost.Configuration
         private readonly JsonAgentSettingsStore _store;
         private readonly ISecretStore _secretStore;
         private readonly SqliteJobRepository _repository;
+        private readonly ExecutionMode _startupExecutionMode;
         private readonly SemaphoreSlim _updateGate = new SemaphoreSlim(1, 1);
 
         public AgentSettingsService(AgentSettings settings, JsonAgentSettingsStore store, ISecretStore secretStore, SqliteJobRepository repository)
@@ -34,9 +35,12 @@ namespace SolidWorksCadAgent.AgentHost.Configuration
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _secretStore = secretStore ?? throw new ArgumentNullException(nameof(secretStore));
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _startupExecutionMode = _settings.ExecutionMode;
         }
 
         public AgentSettings Current => _settings;
+        public ExecutionMode ActiveExecutionMode => _startupExecutionMode;
+        public bool ExecutionModeRestartRequired => _settings.ExecutionMode != _startupExecutionMode;
 
         public async Task<AgentSettingsUpdateResult> UpdateAsync(AgentSettings candidate, CancellationToken cancellationToken)
         {

@@ -21,6 +21,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         private readonly ICadPlanningProvider _planningProvider;
         private readonly ICadCommandExecutor _executor;
         private readonly AgentSettings _settings;
+        private readonly ExecutionMode _executionMode;
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
         private readonly SemaphoreSlim _executionGate = new SemaphoreSlim(1, 1);
@@ -45,6 +46,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             _planningProvider = planningProvider ?? throw new ArgumentNullException(nameof(planningProvider));
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _executionMode = _settings.ExecutionMode;
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
             _stateMachine = new JobStateMachine(_utcNow);
         }
@@ -60,7 +62,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 Id = Guid.NewGuid(),
                 Prompt = prompt.Trim(),
                 State = JobState.New,
-                IsSimulated = _settings.ExecutionMode == ExecutionMode.Simulation,
+                IsSimulated = _executionMode == ExecutionMode.Simulation,
                 CreatedUtc = now,
                 UpdatedUtc = now
             };

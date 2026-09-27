@@ -93,7 +93,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 {
                     status = "ok",
                     schemaVersion = 1,
-                    executionMode = (_settingsService?.Current.ExecutionMode ?? ExecutionMode.Real).ToString(),
+                    executionMode = (_settingsService?.ActiveExecutionMode ?? ExecutionMode.Real).ToString(),
                     bridgeCapability = BridgeBuildCapabilities.Capability
                 });
             }
@@ -425,6 +425,14 @@ namespace SolidWorksCadAgent.AgentHost.Host
             if (string.IsNullOrWhiteSpace(request?.Prompt))
             {
                 return Error(400, "PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            }
+
+            if (_settingsService?.ExecutionModeRestartRequired == true)
+            {
+                return Error(
+                    409,
+                    "HOST_RESTART_REQUIRED",
+                    "Restart the Agent Host before creating jobs in the newly selected execution mode.");
             }
 
             if (_coordinator != null)
