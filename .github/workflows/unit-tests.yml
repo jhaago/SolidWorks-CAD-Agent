@@ -42,3 +42,7 @@ jobs:
       - name: Compile integration-test contract only
         shell: pwsh
         run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Validate Windows test bundle
+        shell: pwsh
+        run: .\scripts\validate-windows-test-bundle.ps1 -ZipPath .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
