@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost;
 using SolidWorksCadAgent.AgentHost.Configuration;
@@ -93,6 +94,84 @@ namespace SolidWorksCadAgent.UnitTests
                         CancellationToken.None)).JsonBody);
                     Assert.IsTrue((bool)job["isSimulated"]);
                     Assert.AreEqual(0, realFactoryCalls);
+                }
+            }
+            finally
+            {
+                TryDelete(path);
+                TryDelete(path + "-wal");
+                TryDelete(path + "-shm");
+                TryDelete(settingsPath);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow((int)ExecutionMode.Simulation, (int)ExecutionMode.Real)]
+        [DataRow((int)ExecutionMode.Real, (int)ExecutionMode.Simulation)]
+        public async Task ExecutionModeChange_RequiresRestartBeforeNewJobsAndKeepsStartupMode(
+            int startupModeValue,
+            int requestedModeValue)
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-ModeRestart-" + Guid.NewGuid().ToString("N") + ".db");
+            var settingsPath = path + ".settings.json";
+            try
+            {
+                using (var repository = new SqliteJobRepository(path))
+                {
+                    await repository.InitializeAsync();
+                    var startupMode = (ExecutionMode)startupModeValue;
+                    var requestedMode = (ExecutionMode)requestedModeValue;
+                    var settings = new AgentSettings { AutoMode = false, ExecutionMode = startupMode };
+                    var realFactoryCalls = 0;
+
+                    var routes = AgentHostComposition.CreateRoutesForMode(
+                        repository,
+                        settings,
+                        new JsonAgentSettingsStore(settingsPath),
+                        new FakeSecretStore(),
+                        () =>
+                        {
+                            realFactoryCalls++;
+                            return new FakeSolidWorksSession();
+                        },
+                        () =>
+                        {
+                            realFactoryCalls++;
+                            return new DeterministicCadPlanningProvider();
+                        },
+                        session =>
+                        {
+                            realFactoryCalls++;
+                            return new SimulatedCadCommandExecutor();
+                        });
+
+                    var startupFactoryCalls = realFactoryCalls;
+                    var update = await routes.HandleAsync(
+                        new AgentRequest(
+                            "PUT",
+                            "/settings",
+                            JsonConvert.SerializeObject(new AgentSettings
+                            {
+                                AutoMode = false,
+                                ExecutionMode = requestedMode
+                            })),
+                        CancellationToken.None);
+                    Assert.AreEqual(200, update.StatusCode);
+                    Assert.IsTrue((bool)JObject.Parse(update.JsonBody)["restartRequired"]);
+
+                    var health = JObject.Parse((await routes.HandleAsync(
+                        new AgentRequest("GET", "/health", null),
+                        CancellationToken.None)).JsonBody);
+                    Assert.AreEqual(startupMode.ToString(), (string)health["executionMode"]);
+
+                    var create = await routes.HandleAsync(
+                        new AgentRequest("POST", "/jobs", "{\"prompt\":\"Create a plate\"}"),
+                        CancellationToken.None);
+                    Assert.AreEqual(409, create.StatusCode);
+                    Assert.AreEqual(
+                        "HOST_RESTART_REQUIRED",
+                        (string)JObject.Parse(create.JsonBody)["error"]["code"]);
+                    Assert.AreEqual(startupFactoryCalls, realFactoryCalls);
                 }
             }
             finally
