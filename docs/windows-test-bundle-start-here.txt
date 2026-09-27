@@ -1,0 +1,85 @@
+SOLIDWORKS CAD AGENT - WINDOWS TEST BUNDLE
+================================================
+
+READ BUILD-CAPABILITY.txt FIRST
+
+NativeSolidWorksInterop
+  This bundle was built where the SOLIDWORKS interop assemblies were
+  available. It can be used for the physical SOLIDWORKS acceptance test.
+
+CompileOnlyNoSolidWorksInterop
+  This bundle was built without the proprietary SOLIDWORKS interop
+  assemblies. It is for Simulation-mode testing only. It cannot perform
+  the physical SOLIDWORKS acceptance test, even if SOLIDWORKS is installed
+  on the computer where the ZIP is later opened.
+
+PREREQUISITES
+
+- Windows 10 or Windows 11.
+- .NET Framework 4.8.
+- Administrator access once for the localhost URL reservation.
+- SOLIDWORKS Premium 2020 SP0.0 only for the physical acceptance test.
+- An OpenAI API key only for Real mode with the cloud planner.
+
+FIRST-TIME SETUP
+
+1. Extract the complete ZIP. Do not run the programs from inside the ZIP.
+2. Open PowerShell as Administrator.
+3. Change to the extracted Setup folder.
+4. Run:
+
+     .\register-agent-host-url.ps1
+
+5. Create this folder if it does not already exist:
+
+     C:\SolidWorks-CAD-Agent\Workspace
+
+START THE APPLICATION
+
+1. Run AgentHost\SolidWorksCadAgent.AgentHost.exe.
+2. Keep the console window open.
+3. Run Desktop\SolidWorksCadAgent.Desktop.exe.
+
+SIMULATION SMOKE TEST
+
+1. Open Settings in the Desktop application.
+2. Select Simulation mode and save.
+3. If the application says restart required, close both programs.
+4. Start Agent Host, then Desktop again.
+5. Confirm health reports:
+     executionMode: Simulation
+6. Submit:
+     Create a 100 x 60 x 10 mm rectangular plate with one centred
+     diameter 20 through-hole.
+7. Review the generated plan, approve it, and confirm the job reaches
+   ReadyForReview with successful body-count, bounding-box and rebuild
+   checks.
+8. Confirm the job is labelled simulated.
+
+Simulation never creates a native .SLDPRT file.
+
+PHYSICAL SOLIDWORKS TEST
+
+Do not attempt this unless BUILD-CAPABILITY.txt says:
+  NativeSolidWorksInterop
+
+Build the bundle on the SOLIDWORKS PC from a Developer PowerShell prompt:
+
+  .\scripts\build-windows-test-bundle.ps1 -Configuration Release
+
+The script automatically detects the installed SOLIDWORKS API redist
+folder. You can provide it explicitly if necessary:
+
+  .\scripts\build-windows-test-bundle.ps1 -Configuration Release
+  -SolidWorksApiPath "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist"
+
+The resulting ZIP is written to:
+  artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+SECURITY
+
+- Never put an OpenAI API key in this folder, a JSON file, screenshots,
+  logs, SQLite, or Git.
+- Configure the key through the Desktop credential control, which stores
+  it as a generic Windows Credential for SolidWorksCadAgent/OpenAI.
+- The Agent Host listens only on 127.0.0.1.

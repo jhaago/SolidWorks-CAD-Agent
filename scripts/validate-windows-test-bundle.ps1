@@ -28,6 +28,7 @@ try {
         "Desktop\SolidWorksCadAgent.Desktop.exe",
         "Desktop\Newtonsoft.Json.dll",
         "Setup\register-agent-host-url.ps1",
+        "BUILD-CAPABILITY.txt",
         "START-HERE.txt"
     )
 
@@ -41,6 +42,15 @@ try {
 
     if ($missing.Count -gt 0) {
         throw "Windows test bundle is missing required files: $($missing -join ', ')"
+    }
+
+    $capability = (Get-Content -LiteralPath (Join-Path $extractRoot "BUILD-CAPABILITY.txt") -Raw).Trim()
+    $allowedCapabilities = @(
+        "NativeSolidWorksInterop",
+        "CompileOnlyNoSolidWorksInterop"
+    )
+    if ($capability -notin $allowedCapabilities) {
+        throw "Windows test bundle has an unknown bridge capability: $capability"
     }
 
     $symbols = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "*.pdb")

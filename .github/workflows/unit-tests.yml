@@ -43,6 +43,18 @@ jobs:
         shell: pwsh
         run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
 
+      - name: Build Windows test bundle
+        shell: pwsh
+        run: .\scripts\build-windows-test-bundle.ps1 -Configuration Release
+
       - name: Validate Windows test bundle
         shell: pwsh
         run: .\scripts\validate-windows-test-bundle.ps1 -ZipPath .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Upload Windows test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolidWorksCadAgent-Windows-Test-Bundle
+          path: artifacts/SolidWorksCadAgent-Windows-Test-Bundle.zip
+          if-no-files-found: error
+          retention-days: 14
