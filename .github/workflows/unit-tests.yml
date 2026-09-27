@@ -51,6 +51,10 @@ jobs:
         shell: pwsh
         run: .\scripts\validate-windows-test-bundle.ps1 -ZipPath .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
 
+      - name: Test bundle capability validation
+        shell: pwsh
+        run: .\scripts\test-windows-bundle-validator.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
       - name: Upload Windows test bundle
         uses: actions/upload-artifact@v4
         with:
