@@ -26,36 +26,53 @@ namespace SolidWorksCadAgent.AgentHost
             var settings = settingsStore.Load();
             var secretStore = new WindowsCredentialStore();
 
+            ISolidWorksSession realSession = null;
+            IDisposable realExecutorLifetime = null;
             using (var repository = new SqliteJobRepository(databasePath))
-            using (var solidWorks = new SolidWorksSession())
-            using (var bridge = new SolidWorksBridgeFacade(
-                solidWorks,
-                new WorkspacePolicy(settings.WorkspaceRoot)))
             using (var httpClient = new HttpClient())
-            using (var server = new LocalHttpServer(
-                settings.HostPrefix,
-                AgentHostComposition.CreateRoutes(
-                    repository,
-                    solidWorks,
-                    new OpenAiCadPlanningProvider(
-                        httpClient,
-                        secretStore,
-                        settings.OpenAiModel),
-                    bridge,
-                    settings,
-                    settingsStore,
-                    secretStore)))
             using (var shutdown = new CancellationTokenSource())
             {
-                repository.InitializeAsync().GetAwaiter().GetResult();
-                Console.CancelKeyPress += (sender, args) =>
+                try
                 {
-                    args.Cancel = true;
-                    shutdown.Cancel();
-                };
+                    repository.InitializeAsync().GetAwaiter().GetResult();
+                    var routes = AgentHostComposition.CreateRoutesForMode(
+                        repository,
+                        settings,
+                        settingsStore,
+                        secretStore,
+                        () => realSession = new SolidWorksSession(),
+                        () => new OpenAiCadPlanningProvider(
+                            httpClient,
+                            secretStore,
+                            settings.OpenAiModel),
+                        session =>
+                        {
+                            var bridge = new SolidWorksBridgeFacade(
+                                session,
+                                new WorkspacePolicy(settings.WorkspaceRoot));
+                            realExecutorLifetime = bridge;
+                            return bridge;
+                        });
 
-                Console.WriteLine("SolidWorks CAD Agent Host listening on " + settings.HostPrefix);
-                server.RunAsync(shutdown.Token).GetAwaiter().GetResult();
+                    using (var server = new LocalHttpServer(settings.HostPrefix, routes))
+                    {
+                        Console.CancelKeyPress += (sender, args) =>
+                        {
+                            args.Cancel = true;
+                            shutdown.Cancel();
+                        };
+
+                        Console.WriteLine(
+                            "SolidWorks CAD Agent Host listening on " + settings.HostPrefix +
+                            " in " + settings.ExecutionMode + " mode.");
+                        server.RunAsync(shutdown.Token).GetAwaiter().GetResult();
+                    }
+                }
+                finally
+                {
+                    realExecutorLifetime?.Dispose();
+                    realSession?.Dispose();
+                }
             }
 
             return 0;

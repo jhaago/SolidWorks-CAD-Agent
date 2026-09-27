@@ -60,6 +60,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 Id = Guid.NewGuid(),
                 Prompt = prompt.Trim(),
                 State = JobState.New,
+                IsSimulated = _settings.ExecutionMode == ExecutionMode.Simulation,
                 CreatedUtc = now,
                 UpdatedUtc = now
             };

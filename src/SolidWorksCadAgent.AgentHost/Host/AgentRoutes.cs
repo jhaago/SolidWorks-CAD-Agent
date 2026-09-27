@@ -11,6 +11,7 @@ using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Jobs;
+using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.AgentHost.Host
@@ -88,7 +89,13 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
             if (method == "GET" && path == "/health")
             {
-                return Json(200, new { status = "ok", schemaVersion = 1 });
+                return Json(200, new
+                {
+                    status = "ok",
+                    schemaVersion = 1,
+                    executionMode = (_settingsService?.Current.ExecutionMode ?? ExecutionMode.Real).ToString(),
+                    bridgeCapability = BridgeBuildCapabilities.Capability
+                });
             }
 
             if (method == "GET" && path == "/solidworks/status")

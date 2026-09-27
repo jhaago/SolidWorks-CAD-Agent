@@ -84,7 +84,7 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
                     result = RequirePart(() => CadCommandResult.Ok(new { hasErrors = false, errors = new string[0] }));
                     break;
                 case CadCommandNames.SavePart:
-                    result = RequirePart(() => CadCommandResult.Ok(new { saved = true, path = (string)parameters["path"] }));
+                    result = SavePart(parameters);
                     break;
                 case CadCommandNames.CloseDocument:
                     result = CloseDocument();
@@ -177,6 +177,23 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
             _completedSketch = null;
             _features.Add("CutExtrude");
             return CadCommandResult.Ok(new { created = true });
+        }
+
+        private CadCommandResult SavePart(JObject parameters)
+        {
+            return RequirePart(() =>
+            {
+                var path = (string)parameters["path"];
+                if (!string.IsNullOrWhiteSpace(path) &&
+                    path.EndsWith(".SLDPRT", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Failure(
+                        "SIMULATION_NATIVE_FORMAT_NOT_ALLOWED",
+                        "Simulation cannot create a native SOLIDWORKS .SLDPRT file.");
+                }
+
+                return CadCommandResult.Ok(new { saved = true, path });
+            });
         }
 
         private CadCommandResult CloseDocument()
