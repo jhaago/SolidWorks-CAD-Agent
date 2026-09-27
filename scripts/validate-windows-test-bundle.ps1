@@ -54,14 +54,16 @@ try {
     }
 
     $bridgePath = Join-Path $extractRoot "AgentHost\SolidWorksCadAgent.SolidWorksBridge.dll"
-    $bridgeAssembly = [System.Reflection.Assembly]::LoadFrom($bridgePath)
-    $capabilitiesType = $bridgeAssembly.GetType(
-        "SolidWorksCadAgent.SolidWorksBridge.BridgeBuildCapabilities",
-        $true)
-    $capabilityField = $capabilitiesType.GetField(
-        "Capability",
-        [System.Reflection.BindingFlags]"Public,Static")
-    $compiledCapability = [string]$capabilityField.GetRawConstantValue()
+    $capabilityReaderPath = Join-Path $PSScriptRoot "read-bridge-capability.ps1"
+    $powerShellPath = (Get-Process -Id $PID).Path
+    $capabilityOutput = @(
+        & $powerShellPath -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File $capabilityReaderPath -BridgePath $bridgePath 2>&1
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect compiled bridge capability: $($capabilityOutput -join [Environment]::NewLine)"
+    }
+    $compiledCapability = ([string]($capabilityOutput | Select-Object -Last 1)).Trim()
     if ($compiledCapability -ne $capability) {
         throw "Bundle capability marker '$capability' does not match compiled bridge capability '$compiledCapability'."
     }
