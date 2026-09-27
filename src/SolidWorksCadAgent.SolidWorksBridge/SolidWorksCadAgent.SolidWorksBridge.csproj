@@ -23,12 +23,12 @@
     <Reference Include="SolidWorks.Interop.sldworks">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
       <EmbedInteropTypes>false</EmbedInteropTypes>
-      <Private>false</Private>
+      <Private>true</Private>
     </Reference>
     <Reference Include="SolidWorks.Interop.swconst">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
       <EmbedInteropTypes>false</EmbedInteropTypes>
-      <Private>false</Private>
+      <Private>true</Private>
     </Reference>
   </ItemGroup>
 </Project>

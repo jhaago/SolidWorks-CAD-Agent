@@ -53,6 +53,36 @@ try {
         throw "Windows test bundle has an unknown bridge capability: $capability"
     }
 
+    $bridgePath = Join-Path $extractRoot "AgentHost\SolidWorksCadAgent.SolidWorksBridge.dll"
+    $bridgeAssembly = [System.Reflection.Assembly]::LoadFrom($bridgePath)
+    $capabilitiesType = $bridgeAssembly.GetType(
+        "SolidWorksCadAgent.SolidWorksBridge.BridgeBuildCapabilities",
+        $true)
+    $capabilityField = $capabilitiesType.GetField(
+        "Capability",
+        [System.Reflection.BindingFlags]"Public,Static")
+    $compiledCapability = [string]$capabilityField.GetRawConstantValue()
+    if ($compiledCapability -ne $capability) {
+        throw "Bundle capability marker '$capability' does not match compiled bridge capability '$compiledCapability'."
+    }
+
+    if ($capability -eq "NativeSolidWorksInterop") {
+        $nativeDependencies = @(
+            "AgentHost\SolidWorks.Interop.sldworks.dll",
+            "AgentHost\SolidWorks.Interop.swconst.dll"
+        )
+        $missingNativeDependencies = @(
+            foreach ($relativePath in $nativeDependencies) {
+                if (-not (Test-Path -LiteralPath (Join-Path $extractRoot $relativePath) -PathType Leaf)) {
+                    $relativePath
+                }
+            }
+        )
+        if ($missingNativeDependencies.Count -gt 0) {
+            throw "Native bundle is missing SOLIDWORKS interop dependencies: $($missingNativeDependencies -join ', ')"
+        }
+    }
+
     $symbols = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "*.pdb")
     if ($symbols.Count -gt 0) {
         throw "Windows test bundle contains debug symbols: $($symbols.FullName -join ', ')"

@@ -5,7 +5,8 @@ READ BUILD-CAPABILITY.txt FIRST
 
 NativeSolidWorksInterop
   This bundle was built where the SOLIDWORKS interop assemblies were
-  available. It can be used for the physical SOLIDWORKS acceptance test.
+  available. The required interop DLLs are included beside Agent Host.
+  It can be used for the physical SOLIDWORKS acceptance test.
 
 CompileOnlyNoSolidWorksInterop
   This bundle was built without the proprietary SOLIDWORKS interop
@@ -63,15 +64,15 @@ PHYSICAL SOLIDWORKS TEST
 Do not attempt this unless BUILD-CAPABILITY.txt says:
   NativeSolidWorksInterop
 
-Build the bundle on the SOLIDWORKS PC from a Developer PowerShell prompt:
+Build the bundle on the SOLIDWORKS PC from a source-code checkout, using
+a Developer PowerShell prompt opened at the repository root:
 
   .\scripts\build-windows-test-bundle.ps1 -Configuration Release
 
 The script automatically detects the installed SOLIDWORKS API redist
-folder. You can provide it explicitly if necessary:
+folder. You can provide it explicitly if necessary, on one command line:
 
-  .\scripts\build-windows-test-bundle.ps1 -Configuration Release
-  -SolidWorksApiPath "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist"
+  .\scripts\build-windows-test-bundle.ps1 -Configuration Release -SolidWorksApiPath "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist"
 
 The resulting ZIP is written to:
   artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip

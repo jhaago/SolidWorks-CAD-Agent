@@ -75,8 +75,9 @@ function Copy-RuntimeTree {
     }
 
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $allowedExtensions = @(".exe", ".dll", ".config")
     foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File) {
-        if ($file.Extension -ieq ".pdb") {
+        if ($file.Extension -notin $allowedExtensions) {
             continue
         }
 
