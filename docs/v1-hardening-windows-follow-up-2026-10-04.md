@@ -40,12 +40,22 @@ The integration project currently contains only three tests categorized `SolidWo
 
 ## Publishing / Windows CI status
 
-Changes are local on the requested branch. Automatic approval review rejected the GitHub push because it considered exporting repository source insufficiently authorized. No workaround was used, no PR was created and nothing was merged. After explicit approval to push this branch, run the existing Windows workflow and inspect its complete unit-test result plus bundle build/validation/file-lock result before treating this pass as fully verified.
+Published on the requested feature branch after explicit user approval: test-first commit `ef1aa8e` and implementation commit `6f537dd`. The connected GitHub app published the commits because command-line push credentials were unavailable; both published trees were verified against the local commits. No PR was created and nothing was merged.
+
+[Windows CI run 37198403652](https://github.com/jhaago/SolidWorks-CAD-Agent/actions/runs/37198403652) passed for implementation commit `6f537dd`:
+
+- Complete solution restore/build: passed.
+- Full Windows MSTest unit suite: **156 passed, 0 failed, 0 skipped**. This includes the seven Windows-path cases that failed in the Linux compatibility run.
+- Integration-test project compile-only contract: passed. No live COM tests were executed; the interop-enabled collector still needs compilation on the SOLIDWORKS machine.
+- Bundle file-lock regression: passed.
+- Windows test bundle build, validation and capability-validation regression: passed; bundle artifact uploaded.
+
+The workflow does not have SOLIDWORKS installed. This CI success does not verify the previously changed native boss/cut geometry or the new physical hole collector.
 
 ## Next Windows / SOLIDWORKS 2020 session
 
 1. Close old `SolidWorksCadAgent.AgentHost.exe` and `SolidWorksCadAgent.Desktop.exe` processes before rebuilding. If the builder reports a PID, close that instance normally. Do not auto-kill processes.
-2. Fetch this feature branch after it has been published. In the Developer PowerShell environment used previously, restore/build the complete solution with the installed SOLIDWORKS interop DLLs:
+2. Fetch the published feature branch. In the Developer PowerShell environment used previously, restore/build the complete solution with the installed SOLIDWORKS interop DLLs:
 
 ```powershell
 msbuild SolidWorksCadAgent.sln /t:Restore /p:Configuration=Debug
