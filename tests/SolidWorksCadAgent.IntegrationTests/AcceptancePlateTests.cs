@@ -80,9 +80,9 @@ namespace SolidWorksCadAgent.IntegrationTests
                     await ExecuteRequired(bridge, CadCommandNames.Rebuild, new { });
 
                     var bounds = await ExecuteRequired(bridge, CadCommandNames.GetBoundingBox, new { });
-                    Assert.AreEqual(10.0, bounds.Data.Value<double>("SizeXmm"), 0.02);
-                    Assert.AreEqual(10.0, bounds.Data.Value<double>("SizeYmm"), 0.02);
-                    Assert.AreEqual(1.0, bounds.Data.Value<double>("SizeZmm"), 0.02);
+                    Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeXmm"), 0.02);
+                    Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeYmm"), 0.02);
+                    Assert.AreEqual(1.0, bounds.Data.Value<double>("sizeZmm"), 0.02);
                 }
                 finally
                 {
@@ -122,20 +122,20 @@ namespace SolidWorksCadAgent.IntegrationTests
             Assert.AreEqual(1, bodyCount.Data.Value<int>("bodyCount"));
 
             var bounds = await ExecuteRequired(bridge, CadCommandNames.GetBoundingBox, new { });
-            Assert.AreEqual(100.0, bounds.Data.Value<double>("SizeXmm"), 0.02);
-            Assert.AreEqual(60.0, bounds.Data.Value<double>("SizeYmm"), 0.02);
-            Assert.AreEqual(10.0, bounds.Data.Value<double>("SizeZmm"), 0.02);
+            Assert.AreEqual(100.0, bounds.Data.Value<double>("sizeXmm"), 0.02);
+            Assert.AreEqual(60.0, bounds.Data.Value<double>("sizeYmm"), 0.02);
+            Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeZmm"), 0.02);
 
             var rebuild = await ExecuteRequired(bridge, CadCommandNames.GetRebuildErrors, new { });
-            Assert.IsTrue(rebuild.Data.Value<bool>("Rebuilt"));
-            Assert.IsFalse(rebuild.Data.Value<bool>("HasErrors"));
+            Assert.IsTrue(rebuild.Data.Value<bool>("rebuilt"));
+            Assert.IsFalse(rebuild.Data.Value<bool>("hasErrors"));
 
             var featureTree = await ExecuteRequired(bridge, CadCommandNames.GetFeatureTree, new { });
             var features = featureTree.Data["features"] as JArray;
             Assert.IsNotNull(features);
             var typeNames = features
                 .OfType<JObject>()
-                .Select(feature => feature.Value<string>("TypeName"))
+                .Select(feature => feature.Value<string>("typeName"))
                 .Where(typeName => !string.IsNullOrWhiteSpace(typeName))
                 .ToArray();
 
