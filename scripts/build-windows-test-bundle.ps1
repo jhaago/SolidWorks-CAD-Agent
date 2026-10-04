@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+. (Join-Path $PSScriptRoot "bundle-file-locks.ps1")
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot "artifacts"
@@ -60,7 +61,7 @@ function Invoke-MSBuildChecked {
 
     & msbuild @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "MSBuild failed with exit code $LASTEXITCODE."
+        throw "MSBuild failed with exit code $LASTEXITCODE. If the output reports access denied or SQLite.Interop.dll in use, close SolidWorksCadAgent.AgentHost.exe and SolidWorksCadAgent.Desktop.exe and retry. Processes were not terminated automatically."
     }
 }
 
@@ -85,7 +86,8 @@ function Copy-RuntimeTree {
         $destinationPath = Join-Path $Destination $relativePath
         $destinationParent = Split-Path -Parent $destinationPath
         New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-        Copy-Item -LiteralPath $file.FullName -Destination $destinationPath -Force
+        try { Copy-Item -LiteralPath $file.FullName -Destination $destinationPath -Force }
+        catch { throw (Get-BundleFileAccessMessage $destinationPath) }
     }
 }
 
@@ -97,6 +99,16 @@ if ($null -ne $detectedApiPath) {
     $capability = "NativeSolidWorksInterop"
 }
 
+$bundleRoot = Join-Path $OutputDirectory "SolidWorksCadAgent-Windows-Test-Bundle"
+$zipPath = Join-Path $OutputDirectory "SolidWorksCadAgent-Windows-Test-Bundle.zip"
+Assert-BundleFilesAvailable -Roots @(
+    (Join-Path $repoRoot "src/SolidWorksCadAgent.AgentHost/bin"),
+    (Join-Path $repoRoot "src/SolidWorksCadAgent.Desktop/bin"),
+    (Join-Path $repoRoot "tests/SolidWorksCadAgent.UnitTests/bin"),
+    (Join-Path $repoRoot "tests/SolidWorksCadAgent.IntegrationTests/bin"),
+    $bundleRoot
+)
+
 Push-Location $repoRoot
 try {
     Invoke-MSBuildChecked (@("SolidWorksCadAgent.sln", "/t:Restore", "/p:Configuration=$Configuration") + $msbuildProperty)
@@ -106,14 +118,13 @@ finally {
     Pop-Location
 }
 
-$bundleRoot = Join-Path $OutputDirectory "SolidWorksCadAgent-Windows-Test-Bundle"
-$zipPath = Join-Path $OutputDirectory "SolidWorksCadAgent-Windows-Test-Bundle.zip"
-
 if (Test-Path -LiteralPath $bundleRoot) {
-    Remove-Item -LiteralPath $bundleRoot -Recurse -Force
+    try { Remove-Item -LiteralPath $bundleRoot -Recurse -Force }
+    catch { throw (Get-BundleFileAccessMessage $bundleRoot) }
 }
 if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
+    try { Remove-Item -LiteralPath $zipPath -Force }
+    catch { throw (Get-BundleFileAccessMessage $zipPath) }
 }
 
 New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null

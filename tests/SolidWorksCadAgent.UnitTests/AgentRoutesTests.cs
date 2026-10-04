@@ -327,6 +327,18 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(200, approve.StatusCode);
             Assert.AreEqual("ReadyForReview", (string)JObject.Parse(approve.JsonBody)["state"]);
             Assert.IsTrue(executor.ExecutedCommands.Count > 0);
+
+            var beforeAccept = JObject.Parse(approve.JsonBody);
+            var executedCount = executor.ExecutedCommands.Count;
+            var accept = await routes.HandleAsync(
+                new AgentRequest("POST", "/jobs/" + jobId + "/complete", "{}"), CancellationToken.None);
+            Assert.AreEqual(200, accept.StatusCode);
+            var accepted = JObject.Parse(accept.JsonBody);
+            Assert.AreEqual("Completed", (string)accepted["state"]);
+            Assert.AreEqual(revisionId, (Guid)accepted["currentRevisionId"]);
+            Assert.IsTrue(JToken.DeepEquals(beforeAccept["plan"], accepted["plan"]));
+            Assert.IsTrue(JToken.DeepEquals(beforeAccept["verifications"], accepted["verifications"]));
+            Assert.AreEqual(executedCount, executor.ExecutedCommands.Count, "Acceptance must not execute more CAD commands.");
         }
 
         [TestMethod]
@@ -559,7 +571,7 @@ namespace SolidWorksCadAgent.UnitTests
             var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
             try
             {
-                var settings = new AgentSettings { ExecutionMode = ExecutionMode.Simulation };
+                var settings = new AgentSettings { ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = Path.GetTempPath() };
                 var service = new AgentSettingsService(settings, new JsonAgentSettingsStore(path), new FakeSecretStore(), _repository);
                 var routes = new AgentRoutes(_repository, _solidWorks, null, service);
                 var id = Guid.NewGuid();
@@ -568,7 +580,7 @@ namespace SolidWorksCadAgent.UnitTests
                     Id = id, Prompt = "Reviewed plate", State = JobState.ReadyForReview,
                     CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow
                 });
-                var candidate = new AgentSettings { ExecutionMode = ExecutionMode.Real };
+                var candidate = new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = Path.GetTempPath() };
                 await Assert.ThrowsExceptionAsync<AgentSettingsServiceException>(() => service.UpdateAsync(candidate, CancellationToken.None));
                 var complete = await routes.HandleAsync(new AgentRequest("POST", "/jobs/" + id + "/complete", "{}"), CancellationToken.None);
                 Assert.AreEqual(200, complete.StatusCode);

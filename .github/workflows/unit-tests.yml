@@ -43,6 +43,10 @@ jobs:
         shell: pwsh
         run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
 
+      - name: Test bundle file-lock diagnostics
+        shell: pwsh
+        run: .\scripts\test-bundle-file-locks.ps1
+
       - name: Build Windows test bundle
         shell: pwsh
         run: .\scripts\build-windows-test-bundle.ps1 -Configuration Release

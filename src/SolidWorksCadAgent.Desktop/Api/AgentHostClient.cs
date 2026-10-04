@@ -60,6 +60,9 @@ namespace SolidWorksCadAgent.Desktop.Api
         public Task<JobViewDto> CancelJobAsync(Guid jobId, CancellationToken cancellationToken) =>
             SendAsync<JobViewDto>(HttpMethod.Post, "jobs/" + jobId.ToString("D") + "/cancel", new JObject(), cancellationToken);
 
+        public Task<JobViewDto> CompleteJobAsync(Guid jobId, CancellationToken cancellationToken) =>
+            SendAsync<JobViewDto>(HttpMethod.Post, "jobs/" + jobId.ToString("D") + "/complete", new JObject(), cancellationToken);
+
         private async Task<T> SendAsync<T>(HttpMethod method, string path, JObject body, CancellationToken cancellationToken)
         {
             using (var request = new HttpRequestMessage(method, path))
@@ -89,13 +92,22 @@ namespace SolidWorksCadAgent.Desktop.Api
                         var message = "Agent Host returned HTTP " + (int)response.StatusCode + ".";
                         try
                         {
-                            message = (string)JObject.Parse(json)["error"]?["message"] ?? message;
+                            var error = JObject.Parse(json)["error"] as JObject;
+                            if (error?["message"]?.Type == JTokenType.String)
+                                message = (string)error["message"];
                         }
                         catch (JsonException) { }
                         throw new AgentHostApiException((int)response.StatusCode, message);
                     }
 
-                    return JsonConvert.DeserializeObject<T>(json);
+                    try
+                    {
+                        return JsonConvert.DeserializeObject<T>(json);
+                    }
+                    catch (JsonException)
+                    {
+                        throw new AgentHostApiException((int)response.StatusCode, "Agent Host returned an invalid response.");
+                    }
                 }
             }
         }

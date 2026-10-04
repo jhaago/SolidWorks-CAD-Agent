@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -69,9 +70,13 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 {
                     throw;
                 }
-                catch (HttpRequestException ex)
+                catch (OperationCanceledException)
                 {
-                    throw new OpenAiPlanningException("OPENAI_REQUEST_FAILED", "The OpenAI planning request could not be completed.", ex);
+                    throw new OpenAiPlanningException("OPENAI_REQUEST_TIMEOUT", "The OpenAI planning request timed out. Try again when the connection is available.");
+                }
+                catch (HttpRequestException)
+                {
+                    throw new OpenAiPlanningException("OPENAI_REQUEST_FAILED", "The OpenAI planning request could not be completed.");
                 }
 
                 using (response)
@@ -79,14 +84,52 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                     var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (!response.IsSuccessStatusCode)
                     {
-                        throw new OpenAiPlanningException(
-                            "OPENAI_HTTP_ERROR",
-                            "OpenAI returned HTTP " + (int)response.StatusCode + " while planning the CAD job.");
+                        throw ParseHttpError((int)response.StatusCode, body, apiKey);
                     }
 
                     return ParseResponse(body);
                 }
             }
+        }
+
+        private static OpenAiPlanningException ParseHttpError(int status, string body, string apiKey)
+        {
+            string code = null, type = null, message = null;
+            try
+            {
+                var error = JObject.Parse(body)["error"] as JObject;
+                code = SafeIdentifier(error?["code"], apiKey);
+                type = SafeIdentifier(error?["type"], apiKey);
+                var token = error?["message"];
+                if (token?.Type == JTokenType.String)
+                    message = SafeMessage((string)token, apiKey);
+            }
+            catch (JsonException) { /* Keep the safe HTTP fallback for non-JSON responses. */ }
+
+            var summary = "OpenAI returned HTTP " + status + " while planning the CAD job.";
+            if (type != null) summary += " Type: " + type + ".";
+            if (code != null) summary += " Code: " + code + ".";
+            if (!string.IsNullOrWhiteSpace(message)) summary += " " + message;
+            return new OpenAiPlanningException("OPENAI_HTTP_ERROR", summary, status, code, type);
+        }
+
+        private static string SafeIdentifier(JToken token, string apiKey)
+        {
+            if (token?.Type != JTokenType.String) return null;
+            var value = (string)token;
+            if (value.Contains(apiKey) || !Regex.IsMatch(value, "\\A[a-z][a-z0-9_]{0,79}\\z")) return null;
+            return value;
+        }
+
+        private static string SafeMessage(string message, string apiKey)
+        {
+            // Error bodies are untrusted: never echo credential/header assignments or raw keys.
+            if (Regex.IsMatch(message, @"(?i)authorization|bearer\s|api[_ -]?key|(?:password|secret|token)\s*[:=]"))
+                return "Check the configured credential and OpenAI account settings.";
+            message = message.Replace(apiKey, "[redacted]");
+            message = Regex.Replace(message, @"(?i)\bsk-[a-z0-9_-]+", "[redacted]");
+            message = Regex.Replace(message, @"[\p{Cc}\p{Cf}]+", " ").Trim();
+            return message.Length > 400 ? message.Substring(0, 400) + "…" : message;
         }
 
         private JObject BuildRequest(CadPlanningRequest request)
@@ -175,9 +218,9 @@ namespace SolidWorksCadAgent.AgentHost.Ai
             {
                 response = JObject.Parse(body);
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                throw new OpenAiPlanningException("INVALID_OPENAI_RESPONSE", "OpenAI returned invalid JSON.", ex);
+                throw new OpenAiPlanningException("INVALID_OPENAI_RESPONSE", "OpenAI returned invalid JSON.");
             }
 
             var functionCalls = (response["output"] as JArray ?? new JArray())
@@ -189,7 +232,7 @@ namespace SolidWorksCadAgent.AgentHost.Ai
             {
                 throw new OpenAiPlanningException(
                     "UNEXPECTED_TOOL_CALL",
-                    "OpenAI requested an unsupported planning tool: " + (string)unexpected["name"]);
+                    "OpenAI requested an unsupported planning tool.");
             }
 
             if (functionCalls.Count != 1)
@@ -201,9 +244,9 @@ namespace SolidWorksCadAgent.AgentHost.Ai
             {
                 arguments = JObject.Parse((string)call["arguments"] ?? string.Empty);
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD planning tool arguments were invalid JSON.", ex);
+                throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD planning tool arguments were invalid JSON.");
             }
 
             var result = new CadPlanningResult
@@ -250,9 +293,9 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 {
                     parameters = JObject.Parse((string)item["parameters_json"] ?? string.Empty);
                 }
-                catch (JsonException ex)
+                catch (JsonException)
                 {
-                    throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "A proposed CAD command had invalid parameter JSON.", ex);
+                    throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "A proposed CAD command had invalid parameter JSON.");
                 }
 
                 commands.Add(new CadCommandEnvelope { Command = name, Parameters = parameters });

@@ -71,6 +71,29 @@ namespace SolidWorksCadAgent.UnitTests
             httpClient.Dispose();
         }
 
+        [DataTestMethod]
+        [DataRow("{\"error\":\"wrong shape\"}")]
+        [DataRow("{\"error\":{\"message\":[]}}")]
+        [DataRow("not JSON")]
+        public async Task MalformedApiError_UsesSafeHttpFallback(string body)
+        {
+            using (var http = new HttpClient(new InvalidErrorHandler(body)))
+            using (var client = new AgentHostClient(http))
+            {
+                var error = await Assert.ThrowsExceptionAsync<AgentHostApiException>(() => client.GetHealthAsync(CancellationToken.None));
+                Assert.AreEqual(503, error.StatusCode);
+                Assert.AreEqual("Agent Host returned HTTP 503.", error.Message);
+            }
+        }
+
+        private sealed class InvalidErrorHandler : HttpMessageHandler
+        {
+            private readonly string _body;
+            public InvalidErrorHandler(string body) { _body = body; }
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(_body) });
+        }
+
         private sealed class QueueHandler : HttpMessageHandler
         {
             private readonly string[] _responses;

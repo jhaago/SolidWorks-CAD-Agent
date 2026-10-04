@@ -149,6 +149,14 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     return await TransitionJobAsync(jobId, JobState.Cancelled, cancellationToken).ConfigureAwait(false);
                 }
 
+                if (method == "POST" && action == "complete")
+                {
+                    var response = await TransitionJobAsync(jobId, JobState.Completed, cancellationToken).ConfigureAwait(false);
+                    return response.StatusCode == 200
+                        ? await GetJobAsync(jobId, cancellationToken).ConfigureAwait(false)
+                        : response;
+                }
+
                 if (method == "POST" && action == "approve")
                 {
                     return await ApproveJobAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
@@ -372,6 +380,10 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     .ConfigureAwait(false);
                 return SnapshotResponse(200, snapshot);
             }
+            catch (OpenAiPlanningException ex)
+            {
+                return PlanningError(ex);
+            }
             catch (JobCoordinatorException ex)
             {
                 return Error(ex.Code == "JOB_NOT_FOUND" ? 404 : 409, ex.Code, ex.Message);
@@ -450,7 +462,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 }
                 catch (OpenAiPlanningException ex)
                 {
-                    return Error(502, ex.Code, ex.Message);
+                    return PlanningError(ex);
                 }
             }
 
@@ -466,6 +478,15 @@ namespace SolidWorksCadAgent.AgentHost.Host
             await _repository.CreateAsync(job, cancellationToken).ConfigureAwait(false);
             return Json(201, new { id = job.Id, state = job.State.ToString() });
         }
+
+        private static AgentResponse PlanningError(OpenAiPlanningException ex) => Json(502, new
+        {
+            error = new
+            {
+                code = ex.Code, message = ex.Message, httpStatusCode = ex.HttpStatusCode,
+                openAiErrorCode = ex.OpenAiErrorCode, openAiErrorType = ex.OpenAiErrorType
+            }
+        });
 
         private static AgentResponse SolidWorksStatus(SolidWorksSessionStatus status)
         {

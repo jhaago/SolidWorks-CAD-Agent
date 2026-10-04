@@ -34,7 +34,7 @@ namespace SolidWorksCadAgent.UnitTests
                         repository,
                         new ThrowingPlanningProvider(new OpenAiPlanningException(
                             "OPENAI_HTTP_ERROR",
-                            "OpenAI returned HTTP 400 while planning the CAD job.")),
+                            "OpenAI returned HTTP 400 while planning the CAD job.", 400, "unsupported_parameter", "invalid_request_error")),
                         new SimulatedCadCommandExecutor(),
                         new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real });
                     var routes = new AgentRoutes(repository, solidWorks, coordinator);
@@ -55,6 +55,9 @@ namespace SolidWorksCadAgent.UnitTests
                     Assert.AreEqual(502, response.StatusCode);
                     var body = JObject.Parse(response.JsonBody);
                     Assert.AreEqual("OPENAI_HTTP_ERROR", (string)body["error"]["code"]);
+                    Assert.AreEqual(400, (int)body["error"]["httpStatusCode"]);
+                    Assert.AreEqual("unsupported_parameter", (string)body["error"]["openAiErrorCode"]);
+                    Assert.AreEqual("invalid_request_error", (string)body["error"]["openAiErrorType"]);
                     Assert.AreEqual(
                         "OpenAI returned HTTP 400 while planning the CAD job.",
                         (string)body["error"]["message"]);

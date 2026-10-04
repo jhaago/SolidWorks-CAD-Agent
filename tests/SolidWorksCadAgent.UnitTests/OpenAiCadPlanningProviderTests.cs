@@ -186,6 +186,22 @@ namespace SolidWorksCadAgent.UnitTests
                 Assert.IsFalse(error.ToString().Contains(value), value);
         }
 
+        [TestMethod]
+        public async Task ProviderTimeout_IsStructuredWithoutLeakingTransportDetails()
+        {
+            var provider = new OpenAiCadPlanningProvider(new HttpClient(new TimeoutHandler()), () => "private-key", "test-model");
+            var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+            Assert.AreEqual("OPENAI_REQUEST_TIMEOUT", error.Code);
+            Assert.IsFalse(error.ToString().Contains("private-key"));
+        }
+
+        private sealed class TimeoutHandler : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                throw new TaskCanceledException("Authorization: Bearer private-key");
+        }
+
         private sealed class ErrorHandler : HttpMessageHandler
         {
             private readonly int _status;

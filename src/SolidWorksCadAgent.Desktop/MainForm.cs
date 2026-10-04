@@ -14,6 +14,9 @@ namespace SolidWorksCadAgent.Desktop
         private readonly CancellationTokenSource _lifetime = new CancellationTokenSource();
         private readonly List<JobViewDto> _history = new List<JobViewDto>();
         private JobViewDto _currentJob;
+        private bool _busy;
+        private bool _hostAvailable;
+        private bool _showingConnectionError;
 
         public MainForm(AgentHostClient client)
         {
@@ -24,13 +27,13 @@ namespace SolidWorksCadAgent.Desktop
         protected override async void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            await RefreshConnectionAsync();
+            try { await new AgentHostConnectionMonitor(_client).RunAsync(DisplayConnection, _lifetime.Token); }
+            finally { _lifetime.Dispose(); }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _lifetime.Cancel();
-            _lifetime.Dispose();
             base.OnFormClosed(e);
         }
 
@@ -70,6 +73,12 @@ namespace SolidWorksCadAgent.Desktop
             await RunUiActionAsync(async () => DisplayJob(await _client.CancelJobAsync(_currentJob.Id, _lifetime.Token)));
         }
 
+        private async void CompleteButton_Click(object sender, EventArgs e)
+        {
+            if (_currentJob?.State != "ReadyForReview") return;
+            await RunUiActionAsync(async () => DisplayJob(await _client.CompleteJobAsync(_currentJob.Id, _lifetime.Token)));
+        }
+
         private void RequestChangesButton_Click(object sender, EventArgs e)
         {
             MessageBox.Show(
@@ -85,19 +94,25 @@ namespace SolidWorksCadAgent.Desktop
             using (var form = new SettingsForm()) form.ShowDialog(this);
         }
 
-        private async Task RefreshConnectionAsync()
+        private void DisplayConnection(HostConnectionSnapshot snapshot)
         {
-            await RunUiActionAsync(async () =>
+            _hostAvailable = snapshot.IsAvailable;
+            hostStatusLabel.Text = snapshot.IsAvailable ? "Agent Host: " + snapshot.Health.Status : "Agent Host: unavailable (retrying)";
+            if (snapshot.IsAvailable && snapshot.SolidWorks != null) DisplaySolidWorks(snapshot.SolidWorks);
+            else solidWorksStatusLabel.Text = "SOLIDWORKS: status unavailable";
+            // Background connection checks must not overwrite a job/planner error or an active action.
+            if (!_busy && !snapshot.IsAvailable)
             {
-                var health = await _client.GetHealthAsync(_lifetime.Token);
-                var solidWorks = await _client.GetSolidWorksStatusAsync(_lifetime.Token);
-                hostStatusLabel.Text = "Agent Host: " + health.Status;
-                DisplaySolidWorks(solidWorks);
-            });
+                SetStatus(snapshot.ErrorMessage, true);
+                _showingConnectionError = true;
+            }
+            else if (!_busy && (_showingConnectionError || _currentJob == null)) SetStatus("Ready", false);
+            UpdateActions();
         }
 
         private async Task RunUiActionAsync(Func<Task> action)
         {
+            if (_busy || _lifetime.IsCancellationRequested) return;
             SetBusy(true);
             try
             {
@@ -111,7 +126,7 @@ namespace SolidWorksCadAgent.Desktop
             }
             finally
             {
-                SetBusy(false);
+                if (!_lifetime.IsCancellationRequested) SetBusy(false);
             }
         }
 
@@ -133,9 +148,7 @@ namespace SolidWorksCadAgent.Desktop
             verificationTextBox.Text = job.Verifications == null
                 ? "No verification results yet."
                 : job.Verifications.ToString(Formatting.Indented);
-            approveButton.Enabled = job.State == "AwaitingApproval" && job.PlanValidated && job.CurrentRevisionId.HasValue;
-            cancelButton.Enabled = job.State != "Cancelled" && job.State != "ReadyForReview" && job.State != "Failed";
-            requestChangesButton.Enabled = job.State == "AwaitingApproval" || job.State == "AwaitingClarification";
+            UpdateActions();
 
             _history.RemoveAll(item => item.Id == job.Id);
             _history.Insert(0, job);
@@ -146,14 +159,26 @@ namespace SolidWorksCadAgent.Desktop
 
         private void SetBusy(bool busy)
         {
+            _busy = busy;
             UseWaitCursor = busy;
-            sendButton.Enabled = !busy;
-            attachButton.Enabled = !busy;
-            launchButton.Enabled = !busy;
+            UpdateActions();
+        }
+
+        private void UpdateActions()
+        {
+            var enabled = !_busy && _hostAvailable;
+            sendButton.Enabled = attachButton.Enabled = launchButton.Enabled = enabled;
+            approveButton.Enabled = enabled && _currentJob?.State == "AwaitingApproval" &&
+                _currentJob.PlanValidated && _currentJob.CurrentRevisionId.HasValue;
+            completeButton.Enabled = enabled && _currentJob?.State == "ReadyForReview";
+            cancelButton.Enabled = enabled && _currentJob != null && _currentJob.State != "Completed" &&
+                _currentJob.State != "Cancelled" && _currentJob.State != "Failed";
+            requestChangesButton.Enabled = enabled && (_currentJob?.State == "AwaitingApproval" || _currentJob?.State == "AwaitingClarification");
         }
 
         private void SetStatus(string message, bool error)
         {
+            _showingConnectionError = false;
             messageLabel.Text = message;
             messageLabel.ForeColor = error ? System.Drawing.Color.Firebrick : System.Drawing.Color.DarkGreen;
         }

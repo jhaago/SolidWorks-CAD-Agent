@@ -21,6 +21,7 @@ namespace SolidWorksCadAgent.Desktop
         private Button approveButton;
         private Button requestChangesButton;
         private Button cancelButton;
+        private Button completeButton;
         private ListBox historyListBox;
 
         private void InitializeComponent()
@@ -54,14 +55,16 @@ namespace SolidWorksCadAgent.Desktop
             approveButton = ButtonAt("Approve Build", 18, 420, 110, ApproveButton_Click);
             requestChangesButton = ButtonAt("Request Changes", 138, 420, 130, RequestChangesButton_Click);
             cancelButton = ButtonAt("Cancel", 278, 420, 90, CancelButton_Click);
-            approveButton.Enabled = requestChangesButton.Enabled = cancelButton.Enabled = false;
+            completeButton = ButtonAt("Accept / Complete", 18, 458, 150, CompleteButton_Click);
+            approveButton.Enabled = requestChangesButton.Enabled = cancelButton.Enabled = completeButton.Enabled = false;
+            sendButton.Enabled = attachButton.Enabled = launchButton.Enabled = false;
 
-            Controls.Add(LabelAt("Job history (this desktop session)", 18, 468, 300));
-            historyListBox = new ListBox { Left = 18, Top = 492, Width = 350, Height = 134, Anchor = AnchorStyles.Left | AnchorStyles.Bottom };
+            Controls.Add(LabelAt("Job history (this desktop session)", 18, 502, 300));
+            historyListBox = new ListBox { Left = 18, Top = 526, Width = 350, Height = 100, Anchor = AnchorStyles.Left | AnchorStyles.Bottom };
 
             Controls.AddRange(new Control[] { hostStatusLabel, solidWorksStatusLabel, messageLabel, settingsButton, attachButton, launchButton,
                 promptTextBox, sendButton, attachmentButton, currentJobLabel, ambiguityTextBox, planTextBox, verificationTextBox,
-                approveButton, requestChangesButton, cancelButton, historyListBox });
+                approveButton, requestChangesButton, cancelButton, completeButton, historyListBox });
         }
 
         private static Label LabelAt(string text, int left, int top, int width) =>

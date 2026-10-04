@@ -27,7 +27,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                 try
                 {
                     await BuildPlateWithHole(bridge);
-                    await VerifyPlateWithHole(bridge);
+                    await VerifyPlateWithHole(bridge, session);
 
                     var relativePath = @"integration\AcceptancePlate-" + Guid.NewGuid().ToString("N") + ".sldprt";
                     var save = await ExecuteRequired(bridge, CadCommandNames.SavePart, new
@@ -43,7 +43,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                     await ExecuteRequired(bridge, CadCommandNames.CloseDocument, new { });
                     await ExecuteRequired(bridge, CadCommandNames.OpenPart, new { path = relativePath });
                     await ExecuteRequired(bridge, CadCommandNames.Rebuild, new { });
-                    await VerifyPlateWithHole(bridge);
+                    await VerifyPlateWithHole(bridge, session);
                 }
                 finally
                 {
@@ -80,9 +80,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                     await ExecuteRequired(bridge, CadCommandNames.Rebuild, new { });
 
                     var bounds = await ExecuteRequired(bridge, CadCommandNames.GetBoundingBox, new { });
-                    Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeXmm"), 0.02);
-                    Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeYmm"), 0.02);
-                    Assert.AreEqual(1.0, bounds.Data.Value<double>("sizeZmm"), 0.02);
+                    AssertOverallBounds(bounds.Data, 1.0, 10.0, 10.0);
                 }
                 finally
                 {
@@ -116,15 +114,18 @@ namespace SolidWorksCadAgent.IntegrationTests
             await ExecuteRequired(bridge, CadCommandNames.Rebuild, new { });
         }
 
-        private static async Task VerifyPlateWithHole(SolidWorksBridgeFacade bridge)
+        private static async Task VerifyPlateWithHole(SolidWorksBridgeFacade bridge, SolidWorksSession session)
         {
             var bodyCount = await ExecuteRequired(bridge, CadCommandNames.GetBodyCount, new { });
             Assert.AreEqual(1, bodyCount.Data.Value<int>("bodyCount"));
 
             var bounds = await ExecuteRequired(bridge, CadCommandNames.GetBoundingBox, new { });
-            Assert.AreEqual(100.0, bounds.Data.Value<double>("sizeXmm"), 0.02);
-            Assert.AreEqual(60.0, bounds.Data.Value<double>("sizeYmm"), 0.02);
-            Assert.AreEqual(10.0, bounds.Data.Value<double>("sizeZmm"), 0.02);
+            AssertOverallBounds(bounds.Data, 10.0, 60.0, 100.0);
+            var hole = await session.InvokeWithApplicationAsync(
+                application => NativePlateInspection.Inspect(application, bounds.Data), CancellationToken.None);
+            Assert.IsTrue(hole.IsCentredTwentyMillimetreThroughHole(),
+                "Expected a centred Ø20 opening on both outside faces, a full cylindrical wall and the correct removed volume. " +
+                Newtonsoft.Json.JsonConvert.SerializeObject(hole));
 
             var rebuild = await ExecuteRequired(bridge, CadCommandNames.GetRebuildErrors, new { });
             Assert.IsTrue(rebuild.Data.Value<bool>("rebuilt"));
@@ -143,6 +144,15 @@ namespace SolidWorksCadAgent.IntegrationTests
                 "Expected a native boss/extrusion feature.");
             Assert.IsTrue(typeNames.Any(typeName => typeName == "Cut"),
                 "Expected a native cut-extrude feature.");
+        }
+
+        private static void AssertOverallBounds(JObject bounds, params double[] expected)
+        {
+            // Reference-plane orientation can permute global axes; verify all three physical dimensions.
+            var actual = new[] { bounds.Value<double>("sizeXmm"), bounds.Value<double>("sizeYmm"), bounds.Value<double>("sizeZmm") }
+                .OrderBy(value => value).ToArray();
+            Assert.IsTrue(expected.SequenceEqual(expected.OrderBy(value => value)), "Expected dimensions must be sorted.");
+            for (var axis = 0; axis < 3; axis++) Assert.AreEqual(expected[axis], actual[axis], 0.02);
         }
 
         private static async Task EnsureExpectedSolidWorksVersion(SolidWorksSession session)

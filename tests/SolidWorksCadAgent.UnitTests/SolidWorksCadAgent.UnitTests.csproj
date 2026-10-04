@@ -20,4 +20,5 @@
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.AgentHost\SolidWorksCadAgent.AgentHost.csproj" />
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.Desktop\SolidWorksCadAgent.Desktop.csproj" />
   </ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\AcceptancePlateEvidence.cs" Link="TestUtilities\AcceptancePlateEvidence.cs" /></ItemGroup>
 </Project>
