@@ -45,7 +45,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
                 var depth = UnitConverter.MillimetresToMetres(depthMm);
                 var feature = model.FeatureManager.FeatureExtrusion2(
-                    false,
+                    true,
                     false,
                     false,
                     (int)swEndConditions_e.swEndCondBlind,
@@ -118,13 +118,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("SKETCH_STILL_ACTIVE", "Execute", "Exit the sketch before creating a cut feature.");
 
                 // FeatureCut4's long signature is isolated here so the version-independent
-                // command contract remains stable. The values mirror the SOLIDWORKS 2020
-                // API definition: Direction 1 Through All, no draft/thin feature, automatic
-                // feature scope, start from the sketch plane, and no sheet-metal normal cut.
+                // command contract remains stable. The V1 plate workflow creates its boss
+                // along the sketch normal, while SOLIDWORKS defaults cuts opposite that
+                // normal, so Direction 1 is reversed to cut into the newly created body.
                 var feature = model.FeatureManager.FeatureCut4(
                     true,
                     false,
-                    false,
+                    true,
                     (int)swEndConditions_e.swEndCondThroughAll,
                     (int)swEndConditions_e.swEndCondBlind,
                     0.0,
