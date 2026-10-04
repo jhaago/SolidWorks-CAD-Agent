@@ -116,6 +116,29 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(second, job.UpdatedUtc);
         }
 
+        [TestMethod]
+        public void Complete_RejectsEveryStateExceptReadyForReviewWithoutMutatingJob()
+        {
+            foreach (JobState state in Enum.GetValues(typeof(JobState)))
+            {
+                var job = CreateJob();
+                job.State = state;
+                var before = job.UpdatedUtc;
+                var machine = new JobStateMachine();
+                if (state == JobState.ReadyForReview)
+                {
+                    machine.Transition(job, JobState.Completed);
+                    Assert.IsTrue(JobStateMachine.IsTerminal(job.State));
+                }
+                else
+                {
+                    Assert.ThrowsException<JobStateTransitionException>(() => machine.Transition(job, JobState.Completed));
+                    Assert.AreEqual(state, job.State);
+                    Assert.AreEqual(before, job.UpdatedUtc);
+                }
+            }
+        }
+
         private static CadJob CreateJob()
         {
             return new CadJob

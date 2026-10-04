@@ -135,6 +135,66 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual("stored-secret", handler.AuthorizationParameter);
         }
 
+        [DataTestMethod]
+        [DataRow(400, "invalid_request_error", "unsupported_parameter", "Unsupported parameter: temperature.")]
+        [DataRow(401, "invalid_request_error", "invalid_api_key", "Incorrect API key provided: sk-project-secret-value")]
+        [DataRow(429, "insufficient_quota", "insufficient_quota", "Check your billing and quota.")]
+        [DataRow(500, "server_error", null, "Try again later.")]
+        public async Task HttpFailure_PreservesSafeUsefulDiagnostics(int status, string type, string code, string message)
+        {
+            var body = new JObject { ["error"] = new JObject { ["type"] = type, ["code"] = code, ["message"] = message } }.ToString();
+            var provider = new OpenAiCadPlanningProvider(new HttpClient(new ErrorHandler(status, body)),
+                () => "sk-project-secret-value", "test-model");
+            var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+            Assert.AreEqual("OPENAI_HTTP_ERROR", error.Code);
+            StringAssert.Contains(error.Message, "HTTP " + status);
+            StringAssert.Contains(error.Message, type);
+            if (code != null) StringAssert.Contains(error.Message, code);
+            Assert.IsFalse(error.ToString().Contains("sk-project-secret-value"));
+            if (status != 401) StringAssert.Contains(error.Message, message);
+        }
+
+        [DataTestMethod]
+        [DataRow("not JSON")]
+        [DataRow("{\"error\":{\"message\":{\"unexpected\":\"shape\"},\"code\":[]}}")]
+        [DataRow("{\"error\":null}")]
+        public async Task HttpFailure_MalformedBodyKeepsStructuredFallback(string body)
+        {
+            var provider = new OpenAiCadPlanningProvider(new HttpClient(new ErrorHandler(502, body)), () => "key", "test-model");
+            var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+            Assert.AreEqual("OPENAI_HTTP_ERROR", error.Code);
+            StringAssert.Contains(error.Message, "HTTP 502");
+            Assert.IsFalse(error.Message.Contains(body));
+        }
+
+        [TestMethod]
+        public async Task HttpFailure_DoesNotEchoSecretsFromAnyErrorFieldOrHeaders()
+        {
+            const string secret = "private-configured-credential";
+            var body = new JObject { ["error"] = new JObject
+            {
+                ["code"] = secret, ["type"] = "Bearer other-secret",
+                ["message"] = "Authorization: Bearer other-secret; api_key=another-secret; token: private-token; " + secret + " sk-other-key",
+                ["details"] = "password=secret-details"
+            } }.ToString();
+            var provider = new OpenAiCadPlanningProvider(new HttpClient(new ErrorHandler(401, body)), () => secret, "test-model");
+            var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+            foreach (var value in new[] { secret, "other-secret", "another-secret", "private-token", "sk-other-key", "secret-details", "Authorization" })
+                Assert.IsFalse(error.ToString().Contains(value), value);
+        }
+
+        private sealed class ErrorHandler : HttpMessageHandler
+        {
+            private readonly int _status;
+            private readonly string _body;
+            public ErrorHandler(int status, string body) { _status = status; _body = body; }
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                Task.FromResult(new HttpResponseMessage((HttpStatusCode)_status) { Content = new StringContent(_body) });
+        }
+
         private static string PlanResponse(string summary, JArray assumptions, JArray ambiguities, JArray commands)
         {
             var arguments = new JObject

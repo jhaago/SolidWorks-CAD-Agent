@@ -524,6 +524,62 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public async Task CompleteJob_OnlyReadyForReviewSucceedsAndCompletedIsTerminal()
+        {
+            foreach (JobState state in Enum.GetValues(typeof(JobState)))
+            {
+                var id = Guid.NewGuid();
+                await _repository.CreateAsync(new CadJob
+                {
+                    Id = id, Prompt = "Reviewed plate", State = state,
+                    CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow
+                });
+                var response = await _routes.HandleAsync(
+                    new AgentRequest("POST", "/jobs/" + id + "/complete", "{}"), CancellationToken.None);
+                Assert.AreEqual(state == JobState.ReadyForReview ? 200 : 409, response.StatusCode, state.ToString());
+                Assert.AreEqual(state == JobState.ReadyForReview ? JobState.Completed : state,
+                    (await _repository.GetAsync(id)).State);
+                if (state == JobState.ReadyForReview)
+                {
+                    var cancel = await _routes.HandleAsync(
+                        new AgentRequest("POST", "/jobs/" + id + "/cancel", "{}"), CancellationToken.None);
+                    Assert.AreEqual(409, cancel.StatusCode);
+                }
+            }
+            var missing = await _routes.HandleAsync(
+                new AgentRequest("POST", "/jobs/" + Guid.NewGuid() + "/complete", "{}"), CancellationToken.None);
+            Assert.AreEqual(404, missing.StatusCode);
+            Assert.AreEqual("JOB_NOT_FOUND", (string)JObject.Parse(missing.JsonBody)["error"]["code"]);
+        }
+
+        [TestMethod]
+        public async Task CompleteJob_UnblocksExecutionModeChanges()
+        {
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+            try
+            {
+                var settings = new AgentSettings { ExecutionMode = ExecutionMode.Simulation };
+                var service = new AgentSettingsService(settings, new JsonAgentSettingsStore(path), new FakeSecretStore(), _repository);
+                var routes = new AgentRoutes(_repository, _solidWorks, null, service);
+                var id = Guid.NewGuid();
+                await _repository.CreateAsync(new CadJob
+                {
+                    Id = id, Prompt = "Reviewed plate", State = JobState.ReadyForReview,
+                    CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow
+                });
+                var candidate = new AgentSettings { ExecutionMode = ExecutionMode.Real };
+                await Assert.ThrowsExceptionAsync<AgentSettingsServiceException>(() => service.UpdateAsync(candidate, CancellationToken.None));
+                var complete = await routes.HandleAsync(new AgentRequest("POST", "/jobs/" + id + "/complete", "{}"), CancellationToken.None);
+                Assert.AreEqual(200, complete.StatusCode);
+                Assert.IsFalse(await _repository.HasNonTerminalJobsAsync());
+                var updated = await service.UpdateAsync(candidate, CancellationToken.None);
+                Assert.AreEqual(ExecutionMode.Real, updated.Settings.ExecutionMode);
+                Assert.IsTrue(updated.RestartRequired);
+            }
+            finally { TryDelete(path); TryDelete(path + ".bak"); }
+        }
+
         private sealed class FakeSolidWorksSession : ISolidWorksSession
         {
             public int AttachCalls { get; private set; }
