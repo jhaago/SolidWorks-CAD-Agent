@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost.Ai;
 using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
@@ -446,6 +447,10 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 catch (JobCoordinatorException ex)
                 {
                     return Error(ex.Code == "PROMPT_REQUIRED" ? 400 : 409, ex.Code, ex.Message);
+                }
+                catch (OpenAiPlanningException ex)
+                {
+                    return Error(502, ex.Code, ex.Message);
                 }
             }
 
