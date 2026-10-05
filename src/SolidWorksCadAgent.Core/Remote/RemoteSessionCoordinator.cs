@@ -73,7 +73,12 @@ namespace SolidWorksCadAgent.Core.Remote
                 if(active!=null) ResetAuthority();
             }
         }
-        public void ReleaseInput(string token) { lock(gate) { Authorize(token); ResetAuthority(); } }
+        public void ReleaseInput(string token,long expectedEpoch) {
+            lock(gate) {
+                if(Authorize(token).Epoch!=expectedEpoch) throw Error(409,"input_stale","Input authority changed. This old release request was ignored.");
+                ResetAuthority();
+            }
+        }
         private void ResetAuthority() {
             active.Controlling=false; active.Sequence=0; active.Epoch=++nextEpoch;
             if(!Release()) { active=null; throw Error(503,"release_failed","Windows could not release remote input. Restart the remote agent before taking control."); }

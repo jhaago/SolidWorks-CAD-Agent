@@ -38,6 +38,13 @@ namespace SolidWorksCadAgent.UnitTests.Remote
     [TestClass]
     public class RemoteSessionTests
     {
+        [TestMethod] public void StaleReleaseCannotRevokeFreshControl() {
+            var f=new SessionFixture();var first=f.Sessions.ResumeControl(f.Grant.SessionToken);
+            var fresh=f.Sessions.TakeControl(f.Grant.SessionToken);
+            Assert.AreNotEqual(first.AuthorityEpoch,fresh.AuthorityEpoch);
+            Assert.ThrowsException<RemoteProtocolException>(()=>f.Sessions.ReleaseInput(f.Grant.SessionToken,first.AuthorityEpoch));
+            Assert.IsTrue(f.Sessions.Status(f.Grant.SessionToken).Controlling);
+        }
         [TestMethod] public void ExpiredOrRevokedTokenCannotReadOrControl() {
             var f=new SessionFixture(); f.Clock.UtcNow+=TimeSpan.FromMinutes(5);
             Assert.ThrowsException<RemoteProtocolException>(()=>f.Sessions.Status(f.Grant.SessionToken));

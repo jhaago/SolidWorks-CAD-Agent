@@ -15,7 +15,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
         public RemoteRoutes(RemotePairingCoordinator pairing,RemoteSessionCoordinator sessions,IRemoteCapture capture,IRemoteClock clock) {
             this.pairing=pairing; this.sessions=sessions; this.capture=capture; this.clock=clock;
         }
-        private sealed class ActionBody { public string DeviceName { get; set; } public string DeviceId { get; set; } public string RequestId { get; set; } }
+        private sealed class ActionBody { public string DeviceName { get; set; } public string DeviceId { get; set; } public string RequestId { get; set; } public long AuthorityEpoch { get; set; } }
         public RemoteResponse Handle(RemoteRequest request) {
             try {
                 if(request==null || request.Path==null || !request.Path.StartsWith("/remote/v1/",StringComparison.Ordinal) || request.Path.Contains("?") || request.Path.Contains("#"))
@@ -34,7 +34,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                     case "session/heartbeat": return Ok(sessions.Heartbeat(Token(request,"Session")));
                     case "session/resume": return Ok(sessions.ResumeControl(Token(request,"Session")));
                     case "session/take-control": return Ok(sessions.TakeControl(Token(request,"Session")));
-                    case "session/release": sessions.ReleaseInput(Token(request,"Session")); return Ok(new {success=true});
+                    case "session/release": sessions.ReleaseInput(Token(request,"Session"),Read<ActionBody>(request).AuthorityEpoch); return Ok(new {success=true});
                     case "session/close": sessions.Close(Token(request,"Session")); return Ok(new {success=true});
                     case "input": sessions.SubmitInput(Token(request,"Session"),Read<RemoteInputEvent>(request)); return Ok(new {success=true});
                     case "display/frame": return Frame(Token(request,"Session"));
