@@ -95,10 +95,16 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
             {
                 bool isWarning;
                 var errorCode = feature.GetErrorCode2(out isWarning);
+                var typeName = feature.GetTypeName2();
+                // Instant3D wraps features as ICE; GetTypeName exposes the underlying native type.
+                if (typeName == "ICE")
+                {
+                    typeName = feature.GetTypeName();
+                }
                 result.Add(new FeatureInspectionItem
                 {
                     Name = feature.Name,
-                    TypeName = feature.GetTypeName2(),
+                    TypeName = typeName,
                     ErrorCode = errorCode,
                     IsWarning = errorCode != 0 && isWarning
                 });

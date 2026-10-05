@@ -133,6 +133,14 @@ Copy-RuntimeTree (Join-Path $repoRoot "src\SolidWorksCadAgent.AgentHost\bin\$Con
 Copy-RuntimeTree (Join-Path $repoRoot "src\SolidWorksCadAgent.Desktop\bin\$Configuration\net48") (Join-Path $bundleRoot "Desktop")
 Copy-RuntimeTree (Join-Path $repoRoot "src\SolidWorksCadAgent.RemoteAgent\bin\$Configuration\net48") (Join-Path $bundleRoot "RemoteAgent")
 
+# MSBuild can omit the constants assembly from transitive output when its enums
+# are compiled into callers. Native bundles still require both interop DLLs.
+if ($null -ne $detectedApiPath) {
+    foreach ($interopName in @("SolidWorks.Interop.sldworks.dll", "SolidWorks.Interop.swconst.dll")) {
+        Copy-Item -LiteralPath (Join-Path $detectedApiPath $interopName) -Destination (Join-Path $bundleRoot "AgentHost\$interopName") -Force
+    }
+}
+
 $setupDirectory = Join-Path $bundleRoot "Setup"
 New-Item -ItemType Directory -Path $setupDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\register-agent-host-url.ps1") -Destination (Join-Path $setupDirectory "register-agent-host-url.ps1") -Force
