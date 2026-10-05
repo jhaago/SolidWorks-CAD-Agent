@@ -1,0 +1,68 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - feature/v1-solidworks-2020
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /t:Restore /p:Configuration=Debug
+
+      - name: Build complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /p:Configuration=Debug /p:Restore=false
+
+      - name: Restore unit-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Build unit tests
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Run unit tests
+        shell: pwsh
+        run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --logger "trx;LogFileName=unit-tests.trx"
+
+      - name: Restore integration-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Compile integration-test contract only
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Test bundle file-lock diagnostics
+        shell: pwsh
+        run: .\scripts\test-bundle-file-locks.ps1
+
+      - name: Build Windows test bundle
+        shell: pwsh
+        run: .\scripts\build-windows-test-bundle.ps1 -Configuration Release
+
+      - name: Validate Windows test bundle
+        shell: pwsh
+        run: .\scripts\validate-windows-test-bundle.ps1 -ZipPath .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Test bundle capability validation
+        shell: pwsh
+        run: .\scripts\test-windows-bundle-validator.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Upload Windows test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolidWorksCadAgent-Windows-Test-Bundle
+          path: artifacts/SolidWorksCadAgent-Windows-Test-Bundle.zip
+          if-no-files-found: error
+          retention-days: 14

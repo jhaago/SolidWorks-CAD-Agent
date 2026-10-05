@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>SolidWorksCadAgent.IntegrationTests</RootNamespace>
+    <AssemblyName>SolidWorksCadAgent.IntegrationTests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <PropertyGroup>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksInteropAvailable Condition="Exists('$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll') and Exists('$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll')">true</SolidWorksInteropAvailable>
+    <SolidWorksInteropAvailable Condition="'$(SolidWorksInteropAvailable)' == ''">false</SolidWorksInteropAvailable>
+    <DefineConstants Condition="'$(SolidWorksInteropAvailable)' == 'true'">$(DefineConstants);SOLIDWORKS_INTEROP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SolidWorksInteropAvailable)' == 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest.TestAdapter" Version="3.6.4" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SolidWorksCadAgent.SolidWorksBridge\SolidWorksCadAgent.SolidWorksBridge.csproj" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\AcceptancePlateEvidence.cs" Link="TestUtilities\AcceptancePlateEvidence.cs" /></ItemGroup>
+</Project>
