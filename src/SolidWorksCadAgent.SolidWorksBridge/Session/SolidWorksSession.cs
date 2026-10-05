@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,15 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         private const int MkEUnavailable = unchecked((int)0x800401E3);
         private readonly SolidWorksStaDispatcher _dispatcher = new SolidWorksStaDispatcher();
         private int _disposed;
+        private readonly string _executablePath;
+        private readonly SemaphoreSlim _launchGate = new SemaphoreSlim(1, 1);
+
+        public SolidWorksSession() : this(null) { }
+
+        public SolidWorksSession(string executablePath)
+        {
+            _executablePath = executablePath;
+        }
 
 #if SOLIDWORKS_INTEROP
         private SldWorks _application;
@@ -25,10 +35,39 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             return _dispatcher.InvokeAsync(AttachCore, cancellationToken);
         }
 
-        public Task<SolidWorksSessionStatus> LaunchAsync(CancellationToken cancellationToken)
+        public async Task<SolidWorksSessionStatus> LaunchAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return _dispatcher.InvokeAsync(LaunchCore, cancellationToken);
+#if SOLIDWORKS_INTEROP
+            await _launchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                ThrowIfDisposed();
+                var result = await SolidWorksNormalLaunch.RunAsync(
+                    () => AttachAsync(cancellationToken),
+                    () => _dispatcher.InvokeAsync(() => _application.StartupProcessCompleted, cancellationToken),
+                    () =>
+                    {
+                        var path = SolidWorksNormalLaunch.ResolveExecutable(_executablePath);
+                        using (var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, Arguments = "" }))
+                        {
+                            if (process == null) throw new InvalidOperationException("SOLIDWORKS process could not be started.");
+                        }
+                    },
+                    token => Task.Delay(500, token), 120, cancellationToken).ConfigureAwait(false);
+                return result.IsConnected
+                    ? await _dispatcher.InvokeAsync(EnsureVisibleAndBuildStatus, cancellationToken).ConfigureAwait(false)
+                    : result;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                return await _dispatcher.InvokeAsync(() => BuildDisconnectedStatus("Unable to launch SOLIDWORKS: " + ex.Message), cancellationToken).ConfigureAwait(false);
+            }
+            finally { _launchGate.Release(); }
+#else
+            return await _dispatcher.InvokeAsync(LaunchCore, cancellationToken).ConfigureAwait(false);
+#endif
         }
 
         public Task<SolidWorksSessionStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -102,36 +141,6 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             catch (Exception ex)
             {
                 return BuildDisconnectedStatus("Unable to attach to SOLIDWORKS: " + ex.Message);
-            }
-        }
-
-        private SolidWorksSessionStatus LaunchCore()
-        {
-            if (_application != null)
-            {
-                return EnsureVisibleAndBuildStatus();
-            }
-
-            try
-            {
-                var type = Type.GetTypeFromProgID("SldWorks.Application", throwOnError: false);
-                if (type == null)
-                {
-                    return BuildDisconnectedStatus("SOLIDWORKS is not registered as SldWorks.Application on this machine.");
-                }
-
-                _application = Activator.CreateInstance(type) as SldWorks;
-                if (_application == null)
-                {
-                    return BuildDisconnectedStatus("SOLIDWORKS launched but the COM object could not be cast to the installed interop type.");
-                }
-
-                return EnsureVisibleAndBuildStatus();
-            }
-            catch (Exception ex)
-            {
-                ReleaseApplicationCore();
-                return BuildDisconnectedStatus("Unable to launch SOLIDWORKS: " + ex.Message);
             }
         }
 

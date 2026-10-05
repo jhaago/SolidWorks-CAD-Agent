@@ -40,7 +40,7 @@ namespace SolidWorksCadAgent.AgentHost
                         settings,
                         settingsStore,
                         secretStore,
-                        () => realSession = new SolidWorksSession(),
+                        () => realSession = new SolidWorksSession(settings.SolidWorksExecutablePath),
                         () => new OpenAiCadPlanningProvider(
                             httpClient,
                             secretStore,
