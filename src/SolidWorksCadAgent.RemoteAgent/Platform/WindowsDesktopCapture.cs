@@ -16,9 +16,15 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
     {
         private readonly object gate=new object(); private readonly DisplayGenerationTracker tracker=new DisplayGenerationTracker();
         private readonly IRemoteClock clock; private long frameId;
+        private readonly Func<DesktopGeometry> geometrySource;
+        private readonly Func<DesktopGeometry,RemoteCapturedFrame> imageSource;
         public WindowsDesktopCapture(IRemoteClock clock) {this.clock=clock;}
+        public WindowsDesktopCapture(IRemoteClock clock,Func<DesktopGeometry> geometrySource,Func<DesktopGeometry,RemoteCapturedFrame> imageSource) {
+            this.clock=clock;this.geometrySource=geometrySource;this.imageSource=imageSource;
+        }
         public DesktopGeometry Geometry() {
             lock(gate) {
+                if(geometrySource!=null)return geometrySource();
                 if(!DesktopAvailability.IsInteractive()) throw new InvalidOperationException("Unlock Windows and close secure desktop prompts.");
                 var monitor=Screen.PrimaryScreen.Bounds;var desktop=SystemInformation.VirtualScreen;
                 int dpi=96;try {dpi=(int)GetDpiForSystem();}catch(EntryPointNotFoundException){}
@@ -27,7 +33,9 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
         }
         public RemoteCapturedFrame Capture() {
             lock(gate) {
-                var geometry=Geometry(); var bounds=geometry.Monitor; var size=DesktopCoordinateMapper.Fit(bounds.Size);
+                var geometry=Geometry();
+                if(imageSource!=null)return imageSource(geometry);
+                var bounds=geometry.Monitor; var size=DesktopCoordinateMapper.Fit(bounds.Size);
                 using(var original=new Bitmap(bounds.Width,bounds.Height,PixelFormat.Format24bppRgb)) {
                     using(var graphics=Graphics.FromImage(original)) graphics.CopyFromScreen(bounds.Location,Point.Empty,bounds.Size,CopyPixelOperation.SourceCopy);
                     using(var scaled=new Bitmap(size.Width,size.Height,PixelFormat.Format24bppRgb)) {
