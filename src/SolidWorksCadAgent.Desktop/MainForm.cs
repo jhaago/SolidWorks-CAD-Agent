@@ -91,7 +91,7 @@ namespace SolidWorksCadAgent.Desktop
 
         private void SettingsButton_Click(object sender, EventArgs e)
         {
-            using (var form = new SettingsForm()) form.ShowDialog(this);
+            using (var form = new SettingsForm(_client)) form.ShowDialog(this);
         }
 
         private void DisplayConnection(HostConnectionSnapshot snapshot)

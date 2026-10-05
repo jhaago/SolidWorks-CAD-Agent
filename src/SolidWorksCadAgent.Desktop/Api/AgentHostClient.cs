@@ -35,6 +35,12 @@ namespace SolidWorksCadAgent.Desktop.Api
         public Task<HostHealthDto> GetHealthAsync(CancellationToken cancellationToken) =>
             SendAsync<HostHealthDto>(HttpMethod.Get, "health", null, cancellationToken);
 
+        public Task<SettingsResponseDto> GetSettingsAsync(CancellationToken cancellationToken) =>
+            SendAsync<SettingsResponseDto>(HttpMethod.Get, "settings", null, cancellationToken);
+
+        public Task<SettingsResponseDto> UpdateSettingsAsync(JObject settings, CancellationToken cancellationToken) =>
+            SendAsync<SettingsResponseDto>(HttpMethod.Put, "settings", settings, cancellationToken);
+
         public Task<SolidWorksStatusDto> GetSolidWorksStatusAsync(CancellationToken cancellationToken) =>
             SendAsync<SolidWorksStatusDto>(HttpMethod.Get, "solidworks/status", null, cancellationToken);
 
