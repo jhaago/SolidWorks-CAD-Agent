@@ -3,6 +3,7 @@ using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.RemoteAgent.Host;
+using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.UnitTests.Remote
 {
@@ -94,6 +95,14 @@ namespace SolidWorksCadAgent.UnitTests.Remote
             Assert.AreEqual(200, response.Status);
             Assert.AreEqual("POST", forwardedMethod);
             Assert.AreEqual("jobs/" + id.ToString("D") + "/cancel", forwardedPath);
+        }
+
+        [TestMethod]
+        public void SolidWorksStatusContractCarriesOnlyTheActiveDocumentTitle()
+        {
+            var property = typeof(SolidWorksSessionStatus).GetProperty("ActiveDocumentTitle");
+            Assert.IsNotNull(property, "Remote status needs the current document title without exposing a COM document object.");
+            Assert.AreEqual(typeof(string), property.PropertyType);
         }
     }
 }
