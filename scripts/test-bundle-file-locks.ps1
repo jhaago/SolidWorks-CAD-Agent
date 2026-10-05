@@ -13,7 +13,7 @@ try {
         try { Assert-BundleFilesAvailable -Roots @($root) }
         catch { $failure = $_.Exception.Message }
         if ($null -eq $failure) { throw "Expected a locked DLL to fail the build preflight." }
-        foreach ($required in @("SQLite.Interop.dll", "SolidWorksCadAgent.AgentHost", "SolidWorksCadAgent.Desktop", "close", "not terminated")) {
+        foreach ($required in @("SQLite.Interop.dll", "SolidWorksCadAgent.AgentHost", "SolidWorksCadAgent.Desktop", "SolidWorksCadAgent.RemoteAgent", "close", "not terminated")) {
             if ($failure -notlike "*$required*") { throw "Missing actionable diagnostic: $required" }
         }
     }
