@@ -36,7 +36,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             {
 #if SOLIDWORKS_INTEROP
                 var swApp = application as SldWorks;
-                var model = swApp?.ActiveDoc as ModelDoc2;
+                var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
 
@@ -110,7 +110,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             {
 #if SOLIDWORKS_INTEROP
                 var swApp = application as SldWorks;
-                var model = swApp?.ActiveDoc as ModelDoc2;
+                var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
 

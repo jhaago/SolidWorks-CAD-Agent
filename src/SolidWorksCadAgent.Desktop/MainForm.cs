@@ -15,6 +15,7 @@ namespace SolidWorksCadAgent.Desktop
         private readonly List<JobViewDto> _history = new List<JobViewDto>();
         private JobViewDto _currentJob;
         private bool _busy;
+        private bool _cancelling;
         private bool _hostAvailable;
         private bool _showingConnectionError;
 
@@ -69,8 +70,26 @@ namespace SolidWorksCadAgent.Desktop
 
         private async void CancelButton_Click(object sender, EventArgs e)
         {
-            if (_currentJob == null) return;
-            await RunUiActionAsync(async () => DisplayJob(await _client.CancelJobAsync(_currentJob.Id, _lifetime.Token)));
+            if (_currentJob == null || _cancelling || _lifetime.IsCancellationRequested) return;
+            var jobId = _currentJob.Id;
+            _cancelling = true;
+            UpdateActions();
+            try
+            {
+                var result = await _client.CancelJobAsync(jobId, _lifetime.Token);
+                if (_currentJob?.Id == jobId) DisplayJob(result);
+                SetStatus("Cancellation saved. An in-progress CAD command may finish; subsequent commands will stop.", false);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+            catch (Exception ex) when (ex is AgentHostUnavailableException || ex is AgentHostApiException)
+            {
+                SetStatus(ex.Message, true);
+            }
+            finally
+            {
+                _cancelling = false;
+                if (!_lifetime.IsCancellationRequested) UpdateActions();
+            }
         }
 
         private async void CompleteButton_Click(object sender, EventArgs e)
@@ -140,6 +159,9 @@ namespace SolidWorksCadAgent.Desktop
 
         private void DisplayJob(JobViewDto job)
         {
+            // Approval and cancellation use independent requests. A late approval snapshot
+            // must not replace a cancellation already acknowledged by the Host.
+            if (_currentJob?.Id == job?.Id && _currentJob?.State == "Cancelled" && job?.State != "Cancelled") return;
             _currentJob = job;
             if (job == null) return;
             currentJobLabel.Text = job.Id.ToString("D") + "  |  " + job.State;
@@ -171,7 +193,7 @@ namespace SolidWorksCadAgent.Desktop
             approveButton.Enabled = enabled && _currentJob?.State == "AwaitingApproval" &&
                 _currentJob.PlanValidated && _currentJob.CurrentRevisionId.HasValue;
             completeButton.Enabled = enabled && _currentJob?.State == "ReadyForReview";
-            cancelButton.Enabled = enabled && _currentJob != null && _currentJob.State != "Completed" &&
+            cancelButton.Enabled = _hostAvailable && !_cancelling && _currentJob != null && _currentJob.State != "Completed" &&
                 _currentJob.State != "Cancelled" && _currentJob.State != "Failed";
             requestChangesButton.Enabled = enabled && (_currentJob?.State == "AwaitingApproval" || _currentJob?.State == "AwaitingClarification");
         }
