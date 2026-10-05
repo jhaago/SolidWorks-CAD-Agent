@@ -504,6 +504,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     servicePackHotfix = runtime.ServicePackHotfix,
                     displayVersion = runtime.DisplayVersion
                 },
+                activeDocument = status?.ActiveDocumentTitle,
                 errorMessage = status?.ErrorMessage
             });
         }
