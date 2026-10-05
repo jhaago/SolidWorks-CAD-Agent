@@ -12,6 +12,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         public int DispatcherThreadId { get; set; }
         public SolidWorksRuntimeInfo RuntimeInfo { get; set; }
         public SolidWorksCompatibilityResult Compatibility { get; set; }
+        public string ActiveDocumentTitle { get; set; }
         public string ErrorMessage { get; set; }
     }
 
