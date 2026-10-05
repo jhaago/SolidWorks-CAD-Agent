@@ -1,12 +1,12 @@
 function Get-CadAgentProcesses {
-    @(Get-Process -Name "SolidWorksCadAgent.AgentHost", "SolidWorksCadAgent.Desktop" -ErrorAction SilentlyContinue)
+    @(Get-Process -Name "SolidWorksCadAgent.AgentHost", "SolidWorksCadAgent.Desktop", "SolidWorksCadAgent.RemoteAgent" -ErrorAction SilentlyContinue)
 }
 
 function Get-BundleFileAccessMessage {
     param([string]$Path)
     $running = @(Get-CadAgentProcesses | ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" })
     $details = if ($running.Count -gt 0) { " Running: " + ($running -join ", ") + "." } else { "" }
-    "Cannot replace or remove '$Path'. It may be locked by a previous Agent Host/Desktop session, or access permissions may prevent writing. Please close SolidWorksCadAgent.AgentHost.exe and SolidWorksCadAgent.Desktop.exe, then rerun the bundle build. Also close any test runner using this output and check folder permissions if the error persists.$details Processes were not terminated automatically."
+    "Cannot replace or remove '$Path'. It may be locked by a previous CAD Agent session, or access permissions may prevent writing. Please close SolidWorksCadAgent.AgentHost.exe, SolidWorksCadAgent.Desktop.exe and SolidWorksCadAgent.RemoteAgent.exe, then rerun the bundle build. Also close any test runner using this output and check folder permissions if the error persists.$details Processes were not terminated automatically."
 }
 
 function Assert-BundleFilesAvailable {
