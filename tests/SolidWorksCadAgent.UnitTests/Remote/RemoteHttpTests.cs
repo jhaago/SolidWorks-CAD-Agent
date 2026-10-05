@@ -44,6 +44,13 @@ namespace SolidWorksCadAgent.UnitTests.Remote
             capture.Frame.JpegBytes=new byte[2097153];
             Assert.AreEqual(503,routes.Handle(Request("display/frame",f.Grant.SessionToken,"GET","")).Status);
         }
+        [TestMethod] public void FrameReportsCaptureAgeOnTheWindowsClock() {
+            var f=new SessionFixture(); var capture=new TestCapture(); capture.Frame.CapturedAt=f.Clock.UtcNow-TimeSpan.FromSeconds(2);
+            var routes=new RemoteRoutes(f.Pairing,f.Sessions,capture,f.Clock);
+            var response=routes.Handle(Request("display/frame",f.Grant.SessionToken,"GET",""));
+            Assert.AreEqual(200,response.Status);
+            Assert.AreEqual(2000L,(long)JObject.Parse(response.Body)["ageAtResponseMs"]);
+        }
         [TestMethod] public void ErrorsNeverEchoSecrets() {
             var f=new SessionFixture(); var routes=new RemoteRoutes(f.Pairing,f.Sessions,new TestCapture(),f.Clock);
             var response=routes.Handle(Request("session/status","private-token","GET",""));
