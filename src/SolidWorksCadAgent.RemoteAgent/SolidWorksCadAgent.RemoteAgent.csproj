@@ -5,6 +5,7 @@
     <RootNamespace>SolidWorksCadAgent.RemoteAgent</RootNamespace>
     <AssemblyName>SolidWorksCadAgent.RemoteAgent</AssemblyName>
     <UseWindowsForms>true</UseWindowsForms>
+    <OutputType>WinExe</OutputType>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System.Security" />

@@ -87,6 +87,7 @@ namespace SolidWorksCadAgent.Core.Remote
         public bool Authenticate(string id, string credential) {
             lock(gate) return healthy && records.Any(r=>r.DeviceId==id && RemoteSecrets.Matches(r.Verifier,credential));
         }
+        public bool IsDeviceActive(string id) { lock(gate) return healthy && records.Any(r=>r.DeviceId==id); }
         public void Revoke(string id) {
             bool failed=false;
             lock(gate) {
