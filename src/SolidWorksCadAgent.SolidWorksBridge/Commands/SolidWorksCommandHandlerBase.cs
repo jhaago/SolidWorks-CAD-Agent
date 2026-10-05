@@ -1,15 +1,31 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Commands;
+using SolidWorksCadAgent.Core.Workspace;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
 namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 {
     public abstract class SolidWorksCommandHandlerBase : ICadCommandHandler
     {
+        private static readonly ConditionalWeakTable<ISolidWorksSession, SolidWorksDocumentContext> Documents =
+            new ConditionalWeakTable<ISolidWorksSession, SolidWorksDocumentContext>();
+        internal static SolidWorksDocumentContext DocumentContext(ISolidWorksSession session) => Documents.GetValue(session, key => new SolidWorksDocumentContext());
+        protected void BindDocument(object document) => DocumentContext(Session).Bind(document);
+        protected void ClearDocument() => DocumentContext(Session).Clear();
+        protected object RequireDocument(object application)
+        {
+#if SOLIDWORKS_INTEROP
+            var app = application as SolidWorks.Interop.sldworks.SldWorks;
+            return DocumentContext(Session).RequireActive(app?.ActiveDoc);
+#else
+            throw new DocumentTargetException();
+#endif
+        }
         protected SolidWorksCommandHandlerBase(ISolidWorksSession session)
         {
             Session = session ?? throw new ArgumentNullException(nameof(session));
@@ -29,7 +45,18 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             Func<object, CadCommandResult> operation,
             CancellationToken cancellationToken)
         {
-            return Session.InvokeWithApplicationAsync(operation, cancellationToken);
+            return Session.InvokeWithApplicationAsync(application =>
+            {
+                try { return operation(application); }
+                catch (DocumentTargetException ex)
+                {
+                    return Failure("DOCUMENT_TARGET_CHANGED", "Execute", ex.Message);
+                }
+                catch (WorkspacePolicyException ex)
+                {
+                    return Failure("WORKSPACE_POLICY_VIOLATION", "Execute", ex.Message);
+                }
+            }, cancellationToken);
         }
 
         protected static CadCommandResult Ok(object data = null)

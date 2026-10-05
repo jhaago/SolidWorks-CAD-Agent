@@ -109,7 +109,28 @@ namespace SolidWorksCadAgent.Core.Workspace
                 throw new WorkspacePolicyException("The requested file extension is not permitted for CAD file operations.");
             }
 
+            RejectReparsePoints(resolved);
             return resolved;
+        }
+
+        private static void RejectReparsePoints(string path)
+        {
+            // Check the target and every ancestor, including a redirected workspace root.
+            // Missing descendants are valid for saves; existing ancestors must still be checked.
+            for (var current = path; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+            {
+                try
+                {
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                        throw new WorkspacePolicyException("CAD paths cannot pass through symbolic links or directory junctions.");
+                }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    throw new WorkspacePolicyException("The CAD path could not be checked safely.", ex);
+                }
+            }
         }
     }
 }

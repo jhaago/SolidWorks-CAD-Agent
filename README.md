@@ -4,7 +4,7 @@ AI-assisted native CAD automation for SOLIDWORKS.
 
 ## V1 baseline
 
-The first certified runtime is **SOLIDWORKS Premium 2020 SP0.0**. The bridge is designed so SOLIDWORKS-version-specific COM/API details stay behind a version-independent command layer, allowing later releases to be certified by rerunning the integration and acceptance suite.
+The V1 target runtime is **SOLIDWORKS Premium 2020 SP0.0**. The bridge is designed so SOLIDWORKS-version-specific COM/API details stay behind a version-independent command layer, allowing later releases to be certified by rerunning the integration and acceptance suite.
 
 The first acceptance model is a native editable 100 × 60 × 10 mm plate with a centred Ø20 through-hole.
 
@@ -23,7 +23,7 @@ Image interpretation, assemblies, drawings and arbitrary macros are not enabled 
 
 ## Manual remote workstation test build
 
-The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. Live AI control is unavailable. See [setup and pending physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native SOLIDWORKS geometry acceptance remains pending on the SOLIDWORKS 2020 PC.
+The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. Live AI control is unavailable. See [setup and pending physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native plate and millimetre-scale acceptance passed on the SOLIDWORKS 2020 PC; see [Windows validation](docs/windows-validation-2026-10-05.md). Live remote acceptance remains pending.
 
 ## Prerequisites
 
@@ -76,4 +76,4 @@ The expected cloud-planning state is `AwaitingApproval`. Inspect the proposed pl
 
 ## Current testing boundary
 
-GitHub Actions builds the Agent Host, desktop client, unit tests, and the integration-test contract. Remaining software work includes persisted/navigable job history, editable Settings, and clarification revisions. The separate physical release gate is a run on the user's SOLIDWORKS 2020 SP0.0 PC, including attach/launch, native feature creation, save/reopen, verification, and three repeated acceptance runs.
+GitHub Actions builds the Agent Host, desktop client, unit tests, and the integration-test contract. Remaining software work includes navigable persisted job history and Desktop clarification revisions. Model and execution-mode settings are editable and persist across Host restarts. Geometry, save/reopen, and normal-launch checks have passed on the target PC. Remaining physical release gates include three repeated acceptance workflows and approval/Auto-mode checks on the user's SOLIDWORKS 2020 SP0.0 PC, including attach/launch, native feature creation, save/reopen, verification, and three repeated acceptance runs.

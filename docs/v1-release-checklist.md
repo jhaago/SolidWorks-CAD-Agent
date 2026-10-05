@@ -17,17 +17,19 @@ Branch: `feature/v1-solidworks-2020`
 
 ## Physical SOLIDWORKS 2020 gate
 
-- [ ] Register the localhost URL ACL and start Agent Host and Desktop as separate processes.
-- [ ] Confirm Attach and Launch report the installed SOLIDWORKS version.
+- [x] Register the localhost URL ACL and start Agent Host and Desktop as separate processes.
+- [x] Confirm Attach and Launch report the installed SOLIDWORKS version.
 - [ ] Run every test marked `SolidWorksIntegration` with SOLIDWORKS visible.
 - [ ] Submit the acceptance prompt in approval mode and confirm zero CAD commands execute before approval.
-- [ ] Approve and confirm native sketch, boss-extrude, hole cut, rebuild, and structured verification.
-- [ ] Save, close, reopen, rebuild, and re-verify the native `.SLDPRT` inside the workspace.
+- [x] Approve and confirm native sketch, boss-extrude, hole cut, rebuild, and structured verification.
+- [x] Save, close, reopen, rebuild, and re-verify the native `.SLDPRT` inside the workspace.
 - [ ] Repeat the complete acceptance workflow three times with new job IDs.
 - [ ] Submit “Make a plate with an M8 hole” and confirm clarification is required.
 - [ ] Run the acceptance prompt in Auto mode and re-confirm ambiguity and overwrite hard gates.
 - [ ] Search logs, SQLite, screenshots, and Git history for the test API-key prefix; confirm no match.
 
 ## V2 seam
+
+Evidence for completed PC checks is recorded in `windows-validation-2026-10-05.md`. The full visible integration suite, repeated workflows, live ambiguity/Auto-mode checks, and secret scan remain open. Remote control has its own pending physical checklist in `live-remote-windows-testing.md`.
 
 The desktop consumes only the versioned localhost HTTP/JSON job API. A future authenticated remote gateway can reuse that API and persistent job model without referencing SOLIDWORKS interop assemblies. V1 must remain bound to loopback only.

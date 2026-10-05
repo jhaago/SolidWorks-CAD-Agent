@@ -81,8 +81,9 @@ SECURITY
 
 - Never put an OpenAI API key in this folder, a JSON file, screenshots,
   logs, SQLite, or Git.
-- Configure the key through the Desktop credential control, which stores
-  it as a generic Windows Credential for SolidWorksCadAgent/OpenAI.
+- In Windows Credential Manager, add a Generic Credential with address
+  SolidWorksCadAgent/OpenAI, username OpenAI, and the API key as password.
+  Desktop Settings displays the credential target but does not edit keys.
 - The Agent Host listens only on 127.0.0.1.
 
 LIVE REMOTE WORKSTATION

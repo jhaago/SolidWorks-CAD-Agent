@@ -362,7 +362,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             CancellationToken cancellationToken)
         {
             var started = _utcNow();
-            var result = await _executor.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+            var result = await _executor.ExecuteAsync(new CadCommandEnvelope
+            {
+                Command = command.Command,
+                Parameters = command.Parameters,
+                ExecutionId = jobId
+            }, cancellationToken).ConfigureAwait(false);
             await _repository.AppendCommandAsync(new CommandExecutionRecord
             {
                 Id = Guid.NewGuid(),

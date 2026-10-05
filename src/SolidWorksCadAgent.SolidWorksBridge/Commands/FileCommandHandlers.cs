@@ -62,22 +62,21 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     ex.Message));
             }
 
-            var parent = Path.GetDirectoryName(resolvedPath);
-            if (!string.IsNullOrWhiteSpace(parent))
-            {
-                Directory.CreateDirectory(parent);
-            }
-
             return InvokeAsync(application =>
             {
 #if SOLIDWORKS_INTEROP
                 var swApp = application as SldWorks;
-                var model = swApp?.ActiveDoc as ModelDoc2;
+                var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                 {
                     return Failure("NO_ACTIVE_DOCUMENT", "Save", "No active SOLIDWORKS document is available to save.");
                 }
 
+                // Recheck on the STA after queueing, before creating directories or saving.
+                _workspacePolicy.ResolveForWrite(resolvedPath, allowOverwrite);
+                var parent = Path.GetDirectoryName(resolvedPath);
+                if (!string.IsNullOrWhiteSpace(parent)) Directory.CreateDirectory(parent);
+                _workspacePolicy.ResolveForWrite(resolvedPath, allowOverwrite);
                 model.ClearSelection2(true);
                 var errors = 0;
                 var warnings = 0;
@@ -164,6 +163,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
                 var errors = 0;
                 var warnings = 0;
+                _workspacePolicy.ResolveForRead(resolvedPath);
                 var model = swApp.OpenDoc6(
                     resolvedPath,
                     (int)swDocumentTypes_e.swDocPART,
@@ -181,6 +181,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                         string.Format("errors={0}; warnings={1}; path={2}", errors, warnings, resolvedPath));
                 }
 
+                BindDocument(model);
                 return Ok(new { path = resolvedPath, documentTitle = model.GetTitle(), errors, warnings });
 #else
                 return InteropUnavailable();
@@ -205,7 +206,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             {
 #if SOLIDWORKS_INTEROP
                 var swApp = application as SldWorks;
-                var model = swApp?.ActiveDoc as ModelDoc2;
+                var model = RequireDocument(application) as ModelDoc2;
                 if (swApp == null || model == null)
                 {
                     return Failure("NO_ACTIVE_DOCUMENT", "Close", "No active SOLIDWORKS document is available to close.");
@@ -213,6 +214,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
                 var title = model.GetTitle();
                 swApp.CloseDoc(title);
+                ClearDocument();
                 return Ok(new { documentTitle = title, closed = true });
 #else
                 return InteropUnavailable();
