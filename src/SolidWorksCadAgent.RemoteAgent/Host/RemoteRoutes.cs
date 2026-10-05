@@ -47,11 +47,13 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
         private RemoteResponse Frame(string token) {
             sessions.Status(token);
             var frame=capture.Capture();
+            var now=clock.UtcNow;
             if(frame==null || frame.Width<1 || frame.Height<1 || frame.Width>1600 || frame.Height>1600 || frame.DisplayGeneration<1 ||
                 frame.JpegBytes==null || frame.JpegBytes.Length==0 || frame.JpegBytes.Length>2097152 ||
                 !RemoteInputEvent.Coordinate(frame.CursorX) || !RemoteInputEvent.Coordinate(frame.CursorY) ||
-                clock.UtcNow-frame.CapturedAt>TimeSpan.FromSeconds(3) || frame.CapturedAt>clock.UtcNow.AddSeconds(1))
+                now-frame.CapturedAt>TimeSpan.FromSeconds(3) || frame.CapturedAt>now.AddSeconds(1))
                 throw Error(503,"display_unavailable","A current desktop image is unavailable. Check the Windows desktop.");
+            frame.AgeAtResponseMs=Math.Max(0,(long)(now-frame.CapturedAt).TotalMilliseconds);
             sessions.UpdateDisplayGeneration(frame.DisplayGeneration); sessions.Status(token);
             return Ok(frame);
         }

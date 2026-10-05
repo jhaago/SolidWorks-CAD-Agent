@@ -31,6 +31,8 @@ namespace SolidWorksCadAgent.Contracts.Remote
         public int Width { get; set; }
         public int Height { get; set; }
         public DateTimeOffset CapturedAt { get; set; }
+        // Server-side capture age; the phone adds its own monotonic request elapsed time.
+        public long AgeAtResponseMs { get; set; }
         public double CursorX { get; set; }
         public double CursorY { get; set; }
         public byte[] JpegBytes { get; set; }

@@ -19,22 +19,33 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
         private readonly IRemoteClock clock; private long frameId;
         private readonly Func<DesktopGeometry> geometrySource;
         private readonly Func<DesktopGeometry,RemoteCapturedFrame> imageSource;
+        private readonly Func<Rectangle> monitorBounds,desktopBounds;
+        private readonly Func<Rectangle,int> monitorDpi;
         public WindowsDesktopCapture(IRemoteClock clock) {this.clock=clock;}
         public WindowsDesktopCapture(IRemoteClock clock,Func<DesktopGeometry> geometrySource,Func<DesktopGeometry,RemoteCapturedFrame> imageSource) {
             this.clock=clock;this.geometrySource=geometrySource;this.imageSource=imageSource;
         }
+        public WindowsDesktopCapture(IRemoteClock clock,Func<Rectangle> monitorBounds,Func<Rectangle> desktopBounds,Func<Rectangle,int> monitorDpi) {
+            this.clock=clock;this.monitorBounds=monitorBounds;this.desktopBounds=desktopBounds;this.monitorDpi=monitorDpi;
+        }
         public DesktopGeometry Geometry() {
             lock(gate) {
                 if(geometrySource!=null)return geometrySource();
-                if(!DesktopAvailability.IsInteractive()) throw new InvalidOperationException("Unlock Windows and close secure desktop prompts.");
-                var monitor=Screen.PrimaryScreen.Bounds;var desktop=SystemInformation.VirtualScreen;
-                int dpi=96;try {dpi=(int)GetDpiForSystem();}catch(EntryPointNotFoundException){}
+                if(monitorBounds==null && !DesktopAvailability.IsInteractive()) throw new InvalidOperationException("Unlock Windows and close secure desktop prompts.");
+                var monitor=monitorBounds!=null?monitorBounds():Screen.PrimaryScreen.Bounds;
+                var desktop=desktopBounds!=null?desktopBounds():SystemInformation.VirtualScreen;
+                int dpi=monitorDpi!=null?monitorDpi(monitor):EffectiveMonitorDpi(monitor);
                 return new DesktopGeometry { Monitor=monitor,VirtualDesktop=desktop,Generation=tracker.Update(monitor,desktop,dpi) };
             }
         }
         public RemoteCapturedFrame Capture() {
                 var geometry=Geometry();
-                if(imageSource!=null)return imageSource(geometry);
+                var capturedAt=clock.UtcNow;
+                if(imageSource!=null) {
+                    var frame=imageSource(geometry);
+                    if(frame!=null) frame.CapturedAt=capturedAt;
+                    return frame;
+                }
                 var bounds=geometry.Monitor; var size=DesktopCoordinateMapper.Fit(bounds.Size);
                 using(var original=new Bitmap(bounds.Width,bounds.Height,PixelFormat.Format24bppRgb)) {
                     using(var graphics=Graphics.FromImage(original)) graphics.CopyFromScreen(bounds.Location,Point.Empty,bounds.Size,CopyPixelOperation.SourceCopy);
@@ -45,12 +56,19 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
                             scaled.Save(stream,ImageCodecInfo.GetImageEncoders().First(e=>e.FormatID==ImageFormat.Jpeg.Guid),parameters);
                             var after=Geometry(); if(after.Generation!=geometry.Generation)return null;
                             var cursor=Cursor.Position;
-                            return new RemoteCapturedFrame {FrameId=Interlocked.Increment(ref frameId),DisplayGeneration=geometry.Generation,Width=size.Width,Height=size.Height,CapturedAt=clock.UtcNow,
+                            return new RemoteCapturedFrame {FrameId=Interlocked.Increment(ref frameId),DisplayGeneration=geometry.Generation,Width=size.Width,Height=size.Height,CapturedAt=capturedAt,
                                 CursorX=Math.Max(0,Math.Min(1,(cursor.X-bounds.Left)/(double)Math.Max(1,bounds.Width-1))),CursorY=Math.Max(0,Math.Min(1,(cursor.Y-bounds.Top)/(double)Math.Max(1,bounds.Height-1))),JpegBytes=stream.ToArray()};
                         }
                     }
                 }
         }
-        [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
+        private static int EffectiveMonitorDpi(Rectangle bounds) {
+            var monitor=MonitorFromPoint(new Point(bounds.Left+bounds.Width/2,bounds.Top+bounds.Height/2),2);
+            if(monitor==IntPtr.Zero || GetDpiForMonitor(monitor,0,out var horizontal,out var vertical)!=0 || horizontal<1 || vertical<1)
+                throw new InvalidOperationException("Primary monitor scale is unavailable.");
+            return checked((int)horizontal);
+        }
+        [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(Point point,uint flags);
+        [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor,int dpiType,out uint horizontal,out uint vertical);
     }
 }
