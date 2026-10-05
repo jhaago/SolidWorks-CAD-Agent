@@ -17,9 +17,13 @@ See `docs/superpowers/specs/2026-09-22-solidworks-cad-agent-design.md` and the v
 - Approval required by default; approval is bound to the current persisted plan revision.
 - Whitelisted native CAD commands, fail-stop execution, programmatic verification, and SQLite history.
 - API credentials stored in Windows Credential Manager, never in repository configuration or SQLite.
-- The listener accepts only `http://127.0.0.1:53741/`; V2 remote access is not enabled.
+- The CAD listener accepts only `http://127.0.0.1:53741/`.
 
-Image interpretation, assemblies, drawings, arbitrary macros, and remote phone/tablet access are not enabled in V1.
+Image interpretation, assemblies, drawings and arbitrary macros are not enabled in V1.
+
+## Manual remote workstation test build
+
+The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. Live AI control is unavailable. See [setup and pending physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native SOLIDWORKS geometry acceptance remains pending on the SOLIDWORKS 2020 PC.
 
 ## Prerequisites
 

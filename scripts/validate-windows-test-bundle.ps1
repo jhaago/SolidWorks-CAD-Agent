@@ -27,7 +27,14 @@ try {
         "AgentHost\x64\SQLite.Interop.dll",
         "Desktop\SolidWorksCadAgent.Desktop.exe",
         "Desktop\Newtonsoft.Json.dll",
+        "RemoteAgent\SolidWorksCadAgent.RemoteAgent.exe",
+        "RemoteAgent\SolidWorksCadAgent.RemoteAgent.exe.config",
+        "RemoteAgent\SolidWorksCadAgent.Contracts.dll",
+        "RemoteAgent\SolidWorksCadAgent.Core.dll",
+        "RemoteAgent\Newtonsoft.Json.dll",
         "Setup\register-agent-host-url.ps1",
+        "Setup\register-remote-agent-url.ps1",
+        "LIVE-REMOTE.txt",
         "BUILD-CAPABILITY.txt",
         "START-HERE.txt"
     )
@@ -43,6 +50,12 @@ try {
     if ($missing.Count -gt 0) {
         throw "Windows test bundle is missing required files: $($missing -join ', ')"
     }
+    $remoteScript = Get-Content -LiteralPath (Join-Path $extractRoot "Setup\register-remote-agent-url.ps1") -Raw
+    if ($remoteScript -notmatch 'http://127\.0\.0\.1:5079/' -or $remoteScript -match 'http://[+*]') {
+        throw "Remote setup must reserve the fixed loopback prefix only."
+    }
+    $credentials = @(Get-ChildItem $extractRoot -Recurse -File | Where-Object { $_.Name -match '^(devices\.dat|remote-workstation-.*\.enc)$' })
+    if ($credentials.Count -gt 0) { throw "Windows test bundle contains device credentials." }
 
     $capability = (Get-Content -LiteralPath (Join-Path $extractRoot "BUILD-CAPABILITY.txt") -Raw).Trim()
     $allowedCapabilities = @(

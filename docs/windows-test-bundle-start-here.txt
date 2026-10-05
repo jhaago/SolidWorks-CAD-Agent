@@ -84,3 +84,12 @@ SECURITY
 - Configure the key through the Desktop credential control, which stores
   it as a generic Windows Credential for SolidWorksCadAgent/OpenAI.
 - The Agent Host listens only on 127.0.0.1.
+
+LIVE REMOTE WORKSTATION
+
+Read LIVE-REMOTE.txt for the separate manual remote-view/control setup.
+RemoteAgent\SolidWorksCadAgent.RemoteAgent.exe does not require SOLIDWORKS
+or an OpenAI key. It listens only on 127.0.0.1:5079. Tailscale Serve exposes
+that separate service using private HTTPS. Do not forward the CAD Agent
+Host on port 53741 and do not use Funnel or router port forwarding.
+The compile-only CAD capability does not prevent manual Remote testing.
