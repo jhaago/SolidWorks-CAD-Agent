@@ -95,6 +95,7 @@ namespace SolidWorksCadAgent.UnitTests
             var body = JObject.Parse(response.JsonBody);
             Assert.IsTrue((bool)body["isConnected"]);
             Assert.AreEqual("2020 SP0.0", (string)body["runtime"]["displayVersion"]);
+            Assert.AreEqual("Fixture.SLDPRT", (string)body["activeDocument"]);
         }
 
         [TestMethod]
@@ -630,6 +631,7 @@ namespace SolidWorksCadAgent.UnitTests
                     IsConnected = true,
                     IsRunning = true,
                     IsVisible = true,
+                    ActiveDocumentTitle = "Fixture.SLDPRT",
                     RuntimeInfo = new SolidWorksRuntimeInfo
                     {
                         DisplayVersion = "2020 SP0.0"
