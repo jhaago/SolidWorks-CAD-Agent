@@ -192,8 +192,31 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                 DispatcherThreadId = Thread.CurrentThread.ManagedThreadId,
                 RuntimeInfo = runtimeInfo,
                 Compatibility = compatibility,
+                ActiveDocumentTitle = ReadActiveDocumentTitle(),
                 ErrorMessage = null
             };
+        }
+
+        private string ReadActiveDocumentTitle()
+        {
+            ModelDoc2 document = null;
+            try
+            {
+                document = _application.IActiveDoc2;
+                return document?.GetTitle();
+            }
+            catch (COMException)
+            {
+                return null;
+            }
+            finally
+            {
+                if (document != null && Marshal.IsComObject(document))
+                {
+                    try { Marshal.ReleaseComObject(document); }
+                    catch { }
+                }
+            }
         }
 
         private void ReleaseApplicationCore()
@@ -250,6 +273,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                 DispatcherThreadId = Thread.CurrentThread.ManagedThreadId,
                 RuntimeInfo = null,
                 Compatibility = SolidWorksCompatibility.Evaluate(null),
+                ActiveDocumentTitle = null,
                 ErrorMessage = "SOLIDWORKS interop libraries were not available when this build was compiled."
             };
         }
@@ -265,6 +289,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                 DispatcherThreadId = Thread.CurrentThread.ManagedThreadId,
                 RuntimeInfo = null,
                 Compatibility = SolidWorksCompatibility.Evaluate(null),
+                ActiveDocumentTitle = null,
                 ErrorMessage = errorMessage
             };
         }
