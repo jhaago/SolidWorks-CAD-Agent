@@ -26,3 +26,13 @@ The updated builder was then run from a fresh output directory on this PC. Build
 - Initial native attempts crashed; a SOLIDWORKS crash report named CAMWorks. Testing subsequently succeeded after the CAM startup checkbox was cleared and SOLIDWORKS restarted. This isolates an environment interaction but does not establish the add-in's root cause.
 - Separate lifecycle integration and live remote-control tests were not verified in this session.
 - No merge to main.
+
+## Desktop Settings follow-up
+
+- Settings now loads actual Host values instead of fixed placeholders. Model and execution mode are editable; Save uses the existing settings API and preserves unedited fields.
+- Save displays Host errors and the required Host restart notice. Controls are disabled during requests; requests have a ten-second deadline and closing the form cancels pending requests. Writes are not retried automatically.
+- The user verified Real → Simulation → Real through Desktop Settings, including saving, restart notices and persistence after Host restarts.
+- The unavailable-model live check displayed HTTP 404, `invalid_request_error` and `model_not_found`; model changes require Host restart. Host stop/restart recovery and mode switching via API also passed.
+- Updated full unit suite outside the restricted environment: **195 passed, 0 failed, 0 skipped**. New client tests cover settings preservation, JSON PUT and restart information, plus readable Host errors.
+- Updated native bundle build and validation passed. Live native geometry was verified earlier; Settings does not change geometry commands.
+- The separate automation-launch lifecycle test failed second-session attachment even after 30 seconds and a UserControl experiment. Host attached to a manually launched instance but not that test-launched instance. Diagnostic test changes remain separate and are not part of the Settings change; the cause is unresolved.

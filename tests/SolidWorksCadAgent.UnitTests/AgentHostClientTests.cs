@@ -13,6 +13,41 @@ namespace SolidWorksCadAgent.UnitTests
     public class AgentHostClientTests
     {
         [TestMethod]
+        public async Task Settings_LoadAndSavePreserveUneditedFieldsAndRestartNotice()
+        {
+            var handler = new QueueHandler(
+                "{\"settings\":{\"executionMode\":\"Real\",\"openAiModel\":\"original\",\"workspaceRoot\":\"C:\\\\CAD\",\"autoMode\":false}}",
+                "{\"settings\":{\"executionMode\":\"Simulation\",\"openAiModel\":\"replacement\"},\"restartRequired\":true}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var loaded = await client.GetSettingsAsync(CancellationToken.None);
+                loaded.Settings["executionMode"] = "Simulation";
+                loaded.Settings["openAiModel"] = "replacement";
+                var saved = await client.UpdateSettingsAsync(loaded.Settings, CancellationToken.None);
+                Assert.IsTrue(saved.RestartRequired);
+                Assert.AreEqual("replacement", (string)saved.Settings["openAiModel"]);
+                Assert.AreEqual(HttpMethod.Put, handler.LastMethod);
+                Assert.AreEqual("application/json", handler.LastContentType);
+                StringAssert.EndsWith(handler.LastUri.AbsolutePath, "/settings");
+                var sent = Newtonsoft.Json.Linq.JObject.Parse(handler.LastBody);
+                Assert.AreEqual("C:\\CAD", (string)sent["workspaceRoot"]);
+                Assert.AreEqual(false, (bool)sent["autoMode"]);
+            }
+        }
+
+        [TestMethod]
+        public async Task Settings_HostFailureIsReportedWithoutRetryingSave()
+        {
+            using (var client = new AgentHostClient(new HttpClient(new InvalidErrorHandler(
+                "{\"error\":{\"message\":\"Execution mode cannot change while a nonterminal CAD job exists.\"}}"))))
+            {
+                var error = await Assert.ThrowsExceptionAsync<AgentHostApiException>(() =>
+                    client.UpdateSettingsAsync(new Newtonsoft.Json.Linq.JObject(), CancellationToken.None));
+                StringAssert.Contains(error.Message, "nonterminal CAD job");
+            }
+        }
+
+        [TestMethod]
         public async Task HealthAndStatus_UseLocalhostApiAndParseStronglyTypedResults()
         {
             var handler = new QueueHandler(
@@ -103,11 +138,15 @@ namespace SolidWorksCadAgent.UnitTests
             public Uri FirstUri { get; private set; }
             public Uri LastUri { get; private set; }
             public string LastBody { get; private set; }
+            public HttpMethod LastMethod { get; private set; }
+            public string LastContentType { get; private set; }
 
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 if (FirstUri == null) FirstUri = request.RequestUri;
                 LastUri = request.RequestUri;
+                LastMethod = request.Method;
+                LastContentType = request.Content?.Headers.ContentType?.MediaType;
                 LastBody = request.Content == null ? null : await request.Content.ReadAsStringAsync();
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
