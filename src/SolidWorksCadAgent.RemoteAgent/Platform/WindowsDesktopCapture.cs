@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 using SolidWorksCadAgent.Contracts.Remote;
 using SolidWorksCadAgent.Core.Remote;
@@ -32,7 +33,6 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
             }
         }
         public RemoteCapturedFrame Capture() {
-            lock(gate) {
                 var geometry=Geometry();
                 if(imageSource!=null)return imageSource(geometry);
                 var bounds=geometry.Monitor; var size=DesktopCoordinateMapper.Fit(bounds.Size);
@@ -45,12 +45,11 @@ namespace SolidWorksCadAgent.RemoteAgent.Platform
                             scaled.Save(stream,ImageCodecInfo.GetImageEncoders().First(e=>e.FormatID==ImageFormat.Jpeg.Guid),parameters);
                             var after=Geometry(); if(after.Generation!=geometry.Generation)return null;
                             var cursor=Cursor.Position;
-                            return new RemoteCapturedFrame {FrameId=++frameId,DisplayGeneration=geometry.Generation,Width=size.Width,Height=size.Height,CapturedAt=clock.UtcNow,
+                            return new RemoteCapturedFrame {FrameId=Interlocked.Increment(ref frameId),DisplayGeneration=geometry.Generation,Width=size.Width,Height=size.Height,CapturedAt=clock.UtcNow,
                                 CursorX=Math.Max(0,Math.Min(1,(cursor.X-bounds.Left)/(double)Math.Max(1,bounds.Width-1))),CursorY=Math.Max(0,Math.Min(1,(cursor.Y-bounds.Top)/(double)Math.Max(1,bounds.Height-1))),JpegBytes=stream.ToArray()};
                         }
                     }
                 }
-            }
         }
         [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
     }
