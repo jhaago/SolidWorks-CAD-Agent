@@ -10,6 +10,7 @@
   <ItemGroup>
     <Reference Include="System.Security" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
     <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
   </ItemGroup>
