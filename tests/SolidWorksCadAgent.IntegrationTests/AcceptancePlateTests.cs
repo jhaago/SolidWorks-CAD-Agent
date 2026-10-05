@@ -143,7 +143,7 @@ namespace SolidWorksCadAgent.IntegrationTests
             Assert.IsTrue(typeNames.Any(typeName => typeName == "Extrusion" || typeName == "Boss"),
                 "Expected a native boss/extrusion feature.");
             Assert.IsTrue(typeNames.Any(typeName => typeName == "Cut"),
-                "Expected a native cut-extrude feature.");
+                "Expected a native cut-extrude feature. Returned feature tree: " + features.ToString(Newtonsoft.Json.Formatting.None));
         }
 
         private static void AssertOverallBounds(JObject bounds, params double[] expected)
