@@ -60,6 +60,8 @@ namespace SolidWorksCadAgent.Core.Remote
                 }
                 if (string.IsNullOrWhiteSpace(name) || name.Length > 80 || name.Any(char.IsControl)) throw Error(400,"device_name","Enter a device name of 1–80 printable characters.");
                 requestId=Guid.NewGuid().ToString("N"); requestedName=name.Trim(); windowVerifier=null;
+                // Code entry and local approval have separate bounded windows.
+                expires=clock.UtcNow.AddMinutes(2);
                 var receipt=RemoteSecrets.New(secrets); receiptVerifier=RemoteSecrets.Hash(receipt);
                 return new PairingReceipt { RequestId=requestId, ReceiptSecret=receipt };
             }

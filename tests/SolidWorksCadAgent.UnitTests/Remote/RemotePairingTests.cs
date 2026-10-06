@@ -46,6 +46,28 @@ namespace SolidWorksCadAgent.UnitTests.Remote
             Assert.ThrowsException<RemoteProtocolException>(() => pairing.RequestPairing(window.Secret, "other"));
         }
         [TestMethod]
+        public void PairingRequestGetsFullApprovalWindowAfterCodeEntry()
+        {
+            var clock = new TestRemoteClock();
+            var pairing = new RemotePairingCoordinator(clock, new MemoryRemoteStore());
+            var window = pairing.OpenPairing();
+            clock.UtcNow += TimeSpan.FromSeconds(115);
+            var receipt = pairing.RequestPairing(window.Secret, "phone");
+            clock.UtcNow += TimeSpan.FromSeconds(100);
+            Assert.AreEqual("pending", pairing.Poll(receipt.RequestId, receipt.ReceiptSecret).State);
+            pairing.Approve(receipt.RequestId);
+            Assert.AreEqual("approved", pairing.Poll(receipt.RequestId, receipt.ReceiptSecret).State);
+        }
+        [TestMethod]
+        public void PairingApprovalStillExpiresTwoMinutesAfterRequest()
+        {
+            var clock = new TestRemoteClock();
+            var pairing = new RemotePairingCoordinator(clock, new MemoryRemoteStore());
+            var receipt = pairing.RequestPairing(pairing.OpenPairing().Secret, "phone");
+            clock.UtcNow += TimeSpan.FromMinutes(2);
+            Assert.ThrowsException<RemoteProtocolException>(() => pairing.Approve(receipt.RequestId));
+        }
+        [TestMethod]
         public void PairingRateLimitClosesWindowAfterFiveFailedAttempts()
         {
             var pairing = new RemotePairingCoordinator(new TestRemoteClock(), new MemoryRemoteStore());
