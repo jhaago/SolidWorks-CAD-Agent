@@ -65,6 +65,10 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 ["tools"] = new JArray(new JObject { ["type"] = "function", ["name"] = "interpret_design", ["description"] = "Return a design interpretation for human review; performs no CAD actions.", ["strict"] = true, ["parameters"] = Schema() }),
                 ["tool_choice"] = new JObject { ["type"] = "function", ["name"] = "interpret_design" }
             };
+            payload["instructions"] = (string)payload["instructions"] +
+                " MissingDimensions contains only dimensions necessary to define the nominal geometry or satisfy the user's stated design purpose. " +
+                "Unspecified manufacturing tolerances, surface finish, and material stay in Unknowns or Warnings unless required by the user's stated purpose. " +
+                "For a nominal geometry prototype, do not block design approval on optional manufacturing details or invent values for them.";
             using (var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
             operation.CancelAfter(_requestTimeout);

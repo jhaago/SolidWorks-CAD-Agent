@@ -113,6 +113,8 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse((bool)questionResolutionSchema["additionalProperties"]);
             CollectionAssert.AreEqual(new[] { "QuestionId", "Evidence" }, ((JArray)questionResolutionSchema["required"]).Values<string>().ToArray());
             StringAssert.Contains((string)payload["instructions"], "VERBATIM quoted Evidence");
+            StringAssert.Contains((string)payload["instructions"], "nominal geometry");
+            StringAssert.Contains((string)payload["instructions"], "unless required by the user's stated purpose");
             var content = (JArray)payload["input"][0]["content"];
             Assert.AreEqual(2, content.Count(c => (string)c["type"] == "input_image"));
             StringAssert.Contains((string)content[2]["image_url"], "data:image/png;base64,AQID");

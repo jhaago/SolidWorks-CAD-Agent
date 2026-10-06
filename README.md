@@ -4,6 +4,8 @@ AI-assisted native CAD automation for SOLIDWORKS.
 
 ## PC V2 development
 
+The image-design intake milestone is on `feature/v2-image-design-intake`, based on the newer local V2 line. Open **Image / Design Intake** in the desktop app to attach PNG/JPEG references, hold an engineering clarification conversation, inspect revisioned Design Briefs and approve the current brief. **Create CAD Plan** then enters the existing job workflow; **Approve Build** remains a separate mandatory action even in Auto Mode. Discussion has no CAD execution capability. See [usage, architecture, security and roadmap](docs/image-design-intake.md).
+
 The first V2 increment adds Desktop clarification revisions and navigable persisted job history, plus native `AddLine` and `AddArc` sketch commands for custom profiles. On the SOLIDWORKS 2020 PC, the new line/arc profile passed geometry and save/reopen acceptance alongside the existing plate and document-safety regressions. See [V2 design](docs/superpowers/specs/2026-10-06-pc-agent-v2-design.md) and [validation and remaining boundaries](docs/windows-validation-v2-2026-10-06.md).
 
 Further stages cover dimensions/relations, fillets/chamfers, patterns/revolve and safe native model edits. Android development is outside this PC milestone. Simulation does not verify solids made from custom line/arc profiles; use native execution for those profiles.
@@ -28,7 +30,7 @@ Image interpretation, assemblies, drawings and arbitrary macros are not enabled 
 
 ## Manual remote workstation test build
 
-The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. Live AI control is unavailable. See [setup and pending physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native plate and millimetre-scale acceptance passed on the SOLIDWORKS 2020 PC; see [Windows validation](docs/windows-validation-2026-10-05.md). Live remote acceptance remains pending.
+The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. V2 also provides authenticated paired job submission, status, approval, revisions, completion and bounded native artifact download. Android UI availability depends on the companion build. Image-design intake remains desktop/loopback-only in this milestone. See [setup and physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native plate and millimetre-scale acceptance passed on the SOLIDWORKS 2020 PC; see [Windows validation](docs/windows-validation-2026-10-05.md).
 
 ## Prerequisites
 
