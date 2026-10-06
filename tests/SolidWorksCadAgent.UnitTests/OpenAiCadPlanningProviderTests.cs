@@ -59,6 +59,8 @@ namespace SolidWorksCadAgent.UnitTests
             CollectionAssert.Contains(commandSchema["enum"].Values<string>().ToArray(), CadCommandNames.AddRectangle);
             StringAssert.Contains((string)request["instructions"], "widthMm");
             StringAssert.Contains((string)request["instructions"], "ThroughAll");
+            StringAssert.Contains((string)request["instructions"], "normal to the sketch");
+            StringAssert.Contains((string)request["instructions"], "create missing folders");
         }
 
         [TestMethod]

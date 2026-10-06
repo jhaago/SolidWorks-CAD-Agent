@@ -31,6 +31,31 @@ namespace SolidWorksCadAgent.UnitTests.Remote
         }
 
         [TestMethod]
+        public void LifecycleRequiresSessionAndForwardsOnlyValidatedCurrentRevisionPayload()
+        {
+            var fixture = new SessionFixture();
+            string forwardedPath = null, forwardedBody = null;
+            var routes = CreateRoutes(fixture, (method, path, body) =>
+            { forwardedPath = path; forwardedBody = body; return new RemoteResponse { Status = 202, Body = "{}" }; });
+            var id = Guid.NewGuid();
+            var revision = Guid.NewGuid();
+            var body = new JObject { ["revisionId"] = revision.ToString(), ["instructions"] = "Wider", ["allowOverwrite"] = true }.ToString();
+            foreach (var action in new[] { "approve", "request-changes", "complete", "artifact" })
+            {
+                Assert.AreEqual(401, routes.Handle(Request("agent/jobs/" + id + "/" + action, method: action == "artifact" ? "GET" : "POST", body: body)).Status);
+                Assert.IsNull(forwardedPath);
+            }
+            Assert.AreEqual(400, routes.Handle(Request("agent/jobs/" + id + "/approve", fixture.Grant.SessionToken, body: "{}")).Status);
+            Assert.IsNull(forwardedPath);
+            Assert.AreEqual(202, routes.Handle(Request("agent/jobs/" + id + "/request-changes", fixture.Grant.SessionToken, body: body)).Status);
+            Assert.AreEqual("jobs/" + id + "/request-changes", forwardedPath);
+            var payload = JObject.Parse(forwardedBody);
+            Assert.AreEqual(revision.ToString(), (string)payload["revisionId"]);
+            Assert.AreEqual("Wider", (string)payload["instructions"]);
+            Assert.IsNull(payload["allowOverwrite"]);
+        }
+
+        [TestMethod]
         public void AgentStatusRequiresAValidRemoteSessionBeforeProxying()
         {
             var fixture = new SessionFixture();

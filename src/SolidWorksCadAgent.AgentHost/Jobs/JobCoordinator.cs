@@ -54,6 +54,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             _stateMachine = new JobStateMachine(_utcNow);
         }
 
+        public string WorkspaceRoot => _settings.WorkspaceRoot;
+
         public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken)
         {
             var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
@@ -68,30 +70,32 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             try
             {
                 var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
-                var receipt = await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
-                var work = Task.Run(async () =>
-                {
-                    try { await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false); }
-                    catch
-                    {
-                        // Errors are observable through the durable job, never an unobserved task exception.
-                        await FailIfCurrentAsync(job.Id, JobState.New, CancellationToken.None).ConfigureAwait(false);
-                        await FailIfCurrentAsync(job.Id, JobState.Interpreting, CancellationToken.None).ConfigureAwait(false);
-                        await FailIfCurrentAsync(job.Id, JobState.Approved, CancellationToken.None).ConfigureAwait(false);
-                        await FailIfCurrentAsync(job.Id, JobState.Executing, CancellationToken.None).ConfigureAwait(false);
-                        await FailIfCurrentAsync(job.Id, JobState.Verifying, CancellationToken.None).ConfigureAwait(false);
-                    }
-                    finally { _submissionSlots.Release(); }
-                });
-                lock (_submittedSync) _submitted.Add(work);
-                _ = work.ContinueWith(completed =>
-                {
-                    var observed = completed.Exception;
-                    lock (_submittedSync) _submitted.Remove(completed);
-                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                var receipt = await SnapshotAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+                TrackBackground(job.Id, () => PlanCreatedJobAsync(job, cancellationToken));
                 return receipt;
             }
             catch { _submissionSlots.Release(); throw; }
+        }
+
+        // All remote lifecycle work shares the same bounded queue and host shutdown drain.
+        private void TrackBackground(Guid jobId, Func<Task<JobSnapshot>> action)
+        {
+            var work = Task.Run(async () =>
+            {
+                try { await action().ConfigureAwait(false); }
+                catch
+                {
+                    foreach (var state in new[] { JobState.New, JobState.Interpreting, JobState.Approved, JobState.Executing, JobState.Verifying })
+                        await FailIfCurrentAsync(jobId, state, CancellationToken.None).ConfigureAwait(false);
+                }
+                finally { _submissionSlots.Release(); }
+            });
+            lock (_submittedSync) _submitted.Add(work);
+            _ = work.ContinueWith(completed =>
+            {
+                var observed = completed.Exception;
+                lock (_submittedSync) _submitted.Remove(completed);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         public Task WaitForSubmittedJobsAsync()
@@ -190,10 +194,21 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<JobSnapshot> ApproveAndExecuteAsync(
-            Guid jobId,
-            Guid revisionId,
-            CancellationToken cancellationToken)
+        public Task<JobSnapshot> ApproveAndExecuteAsync(Guid jobId, Guid revisionId, CancellationToken cancellationToken) =>
+            ApproveAsync(jobId, revisionId, cancellationToken, false);
+
+        public Task<JobSnapshot> EnqueueApprovalAsync(Guid jobId, Guid revisionId, CancellationToken cancellationToken) =>
+            WithBackgroundSlotAsync(() => ApproveAsync(jobId, revisionId, cancellationToken, true));
+
+        private async Task<JobSnapshot> WithBackgroundSlotAsync(Func<Task<JobSnapshot>> prepare)
+        {
+            if (!_submissionSlots.Wait(0))
+                throw new JobCoordinatorException("SUBMISSION_BUSY", "Four lifecycle operations are already pending. Wait for work to finish.");
+            try { return await prepare().ConfigureAwait(false); }
+            catch { _submissionSlots.Release(); throw; }
+        }
+
+        private async Task<JobSnapshot> ApproveAsync(Guid jobId, Guid revisionId, CancellationToken cancellationToken, bool enqueue)
         {
             var snapshot = await SnapshotAsync(jobId, cancellationToken).ConfigureAwait(false);
             if (snapshot == null)
@@ -212,17 +227,29 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 throw new JobCoordinatorException("INVALID_PLAN", "The persisted CAD plan could not be loaded.");
             plan = NormalizePlan(plan);
 
-            if (!await TransitionAsync(snapshot.Job, JobState.Approved, cancellationToken).ConfigureAwait(false))
+            if (!await TransitionAsync(snapshot.Job, JobState.Approved, cancellationToken, revisionId).ConfigureAwait(false))
                 throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while approval was being processed.");
 
+            if (enqueue)
+            {
+                var receipt = await SnapshotAsync(jobId, CancellationToken.None).ConfigureAwait(false);
+                TrackBackground(jobId, () => ExecuteApprovedAsync(snapshot.Job, revision, plan, cancellationToken));
+                return receipt;
+            }
             return await ExecuteApprovedAsync(snapshot.Job, revision, plan, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<JobSnapshot> RequestChangesAsync(
+        public Task<JobSnapshot> RequestChangesAsync(Guid jobId, Guid expectedRevisionId, string instructions, CancellationToken cancellationToken) =>
+            ChangeAsync(jobId, expectedRevisionId, instructions, cancellationToken, false);
+
+        public Task<JobSnapshot> EnqueueChangesAsync(Guid jobId, Guid expectedRevisionId, string instructions, CancellationToken cancellationToken) =>
+            WithBackgroundSlotAsync(() => ChangeAsync(jobId, expectedRevisionId, instructions, cancellationToken, true));
+
+        private async Task<JobSnapshot> ChangeAsync(
             Guid jobId,
             Guid expectedRevisionId,
             string instructions,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, bool enqueue)
         {
             if (string.IsNullOrWhiteSpace(instructions))
                 throw new JobCoordinatorException("INSTRUCTIONS_REQUIRED", "Change instructions are required.");
@@ -234,10 +261,30 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var currentRevision = snapshot.Revisions.OrderBy(item => item.RevisionNumber).LastOrDefault();
             if (currentRevision == null || currentRevision.Id != expectedRevisionId)
                 throw new JobCoordinatorException("STALE_PLAN", "The requested changes do not target the current CAD job revision.");
-            if (snapshot.Job.State != JobState.AwaitingApproval && snapshot.Job.State != JobState.AwaitingClarification)
-                throw new JobCoordinatorException("INVALID_JOB_STATE", "Changes can only be requested before CAD execution.");
+            if (snapshot.Job.State != JobState.AwaitingApproval && snapshot.Job.State != JobState.AwaitingClarification && snapshot.Job.State != JobState.ReadyForReview)
+                throw new JobCoordinatorException("INVALID_JOB_STATE", "Changes require a pending plan or a result ready for review.");
 
-            var expectedState = snapshot.Job.State;
+            var rebuildResult = snapshot.Job.State == JobState.ReadyForReview ||
+                snapshot.Commands.Any(command => command.Success && command.CommandName == CadCommandNames.NewPart);
+            if (rebuildResult)
+                instructions += "\nBuild a complete replacement in a NEW part, leaving the previous result untouched. Save a separate revision file without overwrite.";
+
+            if (!await TransitionAsync(snapshot.Job, JobState.Interpreting, cancellationToken, expectedRevisionId).ConfigureAwait(false))
+                throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while revision was being requested.");
+            if (enqueue)
+            {
+                var receipt = await SnapshotAsync(jobId, CancellationToken.None).ConfigureAwait(false);
+                TrackBackground(jobId, () => ReplanAsync(snapshot, expectedRevisionId, instructions, cancellationToken, rebuildResult));
+                return receipt;
+            }
+            return await ReplanAsync(snapshot, expectedRevisionId, instructions, cancellationToken, rebuildResult).ConfigureAwait(false);
+        }
+
+        private async Task<JobSnapshot> ReplanAsync(JobSnapshot snapshot, Guid expectedRevisionId, string instructions, CancellationToken cancellationToken, bool rebuildResult = false)
+        {
+            var jobId = snapshot.Job.Id;
+            var currentRevision = snapshot.Revisions.OrderBy(item => item.RevisionNumber).Last();
+            var expectedState = JobState.Interpreting;
             var trimmedInstructions = instructions.Trim();
             var clarifications = snapshot.Revisions
                 .OrderBy(item => item.RevisionNumber)
@@ -263,11 +310,30 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
 
             plan = NormalizePlan(plan);
+            if (rebuildResult)
+            {
+                if (plan.ProposedCommands.FirstOrDefault()?.Command != CadCommandNames.NewPart)
+                    plan.Ambiguities.Add("A revised result must start with NewPart to preserve the previous result.");
+                if (plan.ProposedCommands.Any(command => command.Command == CadCommandNames.OpenPart))
+                    plan.Ambiguities.Add("A replacement result cannot open an existing part; build it entirely in the new part.");
+                if (!plan.ProposedCommands.Any(command => command.Command == CadCommandNames.SavePart))
+                    plan.Ambiguities.Add("A replacement result must save a separate native part file.");
+                foreach (var save in plan.ProposedCommands.Where(command => command.Command == CadCommandNames.SavePart))
+                {
+                    var path = (string)save.Parameters["path"];
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        var extension = System.IO.Path.GetExtension(path);
+                        save.Parameters["path"] = path.Substring(0, path.Length - extension.Length) + "-r" + (currentRevision.RevisionNumber + 1) + "-" + jobId.ToString("N").Substring(0, 8) + extension;
+                        save.Parameters["allowOverwrite"] = false;
+                    }
+                }
+                plan.Assumptions.Add("The revised result is created as a separate part and file; the previous result remains unchanged.");
+            }
             foreach (var ambiguity in ValidatePlan(plan))
                 plan.Ambiguities.Add(ambiguity);
 
             var job = snapshot.Job;
-            _stateMachine.Transition(job, JobState.Interpreting);
             job.PlanValidated = plan.Ambiguities.Count == 0 && plan.ProposedCommands.Count > 0;
             job.HasUnresolvedAmbiguity = plan.Ambiguities.Count > 0;
             job.AmbiguityMessage = job.HasUnresolvedAmbiguity ? string.Join(Environment.NewLine, plan.Ambiguities) : null;
@@ -442,11 +508,11 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             return result;
         }
 
-        private async Task<bool> TransitionAsync(CadJob job, JobState nextState, CancellationToken cancellationToken)
+        private async Task<bool> TransitionAsync(CadJob job, JobState nextState, CancellationToken cancellationToken, Guid? revisionId = null)
         {
             var expected = job.State;
             _stateMachine.Transition(job, nextState);
-            return await _repository.TryUpdateFromStateAsync(job, expected, cancellationToken).ConfigureAwait(false);
+            return await _repository.TryUpdateFromStateAsync(job, expected, cancellationToken, revisionId).ConfigureAwait(false);
         }
 
         private async Task FailIfCurrentAsync(Guid jobId, JobState expectedState, CancellationToken cancellationToken)

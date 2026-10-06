@@ -61,6 +61,7 @@ namespace SolidWorksCadAgent.Core.Jobs
                 },
                 [JobState.ReadyForReview] = new HashSet<JobState>
                 {
+                    JobState.Interpreting,
                     JobState.Completed,
                     JobState.Failed
                 },

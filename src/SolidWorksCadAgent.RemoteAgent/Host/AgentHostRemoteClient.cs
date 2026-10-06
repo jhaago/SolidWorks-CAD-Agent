@@ -25,7 +25,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             client = new HttpClient(handler)
             {
                 BaseAddress = BaseAddress,
-                Timeout = TimeSpan.FromMilliseconds(750)
+                Timeout = System.Threading.Timeout.InfiniteTimeSpan
             };
         }
 
@@ -36,11 +36,13 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                 if (method == "GET" && path == "status") return BuildStatus();
                 if (method == "POST" && path == "jobs") return Send("POST", "jobs/submit", body);
 
-                Guid id;
-                if (TryJobPath(path, out id, out var cancel))
+                if (TryJobPath(path, out var id, out var action))
                 {
-                    if (!cancel && method == "GET") return Send("GET", "jobs/" + id.ToString("D"), null);
-                    if (cancel && method == "POST") return Send("POST", "jobs/" + id.ToString("D") + "/cancel", "{}");
+                    if (method == "GET" && (action == null || action == "artifact"))
+                        return Send("GET", "jobs/" + id.ToString("D") + (action == null ? "" : "/artifact"), null);
+                    if (method == "POST" && action != null && action != "artifact")
+                        return Send("POST", "jobs/" + id.ToString("D") + "/" + action +
+                            (action == "approve" || action == "request-changes" ? "-submit" : ""), body);
                 }
 
                 return Json(404, new { code = "route_unavailable", message = "This CAD Agent route is unavailable remotely." });
@@ -121,10 +123,11 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 
         private async Task<RemoteResponse> SendAsync(string method, string path, string body)
         {
+            using (var deadline = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(path.EndsWith("/artifact", StringComparison.Ordinal) ? 15000 : 750)))
             using (var request = new HttpRequestMessage(method == "GET" ? HttpMethod.Get : HttpMethod.Post, path))
             {
                 if (method == "POST") request.Content = new StringContent(body ?? "{}", Encoding.UTF8, "application/json");
-                using (var response = await client.SendAsync(request).ConfigureAwait(false))
+                using (var response = await client.SendAsync(request, deadline.Token).ConfigureAwait(false))
                 {
                     var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (string.IsNullOrWhiteSpace(responseBody)) responseBody = "{}";
@@ -134,19 +137,15 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             }
         }
 
-        private static bool TryJobPath(string path, out Guid id, out bool cancel)
+        private static bool TryJobPath(string path, out Guid id, out string action)
         {
             id = Guid.Empty;
-            cancel = false;
-            const string prefix = "jobs/";
-            if (path == null || !path.StartsWith(prefix, StringComparison.Ordinal)) return false;
-            var tail = path.Substring(prefix.Length);
-            if (tail.EndsWith("/cancel", StringComparison.Ordinal))
-            {
-                cancel = true;
-                tail = tail.Substring(0, tail.Length - 7);
-            }
-            return Guid.TryParse(tail, out id);
+            action = null;
+            var parts = (path ?? "").Split('/');
+            if ((parts.Length != 2 && parts.Length != 3) || parts[0] != "jobs" || !Guid.TryParse(parts[1], out id)) return false;
+            if (parts.Length == 2) return true;
+            action = parts[2];
+            return action == "cancel" || action == "approve" || action == "request-changes" || action == "complete" || action == "artifact";
         }
 
         private static bool Terminal(string state) =>

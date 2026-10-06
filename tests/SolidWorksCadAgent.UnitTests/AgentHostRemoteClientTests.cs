@@ -24,6 +24,35 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public void Lifecycle_ForwardsValidatedRevisionPayloadAndArtifactRead()
+        {
+            using (var client = new AgentHostRemoteClient(new UnattachedHandler()))
+            {
+                var id = Guid.NewGuid().ToString("D");
+                foreach (var action in new[] { "approve", "request-changes", "complete" })
+                    Assert.AreEqual(200, client.Forward("POST", "jobs/" + id + "/" + action, "{}").Status);
+                Assert.AreEqual(200, client.Forward("GET", "jobs/" + id + "/artifact", null).Status);
+                Assert.AreEqual(404, client.Forward("POST", "jobs/" + id + "/delete", "{}").Status);
+            }
+        }
+
+        [TestMethod]
+        public void Artifact_UsesLongerBoundedTransferDeadlineThanStatus()
+        {
+            using (var client = new AgentHostRemoteClient(new SlowArtifactHandler()))
+                Assert.AreEqual(200, client.Forward("GET", "jobs/" + Guid.NewGuid() + "/artifact", null).Status);
+        }
+
+        private sealed class SlowArtifactHandler : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                await Task.Delay(1000, token);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+        }
+
         private sealed class BusyCadHandler : HttpMessageHandler
         {
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)

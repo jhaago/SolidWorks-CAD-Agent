@@ -115,6 +115,68 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(submitted.Job.Id)).State);
         }
 
+        [TestMethod]
+        public async Task EnqueueApproval_PersistsApprovedBeforeBlockedExecutionAndDrainsFailure()
+        {
+            var executor = new PendingExecutor();
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation });
+            var planned = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var receipt = await coordinator.EnqueueApprovalAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.Approved, receipt.Job.State);
+            Assert.AreEqual(executor.Started.Task, await Task.WhenAny(executor.Started.Task, Task.Delay(2000)));
+            executor.Result.TrySetException(new InvalidOperationException("execution failure"));
+            await coordinator.WaitForSubmittedJobsAsync();
+            Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(planned.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task EnqueueChanges_PersistsInterpretingAndRejectsApprovalDuringReplan()
+        {
+            var planned = await CreateCoordinator(new SimulatedCadCommandExecutor(), false).CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var planner = new PendingPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(), new AgentSettings());
+            var receipt = await coordinator.EnqueueChangesAsync(planned.Job.Id, planned.Revisions.Single().Id, "Make it wider", CancellationToken.None);
+            Assert.AreEqual(JobState.Interpreting, receipt.Job.State);
+            try
+            {
+                await coordinator.EnqueueApprovalAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
+                Assert.Fail("Cannot approve while revision is planning");
+            }
+            catch (JobCoordinatorException ex) { Assert.AreEqual("INVALID_JOB_STATE", ex.Code); }
+            planner.Result.TrySetResult(await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None));
+            await coordinator.WaitForSubmittedJobsAsync();
+            var revised = await _repository.GetSnapshotAsync(planned.Job.Id);
+            Assert.AreEqual(2, revised.Revisions.Count);
+            Assert.AreEqual(JobState.AwaitingApproval, revised.Job.State);
+        }
+
+        [TestMethod]
+        public async Task EnqueueChanges_CancellationNeverRestoresApprovalOrAppendsRevision()
+        {
+            var planned = await CreateCoordinator(new SimulatedCadCommandExecutor(), false).CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var planner = new PendingPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(), new AgentSettings());
+            await coordinator.EnqueueChangesAsync(planned.Job.Id, planned.Revisions.Single().Id, "Wider", CancellationToken.None);
+            await planner.Started.Task;
+            var job = await _repository.GetAsync(planned.Job.Id);
+            new SolidWorksCadAgent.Core.Jobs.JobStateMachine().Transition(job, JobState.Cancelled);
+            Assert.IsTrue(await _repository.TryUpdateFromStateAsync(job, JobState.Interpreting));
+            planner.Result.TrySetResult(await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None));
+            await coordinator.WaitForSubmittedJobsAsync();
+            var final = await _repository.GetSnapshotAsync(job.Id);
+            Assert.AreEqual(JobState.Cancelled, final.Job.State);
+            Assert.AreEqual(1, final.Revisions.Count);
+        }
+
+        private sealed class PendingExecutor : ICadCommandExecutor
+        {
+            public readonly TaskCompletionSource<bool> Started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<CadCommandResult> Result = new TaskCompletionSource<CadCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token)
+            { Started.TrySetResult(true); return Result.Task; }
+        }
+
         private sealed class ThrowingExecutor : ICadCommandExecutor
         {
             public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token) =>
@@ -276,6 +338,34 @@ namespace SolidWorksCadAgent.UnitTests
             catch
             {
             }
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_AfterReviewRebuildsNewPartWithSeparateSavePathAndApproval()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var savedPlan = await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None);
+            savedPlan.ProposedCommands.Add(new CadCommandEnvelope { Command = CadCommandNames.SavePart,
+                Parameters = JObject.FromObject(new { path = "phone-tests/Plate.sldprt", allowOverwrite = false }) });
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(savedPlan), executor, new AgentSettings { ExecutionMode = ExecutionMode.Simulation });
+            var first = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var built = await coordinator.ApproveAndExecuteAsync(first.Job.Id, first.Revisions.Single().Id, CancellationToken.None);
+            var count = executor.CallCount;
+            var revised = await coordinator.RequestChangesAsync(first.Job.Id, built.Revisions.Last().Id, "Make a revised version", CancellationToken.None);
+            Assert.AreEqual(JobState.AwaitingApproval, revised.Job.State);
+            Assert.AreEqual(count, executor.CallCount);
+            var plan = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(revised.Revisions.Last().PlanJson);
+            Assert.AreEqual(CadCommandNames.NewPart, plan.ProposedCommands.First().Command);
+            var oldPlan = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(first.Revisions.Single().PlanJson);
+            Assert.AreNotEqual((string)oldPlan.ProposedCommands.Single(c => c.Command == CadCommandNames.SavePart).Parameters["path"],
+                (string)plan.ProposedCommands.Single(c => c.Command == CadCommandNames.SavePart).Parameters["path"]);
+            Assert.IsFalse((bool)plan.ProposedCommands.Single(c => c.Command == CadCommandNames.SavePart).Parameters["allowOverwrite"]);
+            savedPlan.ProposedCommands.Insert(1, new CadCommandEnvelope { Command = CadCommandNames.OpenPart,
+                Parameters = JObject.FromObject(new { path = "phone-tests/Plate.sldprt" }) });
+            var unsafeRevision = await coordinator.RequestChangesAsync(first.Job.Id, revised.Revisions.Last().Id, "Keep changing this revision", CancellationToken.None);
+            Assert.AreEqual(JobState.AwaitingClarification, unsafeRevision.Job.State);
+            StringAssert.Contains(unsafeRevision.Job.AmbiguityMessage, "cannot open an existing part");
+            Assert.AreEqual(count, executor.CallCount);
         }
 
         private const string AcceptancePrompt =

@@ -6,7 +6,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 {
     public static class RemoteRequestPolicy
     {
-        public const int BodyLimit=65536, FrameResponseLimit=3145728;
+        public const int BodyLimit=65536, FrameResponseLimit=3145728, ArtifactResponseLimit=6291456;
         public static bool IsAllowedPrefix(Uri uri) => uri!=null && uri.IsAbsoluteUri && uri.Scheme=="http" &&
             uri.Host=="127.0.0.1" && uri.Port>=1024 && uri.AbsolutePath=="/" &&
             string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment);

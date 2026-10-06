@@ -53,7 +53,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                 Guid agentJobId;
                 string agentJobAction;
                 var isAgentJob = TryParseAgentJobPath(path, out agentJobId, out agentJobAction);
-                var get = path == "display/frame" || path == "session/status" || path == "agent/status" || (isAgentJob && agentJobAction == null);
+                var get = path == "display/frame" || path == "session/status" || path == "agent/status" || (isAgentJob && (agentJobAction == null || agentJobAction == "artifact"));
                 if (request.Method != (get ? "GET" : "POST"))
                     throw Error(405, "method_unavailable", "This request method is unsupported.");
                 if (!RemoteRequestPolicy.IsBodyBounded(request.Body ?? ""))
@@ -91,8 +91,11 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                     default:
                         if (isAgentJob)
                         {
-                            var upstreamPath = "jobs/" + agentJobId.ToString("D") + (agentJobAction == "cancel" ? "/cancel" : "");
-                            return ProxyAgent(Token(request, "Session"), agentJobAction == null ? "GET" : "POST", upstreamPath, agentJobAction == null ? "" : "{}");
+                            var upstreamPath = "jobs/" + agentJobId.ToString("D") + (agentJobAction == null ? "" : "/" + agentJobAction);
+                            var sessionToken = Token(request, "Session");
+                            sessions.Status(sessionToken);
+                            var body = LifecycleBody(request, agentJobAction);
+                            return ProxyAgent(sessionToken, get ? "GET" : "POST", upstreamPath, body);
                         }
                         throw Error(404, "route_unavailable", "This remote route is unavailable.");
                 }
@@ -119,7 +122,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 
             var response = agentProxy(method, path, body ?? "");
             if (response == null || response.Status < 100 || response.Status > 599 || response.Body == null ||
-                Encoding.UTF8.GetByteCount(response.Body) > RemoteRequestPolicy.FrameResponseLimit)
+                Encoding.UTF8.GetByteCount(response.Body) > (path.EndsWith("/artifact", StringComparison.Ordinal) ? RemoteRequestPolicy.ArtifactResponseLimit : RemoteRequestPolicy.FrameResponseLimit))
                 throw Error(503, "agent_host_invalid", "The CAD Agent Host returned an invalid response.");
 
             try { JToken.Parse(response.Body); }
@@ -137,24 +140,29 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             return prompt;
         }
 
+        private static string LifecycleBody(RemoteRequest request, string action)
+        {
+            if (action == null || action == "artifact") return "";
+            if (action == "cancel" || action == "complete") return "{}";
+            var payload = JObject.Parse(request.Body ?? "{}");
+            if (payload["revisionId"]?.Type != JTokenType.String || !Guid.TryParse((string)payload["revisionId"], out var revision))
+                throw Error(400, "revision_required", "The current revisionId is required.");
+            if (action == "approve") return JsonConvert.SerializeObject(new { revisionId = revision });
+            var instructions = payload["instructions"]?.Type == JTokenType.String ? ((string)payload["instructions"]).Trim() : null;
+            if (string.IsNullOrEmpty(instructions) || instructions.Length > 2000)
+                throw Error(400, "instructions_invalid", "Enter change instructions of 1–2000 characters.");
+            return JsonConvert.SerializeObject(new { revisionId = revision, instructions });
+        }
+
         private static bool TryParseAgentJobPath(string path, out Guid id, out string action)
         {
             id = Guid.Empty;
             action = null;
-            const string prefix = "agent/jobs/";
-            if (!path.StartsWith(prefix, StringComparison.Ordinal)) return false;
-            var tail = path.Substring(prefix.Length);
-            if (tail.EndsWith("/cancel", StringComparison.Ordinal))
-            {
-                action = "cancel";
-                tail = tail.Substring(0, tail.Length - 7);
-            }
-            if (!Guid.TryParse(tail, out id))
-            {
-                action = null;
-                return false;
-            }
-            return true;
+            var parts = path.Split('/');
+            if ((parts.Length != 3 && parts.Length != 4) || parts[0] != "agent" || parts[1] != "jobs" || !Guid.TryParse(parts[2], out id)) return false;
+            if (parts.Length == 3) return true;
+            action = parts[3];
+            return action == "cancel" || action == "approve" || action == "request-changes" || action == "complete" || action == "artifact";
         }
 
         private RemoteResponse Frame(string token)

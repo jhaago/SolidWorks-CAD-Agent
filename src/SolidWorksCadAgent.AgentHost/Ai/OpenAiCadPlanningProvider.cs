@@ -145,7 +145,7 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 ["model"] = _model,
                 ["store"] = false,
                 ["parallel_tool_calls"] = false,
-                ["instructions"] = "Interpret the engineering request into a safe proposed CAD plan. Do not claim the model has been built. List every unresolved ambiguity. Use millimetres. Return the plan only through propose_cad_plan.\n\n" + CadPlanningCommandContract.ProtocolDescription,
+                ["instructions"] = "Interpret the engineering request into a safe proposed CAD plan. Do not claim the model has been built. List unresolved engineering ambiguities that materially affect geometry or safety. Use millimetres. For a normal extrusion, assume a one-direction blind extrusion normal to the sketch unless the user asks for another end condition; record that assumption instead of asking. Resolve relative save paths beneath the configured workspace and create missing folders; folder creation is an assumption, not a clarification. Never ask the user to select an absolute workspace path for a relative save. Ask when dimensions or placement are missing or contradictory, or an existing file requires overwrite authorization. Return the plan only through propose_cad_plan.\n\n" + CadPlanningCommandContract.ProtocolDescription,
                 ["input"] = input,
                 ["tools"] = new JArray(BuildPlanTool()),
                 ["tool_choice"] = new JObject

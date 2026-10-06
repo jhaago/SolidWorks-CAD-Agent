@@ -46,6 +46,52 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task Artifact_ReadsOnlySuccessfulJobOwnedNativeSaveInsideWorkspace()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "CAD-artifact-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var file = Path.Combine(root, "plate.sldprt");
+            File.WriteAllBytes(file, new byte[] { 1, 2, 3 });
+            var job = new CadJob { Id = Guid.NewGuid(), Prompt = "plate", State = JobState.ReadyForReview, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow };
+            await _repository.CreateAsync(job);
+            await _repository.AppendRevisionAsync(new JobRevision { Id = Guid.NewGuid(), JobId = job.Id, RevisionNumber = 1,
+                Prompt = "plate", PlanJson = "{}", InterpretationJson = "{}", CreatedUtc = DateTime.UtcNow });
+            var coordinator = new SolidWorksCadAgent.AgentHost.Jobs.JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = root });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            try
+            {
+                var absent = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(409, absent.StatusCode);
+                await _repository.AppendCommandAsync(new CommandExecutionRecord
+                {
+                    Id = Guid.NewGuid(), JobId = job.Id, RevisionNumber = 1, SequenceNumber = 1,
+                    CommandName = "SavePart", Success = true, ParametersJson = "{}",
+                    ResultJson = new JObject { ["path"] = file }.ToString(), StartedUtc = DateTime.UtcNow, CompletedUtc = DateTime.UtcNow
+                });
+                var saved = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(200, saved.StatusCode);
+                var body = JObject.Parse(saved.JsonBody);
+                Assert.AreEqual("plate.sldprt", (string)body["fileName"]);
+                CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, Convert.FromBase64String((string)body["base64"]));
+                await _repository.AppendCommandAsync(new CommandExecutionRecord
+                {
+                    Id = Guid.NewGuid(), JobId = job.Id, RevisionNumber = 1, SequenceNumber = 2,
+                    CommandName = "SavePart", Success = true, ParametersJson = "{}",
+                    ResultJson = new JObject { ["path"] = Path.Combine(Path.GetTempPath(), "outside.sldprt") }.ToString(), StartedUtc = DateTime.UtcNow, CompletedUtc = DateTime.UtcNow.AddSeconds(1)
+                });
+                var outside = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(409, outside.StatusCode);
+                Assert.AreEqual("ARTIFACT_UNAVAILABLE", (string)JObject.Parse(outside.JsonBody)["error"]["code"]);
+                await _repository.AppendRevisionAsync(new JobRevision { Id = Guid.NewGuid(), JobId = job.Id, RevisionNumber = 2,
+                    Prompt = "revised plate", PlanJson = "{}", InterpretationJson = "{}", CreatedUtc = DateTime.UtcNow });
+                var stale = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(409, stale.StatusCode);
+                Assert.AreEqual("ARTIFACT_NOT_READY", (string)JObject.Parse(stale.JsonBody)["error"]["code"]);
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        [TestMethod]
         public async Task Health_ReturnsSchemaAndProcessStatus()
         {
             var response = await _routes.HandleAsync(

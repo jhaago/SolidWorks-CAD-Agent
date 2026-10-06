@@ -1,5 +1,7 @@
 using System;
 using System.Globalization;
+using System.IO;
+using SolidWorksCadAgent.Core.Workspace;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -144,6 +146,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     return await GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
                 }
 
+                if (method == "GET" && action == "artifact")
+                    return await ArtifactAsync(jobId, cancellationToken).ConfigureAwait(false);
+
                 if (method == "POST" && action == "cancel")
                 {
                     return await TransitionJobAsync(jobId, JobState.Cancelled, cancellationToken).ConfigureAwait(false);
@@ -157,14 +162,14 @@ namespace SolidWorksCadAgent.AgentHost.Host
                         : response;
                 }
 
-                if (method == "POST" && action == "approve")
+                if (method == "POST" && (action == "approve" || action == "approve-submit"))
                 {
-                    return await ApproveJobAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
+                    return await ApproveJobAsync(jobId, request.Body, cancellationToken, action == "approve-submit").ConfigureAwait(false);
                 }
 
-                if (method == "POST" && action == "request-changes")
+                if (method == "POST" && (action == "request-changes" || action == "request-changes-submit"))
                 {
-                    return await RequestChangesAsync(jobId, request.Body, cancellationToken).ConfigureAwait(false);
+                    return await RequestChangesAsync(jobId, request.Body, cancellationToken, action == "request-changes-submit").ConfigureAwait(false);
                 }
             }
 
@@ -182,6 +187,48 @@ namespace SolidWorksCadAgent.AgentHost.Host
             catch (JsonException)
             {
                 return Error(500, "CORRUPT_JOB_SNAPSHOT", "The persisted CAD job contains invalid JSON.");
+            }
+        }
+
+        private async Task<AgentResponse> ArtifactAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var snapshot = await _repository.GetSnapshotAsync(id, cancellationToken).ConfigureAwait(false);
+            if (snapshot == null) return JobNotFound();
+            if (snapshot.Job.IsSimulated || (snapshot.Job.State != JobState.ReadyForReview && snapshot.Job.State != JobState.Completed))
+                return Error(409, "ARTIFACT_NOT_READY", "A verified native CAD save is required before download.");
+            var currentRevision = snapshot.Revisions.OrderBy(item => item.RevisionNumber).LastOrDefault();
+            var save = snapshot.Commands.Where(item => item.CommandName == "SavePart" && item.Success && item.RevisionNumber == currentRevision?.RevisionNumber)
+                .OrderBy(item => item.CompletedUtc).LastOrDefault();
+            if (save == null) return Error(409, "ARTIFACT_NOT_READY", "This job has no successful native save evidence.");
+            var workspace = _settingsService?.Current.WorkspaceRoot ?? _coordinator?.WorkspaceRoot;
+            if (string.IsNullOrEmpty(workspace)) return Error(409, "ARTIFACT_NOT_CONFIGURED", "The workspace is not configured.");
+            try
+            {
+                var path = (string)JObject.Parse(save.ResultJson)["path"];
+                var policy = new WorkspacePolicy(workspace);
+                path = policy.ResolveForRead(path);
+                if (Path.GetFileName(path).Length > 128)
+                    return Error(409, "ARTIFACT_FILENAME_INVALID", "The saved filename is too long for remote download.");
+                // Open without sharing writes, bound allocation before reading, and recheck path policy.
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    policy.ResolveForRead(path);
+                    if (stream.Length < 1 || stream.Length > 4 * 1024 * 1024)
+                        return Error(413, "ARTIFACT_TOO_LARGE", "Native CAD downloads are limited to four MiB.");
+                    var bytes = new byte[(int)stream.Length];
+                    var offset = 0;
+                    while (offset < bytes.Length)
+                    {
+                        var count = await stream.ReadAsync(bytes, offset, bytes.Length - offset, cancellationToken).ConfigureAwait(false);
+                        if (count == 0) throw new IOException("Incomplete file read.");
+                        offset += count;
+                    }
+                    return Json(200, new { fileName = Path.GetFileName(path), contentType = "application/octet-stream", byteLength = bytes.Length, base64 = Convert.ToBase64String(bytes) });
+                }
+            }
+            catch (Exception ex) when (ex is WorkspacePolicyException || ex is IOException || ex is UnauthorizedAccessException || ex is JsonException || ex is ArgumentException)
+            {
+                return Error(409, "ARTIFACT_UNAVAILABLE", "The recorded native CAD artifact cannot be read safely from the configured workspace.");
             }
         }
 
@@ -314,7 +361,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             }
         }
 
-        private async Task<AgentResponse> ApproveJobAsync(Guid id, string body, CancellationToken cancellationToken)
+        private async Task<AgentResponse> ApproveJobAsync(Guid id, string body, CancellationToken cancellationToken, bool enqueue = false)
         {
             if (_coordinator != null)
             {
@@ -333,9 +380,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
                 try
                 {
-                    var snapshot = await _coordinator.ApproveAndExecuteAsync(id, revisionId, cancellationToken)
-                        .ConfigureAwait(false);
-                    return SnapshotResponse(200, snapshot);
+                    var snapshot = await (enqueue ? _coordinator.EnqueueApprovalAsync(id, revisionId, cancellationToken)
+                        : _coordinator.ApproveAndExecuteAsync(id, revisionId, cancellationToken)).ConfigureAwait(false);
+                    return SnapshotResponse(enqueue ? 202 : 200, snapshot);
                 }
                 catch (JobCoordinatorException ex)
                 {
@@ -353,7 +400,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
             return await TransitionAndSaveAsync(job, JobState.Approved, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<AgentResponse> RequestChangesAsync(Guid id, string body, CancellationToken cancellationToken)
+        private async Task<AgentResponse> RequestChangesAsync(Guid id, string body, CancellationToken cancellationToken, bool enqueue = false)
         {
             if (_coordinator == null)
                 return Error(409, "PLANNING_NOT_CONFIGURED", "Request Changes requires a configured planning coordinator.");
@@ -376,9 +423,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
             try
             {
-                var snapshot = await _coordinator.RequestChangesAsync(id, revisionId, instructions, cancellationToken)
-                    .ConfigureAwait(false);
-                return SnapshotResponse(200, snapshot);
+                var snapshot = await (enqueue ? _coordinator.EnqueueChangesAsync(id, revisionId, instructions, cancellationToken)
+                    : _coordinator.RequestChangesAsync(id, revisionId, instructions, cancellationToken)).ConfigureAwait(false);
+                return SnapshotResponse(enqueue ? 202 : 200, snapshot);
             }
             catch (OpenAiPlanningException ex)
             {

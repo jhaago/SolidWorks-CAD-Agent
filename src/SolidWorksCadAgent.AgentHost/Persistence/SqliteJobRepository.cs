@@ -227,7 +227,7 @@ WHERE Id = @Id;";
         public Task<bool> TryUpdateFromStateAsync(
             CadJob job,
             JobState expectedState,
-            CancellationToken cancellationToken = default(CancellationToken))
+            CancellationToken cancellationToken = default(CancellationToken), Guid? expectedRevisionId = null)
         {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
@@ -249,9 +249,10 @@ UPDATE Jobs SET
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
     UpdatedUtc = @UpdatedUtc
-WHERE Id = @Id AND State = @ExpectedState;";
+WHERE Id = @Id AND State = @ExpectedState AND (@ExpectedRevision IS NULL OR (SELECT Id FROM Revisions WHERE JobId = @Id ORDER BY RevisionNumber DESC LIMIT 1) = @ExpectedRevision);";
                 BindJob(command, job);
                 Add(command, "@ExpectedState", (int)expectedState);
+                Add(command, "@ExpectedRevision", expectedRevisionId.HasValue ? GuidText(expectedRevisionId.Value) : null);
                 return Task.FromResult(command.ExecuteNonQuery() == 1);
             }
         }
