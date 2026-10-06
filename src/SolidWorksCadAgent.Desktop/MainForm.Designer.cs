@@ -23,6 +23,8 @@ namespace SolidWorksCadAgent.Desktop
         private Button cancelButton;
         private Button completeButton;
         private ListBox historyListBox;
+        private Button refreshHistoryButton;
+        private Button olderHistoryButton;
 
         private void InitializeComponent()
         {
@@ -59,12 +61,17 @@ namespace SolidWorksCadAgent.Desktop
             approveButton.Enabled = requestChangesButton.Enabled = cancelButton.Enabled = completeButton.Enabled = false;
             sendButton.Enabled = attachButton.Enabled = launchButton.Enabled = false;
 
-            Controls.Add(LabelAt("Job history (this desktop session)", 18, 502, 300));
+            Controls.Add(LabelAt("Saved job history", 18, 502, 300));
             historyListBox = new ListBox { Left = 18, Top = 526, Width = 350, Height = 100, Anchor = AnchorStyles.Left | AnchorStyles.Bottom };
+
+            historyListBox.SelectedIndexChanged += HistoryListBox_SelectedIndexChanged;
+            refreshHistoryButton = ButtonAt("Refresh", 18, 638, 110, RefreshHistoryButton_Click);
+            olderHistoryButton = ButtonAt("Load older", 138, 638, 110, OlderHistoryButton_Click);
+            refreshHistoryButton.Enabled = olderHistoryButton.Enabled = false;
 
             Controls.AddRange(new Control[] { hostStatusLabel, solidWorksStatusLabel, messageLabel, settingsButton, attachButton, launchButton,
                 promptTextBox, sendButton, attachmentButton, currentJobLabel, ambiguityTextBox, planTextBox, verificationTextBox,
-                approveButton, requestChangesButton, cancelButton, completeButton, historyListBox });
+                approveButton, requestChangesButton, cancelButton, completeButton, historyListBox, refreshHistoryButton, olderHistoryButton });
         }
 
         private static Label LabelAt(string text, int left, int top, int width) =>

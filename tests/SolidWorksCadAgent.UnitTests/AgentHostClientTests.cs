@@ -121,6 +121,48 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public async Task JobHistory_ParsesPersistedPageAndEscapesCursor()
+        {
+            var id = Guid.NewGuid();
+            var handler = new QueueHandler("{\"items\":[{\"id\":\"" + id + "\",\"prompt\":\"saved plate\",\"state\":\"Completed\"}],\"nextCursor\":\"next\"}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var page = await client.ListJobsAsync(25, "a+b/=", CancellationToken.None);
+                Assert.AreEqual(id, page.Items[0].Id);
+                Assert.AreEqual("next", page.NextCursor);
+                StringAssert.Contains(handler.LastUri.Query, "cursor=a%2Bb%2F%3D");
+                Assert.AreEqual(HttpMethod.Get, handler.LastMethod);
+            }
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_SendsDisplayedRevisionAndInstructions()
+        {
+            var job = Guid.NewGuid();
+            var revision = Guid.NewGuid();
+            var handler = new QueueHandler("{\"state\":\"AwaitingApproval\",\"currentRevisionNumber\":2}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var result = await client.RequestChangesAsync(job, revision, "Use a 12 mm hole", CancellationToken.None);
+                Assert.AreEqual(2, result.CurrentRevisionNumber);
+                StringAssert.EndsWith(handler.LastUri.AbsolutePath, "/jobs/" + job + "/request-changes");
+                var body = Newtonsoft.Json.Linq.JObject.Parse(handler.LastBody);
+                Assert.AreEqual(revision.ToString("D"), (string)body["revisionId"]);
+                Assert.AreEqual("Use a 12 mm hole", (string)body["instructions"]);
+            }
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_RejectsBlankBeforeSending()
+        {
+            var handler = new QueueHandler("{}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                await Assert.ThrowsExceptionAsync<ArgumentException>(() => client.RequestChangesAsync(Guid.NewGuid(), Guid.NewGuid(), "  ", CancellationToken.None));
+                Assert.IsNull(handler.LastUri);
+            }
+        }
         private sealed class InvalidErrorHandler : HttpMessageHandler
         {
             private readonly string _body;

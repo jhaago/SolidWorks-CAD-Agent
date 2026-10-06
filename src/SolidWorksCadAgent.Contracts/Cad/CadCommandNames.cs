@@ -9,6 +9,8 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string SavePart = "SavePart";
         public const string CloseDocument = "CloseDocument";
         public const string CreateSketch = "CreateSketch";
+        public const string AddLine = "AddLine";
+        public const string AddArc = "AddArc";
         public const string AddRectangle = "AddRectangle";
         public const string AddCircle = "AddCircle";
         public const string ExitSketch = "ExitSketch";

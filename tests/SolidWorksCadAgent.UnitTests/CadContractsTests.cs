@@ -48,13 +48,13 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public void CadCommandNames_DefinesInitialV1CommandsExactly()
+        public void CadCommandNames_DefinesV1AndFirstV2SketchCommandsExactly()
         {
             var type = RequireType("SolidWorksCadAgent.Contracts.Cad.CadCommandNames");
             var expected = new[]
             {
                 "AttachSolidWorks", "LaunchSolidWorks", "NewPart", "OpenPart", "SavePart", "CloseDocument",
-                "CreateSketch", "AddRectangle", "AddCircle", "ExitSketch", "Extrude",
+                "CreateSketch", "AddLine", "AddArc", "AddRectangle", "AddCircle", "ExitSketch", "Extrude",
                 "CutExtrude", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree"
             };
 

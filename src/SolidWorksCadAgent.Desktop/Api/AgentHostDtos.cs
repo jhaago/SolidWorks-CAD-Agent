@@ -27,6 +27,12 @@ namespace SolidWorksCadAgent.Desktop.Api
         public string ErrorMessage { get; set; }
     }
 
+    public sealed class JobPageDto
+    {
+        public JobViewDto[] Items { get; set; } = new JobViewDto[0];
+        public string NextCursor { get; set; }
+    }
+
     public sealed class JobViewDto
     {
         public Guid Id { get; set; }

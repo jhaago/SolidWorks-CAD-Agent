@@ -51,6 +51,10 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
                 case CadCommandNames.CreateSketch:
                     result = CreateSketch(parameters);
                     break;
+                case CadCommandNames.AddLine:
+                case CadCommandNames.AddArc:
+                    result = AddCustomPrimitive(command.Command, parameters);
+                    break;
                 case CadCommandNames.AddRectangle:
                     result = AddRectangle(parameters);
                     break;
@@ -124,6 +128,14 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
             return CadCommandResult.Ok(new { plane });
         }
 
+        private CadCommandResult AddCustomPrimitive(string name, JObject p)
+        {
+            var error = name == CadCommandNames.AddLine ? SketchPrimitiveValidation.ValidateLine(p) : SketchPrimitiveValidation.ValidateArc(p);
+            if (error != null) return Failure("INVALID_PARAMETERS", error);
+            if (!_sketchOpen) return Failure("NO_ACTIVE_SKETCH", "Create a sketch before adding custom geometry.");
+            _pendingSketch = "Custom";
+            return CadCommandResult.Ok(new { created = true, isSimulated = true });
+        }
         private CadCommandResult AddRectangle(JObject parameters)
         {
             if (!_sketchOpen) return Failure("NO_ACTIVE_SKETCH", "Create a sketch before adding a rectangle.");
@@ -131,7 +143,7 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
                 return Failure("INVALID_PARAMETERS", "Rectangle width and height must be positive millimetre values.");
             _widthMm = width;
             _heightMm = height;
-            _pendingSketch = "Rectangle";
+            if (_pendingSketch != "Custom") _pendingSketch = "Rectangle";
             return CadCommandResult.Ok(new { created = true });
         }
 
@@ -141,7 +153,7 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
             if (!TryPositive(parameters, "diameterMm", out var diameter))
                 return Failure("INVALID_PARAMETERS", "Circle diameter must be a positive millimetre value.");
             _holeDiameterMm = diameter;
-            _pendingSketch = "Circle";
+            if (_pendingSketch != "Custom") _pendingSketch = "Circle";
             return CadCommandResult.Ok(new { created = true });
         }
 
@@ -157,6 +169,7 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
 
         private CadCommandResult Extrude(JObject parameters)
         {
+            if (_completedSketch == "Custom") return Failure("SIMULATION_PROFILE_UNSUPPORTED", "Custom line/arc profile solids require real SOLIDWORKS execution; this simulator does not verify their geometry.");
             if (_completedSketch != "Rectangle") return Failure("INVALID_SKETCH_PROFILE", "Extrude requires a completed rectangle sketch.");
             if (!TryPositive(parameters, "depthMm", out var depth))
                 return Failure("INVALID_PARAMETERS", "Extrude depth must be a positive millimetre value.");

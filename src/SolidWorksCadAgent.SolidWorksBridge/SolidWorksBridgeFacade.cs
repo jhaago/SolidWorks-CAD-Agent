@@ -51,6 +51,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new SavePartCommandHandler(_commandSession, workspacePolicy),
                 new CloseDocumentCommandHandler(_commandSession),
                 new CreateSketchCommandHandler(_commandSession),
+                new AddLineCommandHandler(_commandSession),
+                new AddArcCommandHandler(_commandSession),
                 new AddRectangleCommandHandler(_commandSession),
                 new AddCircleCommandHandler(_commandSession),
                 new ExitSketchCommandHandler(_commandSession),

@@ -53,6 +53,20 @@ namespace SolidWorksCadAgent.Desktop.Api
         public Task<JobViewDto> CreateJobAsync(string prompt, CancellationToken cancellationToken) =>
             SendAsync<JobViewDto>(HttpMethod.Post, "jobs", new JObject { ["prompt"] = prompt }, cancellationToken);
 
+        public Task<JobPageDto> ListJobsAsync(int limit, string cursor, CancellationToken cancellationToken)
+        {
+            if (limit < 1 || limit > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+            var path = "jobs?limit=" + limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!string.IsNullOrEmpty(cursor)) path += "&cursor=" + Uri.EscapeDataString(cursor);
+            return SendAsync<JobPageDto>(HttpMethod.Get, path, null, cancellationToken);
+        }
+
+        public Task<JobViewDto> RequestChangesAsync(Guid jobId, Guid revisionId, string instructions, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(instructions)) throw new ArgumentException("Enter clarification or change instructions.", nameof(instructions));
+            return SendAsync<JobViewDto>(HttpMethod.Post, "jobs/" + jobId.ToString("D") + "/request-changes",
+                new JObject { ["revisionId"] = revisionId.ToString("D"), ["instructions"] = instructions.Trim() }, cancellationToken);
+        }
         public Task<JobViewDto> GetJobAsync(Guid jobId, CancellationToken cancellationToken) =>
             SendAsync<JobViewDto>(HttpMethod.Get, "jobs/" + jobId.ToString("D"), null, cancellationToken);
 

@@ -15,6 +15,8 @@ namespace SolidWorksCadAgent.Core.Commands
             CadCommandNames.SavePart,
             CadCommandNames.CloseDocument,
             CadCommandNames.CreateSketch,
+            CadCommandNames.AddLine,
+            CadCommandNames.AddArc,
             CadCommandNames.AddRectangle,
             CadCommandNames.AddCircle,
             CadCommandNames.ExitSketch,
@@ -32,6 +34,8 @@ namespace SolidWorksCadAgent.Core.Commands
             "SavePart {path:string, allowOverwrite:false}; overwrite permission is server-controlled and the model must never set it true.\n" +
             "CloseDocument {}\n" +
             "CreateSketch {plane:'Top Plane'|'Front Plane'|'Right Plane'}\n" +
+            "AddLine {startXmm:number, startYmm:number, endXmm:number, endYmm:number}; endpoints must be distinct.\n" +
+            "AddArc {centerXmm:number, centerYmm:number, startXmm:number, startYmm:number, endXmm:number, endYmm:number, clockwise:boolean}; endpoints must be distinct and have equal nonzero radii.\n" +
             "AddRectangle {centerXmm:number, centerYmm:number, widthMm:number>0, heightMm:number>0}\n" +
             "AddCircle {centerXmm:number, centerYmm:number, diameterMm:number>0}\n" +
             "ExitSketch {}\n" +
@@ -68,6 +72,10 @@ namespace SolidWorksCadAgent.Core.Commands
                     return plane == "Top Plane" || plane == "Front Plane" || plane == "Right Plane"
                         ? null
                         : "CreateSketch plane must be Top Plane, Front Plane, or Right Plane.";
+                case CadCommandNames.AddLine:
+                    return SketchPrimitiveValidation.ValidateLine(p);
+                case CadCommandNames.AddArc:
+                    return SketchPrimitiveValidation.ValidateArc(p);
                 case CadCommandNames.AddRectangle:
                     return First(
                         Only(p, "centerXmm", "centerYmm", "widthMm", "heightMm"),

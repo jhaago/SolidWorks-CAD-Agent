@@ -2,6 +2,11 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## PC V2 development
+
+The first V2 increment adds Desktop clarification revisions and navigable persisted job history, plus native `AddLine` and `AddArc` sketch commands for custom profiles. On the SOLIDWORKS 2020 PC, the new line/arc profile passed geometry and save/reopen acceptance alongside the existing plate and document-safety regressions. See [V2 design](docs/superpowers/specs/2026-10-06-pc-agent-v2-design.md) and [validation and remaining boundaries](docs/windows-validation-v2-2026-10-06.md).
+
+Further stages cover dimensions/relations, fillets/chamfers, patterns/revolve and safe native model edits. Android development is outside this PC milestone. Simulation does not verify solids made from custom line/arc profiles; use native execution for those profiles.
 ## V1 baseline
 
 The V1 target runtime is **SOLIDWORKS Premium 2020 SP0.0**. The bridge is designed so SOLIDWORKS-version-specific COM/API details stay behind a version-independent command layer, allowing later releases to be certified by rerunning the integration and acceptance suite.
@@ -76,4 +81,4 @@ The expected cloud-planning state is `AwaitingApproval`. Inspect the proposed pl
 
 ## Current testing boundary
 
-GitHub Actions builds the Agent Host, desktop client, unit tests, and the integration-test contract. Remaining software work includes navigable persisted job history and Desktop clarification revisions. Model and execution-mode settings are editable and persist across Host restarts. Geometry, save/reopen, and normal-launch checks have passed on the target PC. Remaining physical release gates include three repeated acceptance workflows and approval/Auto-mode checks on the user's SOLIDWORKS 2020 SP0.0 PC, including attach/launch, native feature creation, save/reopen, verification, and three repeated acceptance runs.
+The PC V1 native acceptance checks passed on SOLIDWORKS 2020. V2 development now provides navigable persisted history and Desktop clarification revisions. Settings persist across Host restarts. See the dated validation notes for exact automated/native evidence; manual Desktop visual review and remote physical acceptance remain separate pending checks.
