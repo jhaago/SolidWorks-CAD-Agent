@@ -4,6 +4,8 @@ AI-assisted native CAD automation for SOLIDWORKS.
 
 ## PC V2 development
 
+The latest CAD capability increment is on `feature/v2-cad-profiles-and-pockets`, based on the image-design intake V2 line. It adds native rotated obround slots, regular polygon profiles and depth-controlled blind cuts through the existing approved planner. See [capabilities, examples and precise placement limits](docs/prismatic-cad-capabilities.md).
+
 The image-design intake milestone is on `feature/v2-image-design-intake`, based on the newer local V2 line. Open **Image / Design Intake** in the desktop app to attach PNG/JPEG references, hold an engineering clarification conversation, inspect revisioned Design Briefs and approve the current brief. **Create CAD Plan** then enters the existing job workflow; **Approve Build** remains a separate mandatory action even in Auto Mode. Discussion has no CAD execution capability. See [usage, architecture, security and roadmap](docs/image-design-intake.md).
 
 The first V2 increment adds Desktop clarification revisions and navigable persisted job history, plus native `AddLine` and `AddArc` sketch commands for custom profiles. On the SOLIDWORKS 2020 PC, the new line/arc profile passed geometry and save/reopen acceptance alongside the existing plate and document-safety regressions. See [V2 design](docs/superpowers/specs/2026-10-06-pc-agent-v2-design.md) and [validation and remaining boundaries](docs/windows-validation-v2-2026-10-06.md).
