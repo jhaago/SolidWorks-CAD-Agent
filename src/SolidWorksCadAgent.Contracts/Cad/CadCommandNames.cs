@@ -13,6 +13,8 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string AddArc = "AddArc";
         public const string AddRectangle = "AddRectangle";
         public const string AddCircle = "AddCircle";
+        public const string AddSlot = "AddSlot";
+        public const string AddRegularPolygon = "AddRegularPolygon";
         public const string ExitSketch = "ExitSketch";
         public const string Extrude = "Extrude";
         public const string CutExtrude = "CutExtrude";
@@ -23,3 +25,4 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetFeatureTree = "GetFeatureTree";
     }
 }
+

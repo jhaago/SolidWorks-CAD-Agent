@@ -55,6 +55,10 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
                 case CadCommandNames.AddArc:
                     result = AddCustomPrimitive(command.Command, parameters);
                     break;
+                case CadCommandNames.AddSlot:
+                case CadCommandNames.AddRegularPolygon:
+                    result = AddPrismaticProfile(command.Command, parameters);
+                    break;
                 case CadCommandNames.AddRectangle:
                     result = AddRectangle(parameters);
                     break;
@@ -136,6 +140,16 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
             _pendingSketch = "Custom";
             return CadCommandResult.Ok(new { created = true, isSimulated = true });
         }
+        private CadCommandResult AddPrismaticProfile(string name, JObject parameters)
+        {
+            var error = name == CadCommandNames.AddSlot ? PrismaticProfileGeometry.ValidateSlot(parameters)
+                : PrismaticProfileGeometry.ValidateRegularPolygon(parameters);
+            if (error != null) return Failure("INVALID_PARAMETERS", error);
+            if (!_sketchOpen) return Failure("NO_ACTIVE_SKETCH", "Create a sketch before adding profile geometry.");
+            _pendingSketch = "Custom";
+            return CadCommandResult.Ok(new { created = true, isSimulated = true });
+        }
+
         private CadCommandResult AddRectangle(JObject parameters)
         {
             if (!_sketchOpen) return Failure("NO_ACTIVE_SKETCH", "Create a sketch before adding a rectangle.");
@@ -182,7 +196,13 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
 
         private CadCommandResult CutExtrude(JObject parameters)
         {
+            var error = PrismaticProfileGeometry.ValidateCut(parameters);
+            if (error != null) return Failure("INVALID_PARAMETERS", error);
             if (!_hasBody) return Failure("NO_SOLID_BODY", "Create a solid body before cutting it.");
+            if (_completedSketch == "Custom")
+                return Failure("SIMULATION_PROFILE_UNSUPPORTED", "Custom profile cuts require real SOLIDWORKS execution; this simulator does not verify their geometry.");
+            if ((string)parameters["endCondition"] == "Blind")
+                return Failure("SIMULATION_FEATURE_UNSUPPORTED", "Blind pocket geometry requires real SOLIDWORKS execution; this simulator does not verify cut depth.");
             if (_completedSketch != "Circle" || _holeDiameterMm <= 0)
                 return Failure("INVALID_SKETCH_PROFILE", "CutExtrude requires a completed circle sketch.");
             if ((string)parameters["endCondition"] != "ThroughAll")

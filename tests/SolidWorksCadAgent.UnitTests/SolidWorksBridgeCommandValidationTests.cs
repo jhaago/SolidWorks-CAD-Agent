@@ -78,7 +78,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public async Task CutExtrude_Blind_IsRejectedBeforeCom()
+        public async Task CutExtrude_BlindWithoutDepth_IsRejectedBeforeCom()
         {
             var session = new RecordingSession();
             using (var bridge = new SolidWorksBridgeFacade(session))
@@ -90,7 +90,7 @@ namespace SolidWorksCadAgent.UnitTests
                 }, CancellationToken.None);
 
                 Assert.IsFalse(result.Success);
-                Assert.AreEqual("UNSUPPORTED_PARAMETER_VALUE", result.Error.Code);
+                Assert.AreEqual("INVALID_PARAMETERS", result.Error.Code);
                 Assert.AreEqual(0, session.ApplicationInvocationCount);
             }
         }

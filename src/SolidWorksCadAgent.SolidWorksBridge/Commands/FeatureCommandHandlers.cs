@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Units;
+using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 #if SOLIDWORKS_INTEROP
 using SolidWorks.Interop.sldworks;
@@ -88,24 +89,17 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
         public override CadError Validate(JObject parameters)
         {
-            var endCondition = GetString(parameters, "endCondition");
-            if (string.IsNullOrWhiteSpace(endCondition))
-            {
-                return InvalidParameter("endCondition is required.");
-            }
-
-            if (endCondition != "ThroughAll")
-            {
-                return UnsupportedValue("V1 CutExtrude supports only endCondition=ThroughAll.");
-            }
-
-            return null;
+            var error = PrismaticProfileGeometry.ValidateCut(parameters);
+            return error == null ? null : InvalidParameter(error);
         }
 
         public override Task<CadCommandResult> ExecuteAsync(
             JObject parameters,
             CancellationToken cancellationToken)
         {
+            var endCondition = GetString(parameters, "endCondition");
+            bool blind = endCondition == "Blind";
+            double? depthMm = blind ? (double?)parameters["depthMm"] : null;
             return InvokeAsync(application =>
             {
 #if SOLIDWORKS_INTEROP
@@ -125,9 +119,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     true,
                     false,
                     true,
-                    (int)swEndConditions_e.swEndCondThroughAll,
+                    blind ? (int)swEndConditions_e.swEndCondBlind : (int)swEndConditions_e.swEndCondThroughAll,
                     (int)swEndConditions_e.swEndCondBlind,
-                    0.0,
+                    blind ? UnitConverter.MillimetresToMetres(depthMm.Value) : 0.0,
                     0.0,
                     false,
                     false,
@@ -151,9 +145,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     false);
 
                 if (feature == null)
-                    return Failure("CUT_EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the through-all cut.");
+                    return Failure("CUT_EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the requested cut.");
 
-                return Ok(new { endCondition = "ThroughAll", featureName = feature.Name });
+                return Ok(new { endCondition, depthMm, featureName = feature.Name });
 #else
                 return InteropUnavailable();
 #endif

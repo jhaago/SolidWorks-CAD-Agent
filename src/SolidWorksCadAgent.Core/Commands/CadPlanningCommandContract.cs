@@ -19,6 +19,8 @@ namespace SolidWorksCadAgent.Core.Commands
             CadCommandNames.AddArc,
             CadCommandNames.AddRectangle,
             CadCommandNames.AddCircle,
+            CadCommandNames.AddSlot,
+            CadCommandNames.AddRegularPolygon,
             CadCommandNames.ExitSketch,
             CadCommandNames.Extrude,
             CadCommandNames.CutExtrude,
@@ -38,9 +40,11 @@ namespace SolidWorksCadAgent.Core.Commands
             "AddArc {centerXmm:number, centerYmm:number, startXmm:number, startYmm:number, endXmm:number, endYmm:number, clockwise:boolean}; endpoints must be distinct and have equal nonzero radii.\n" +
             "AddRectangle {centerXmm:number, centerYmm:number, widthMm:number>0, heightMm:number>0}\n" +
             "AddCircle {centerXmm:number, centerYmm:number, diameterMm:number>0}\n" +
+            "AddSlot {centerXmm:number, centerYmm:number, lengthMm:number, widthMm:number, angleDegrees:number}; total end-to-end lengthMm > widthMm > 0, axis angle counterclockwise in degrees [-360,360].\n" +
+            "AddRegularPolygon {centerXmm:number, centerYmm:number, sides:integer[3,32], diameterMm:number>0, angleDegrees:number}; diameter is the circumcircle diameter, angle of first vertex counterclockwise in degrees [-360,360].\n" +
             "ExitSketch {}\n" +
             "Extrude {depthMm:number>0}\n" +
-            "CutExtrude {endCondition:'ThroughAll'}\n" +
+            "CutExtrude {endCondition:'ThroughAll'} or {endCondition:'Blind', depthMm:number>0}; Blind depth is required, ThroughAll rejects depthMm. Cuts start from the base sketch plane along the positive boss normal, producing an underside pocket for Blind; face-selected and offset-plane pockets are unsupported. No direction parameter.\n" +
             "Rebuild {}";
 
         public static string Validate(CadCommandEnvelope command)
@@ -89,14 +93,14 @@ namespace SolidWorksCadAgent.Core.Commands
                         FiniteNumber(p, "centerXmm", false),
                         FiniteNumber(p, "centerYmm", false),
                         FiniteNumber(p, "diameterMm", true));
+                case CadCommandNames.AddSlot:
+                    return PrismaticProfileGeometry.ValidateSlot(p);
+                case CadCommandNames.AddRegularPolygon:
+                    return PrismaticProfileGeometry.ValidateRegularPolygon(p);
                 case CadCommandNames.Extrude:
                     return First(Only(p, "depthMm"), FiniteNumber(p, "depthMm", true));
                 case CadCommandNames.CutExtrude:
-                    var cutError = First(Only(p, "endCondition"), RequiredString(p, "endCondition"));
-                    if (cutError != null) return cutError;
-                    return (string)p["endCondition"] == "ThroughAll"
-                        ? null
-                        : "CutExtrude endCondition must be ThroughAll.";
+                    return PrismaticProfileGeometry.ValidateCut(p);
                 default:
                     return "The proposed CAD plan contains an unsupported command: " + command.Command;
             }
@@ -139,3 +143,4 @@ namespace SolidWorksCadAgent.Core.Commands
         private static string First(params string[] errors) => errors.FirstOrDefault(error => error != null);
     }
 }
+

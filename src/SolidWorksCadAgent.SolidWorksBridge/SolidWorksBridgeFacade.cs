@@ -55,6 +55,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new AddArcCommandHandler(_commandSession),
                 new AddRectangleCommandHandler(_commandSession),
                 new AddCircleCommandHandler(_commandSession),
+                new AddSlotCommandHandler(_commandSession),
+                new AddRegularPolygonCommandHandler(_commandSession),
                 new ExitSketchCommandHandler(_commandSession),
                 new ExtrudeCommandHandler(_commandSession),
                 new CutExtrudeCommandHandler(_commandSession),

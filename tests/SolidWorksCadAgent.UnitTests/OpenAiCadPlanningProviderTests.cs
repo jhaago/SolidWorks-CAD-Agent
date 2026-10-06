@@ -61,6 +61,9 @@ namespace SolidWorksCadAgent.UnitTests
             StringAssert.Contains((string)request["instructions"], "ThroughAll");
             StringAssert.Contains((string)request["instructions"], "normal to the sketch");
             StringAssert.Contains((string)request["instructions"], "create missing folders");
+            CollectionAssert.Contains(commandSchema["enum"].Values<string>().ToArray(), "AddSlot");
+            CollectionAssert.Contains(commandSchema["enum"].Values<string>().ToArray(), "AddRegularPolygon");
+            StringAssert.Contains((string)request["instructions"], "Do not substitute an underside pocket for a requested top-face pocket");
         }
 
         [TestMethod]
