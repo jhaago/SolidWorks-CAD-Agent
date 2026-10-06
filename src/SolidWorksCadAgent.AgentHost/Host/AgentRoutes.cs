@@ -27,6 +27,16 @@ namespace SolidWorksCadAgent.AgentHost.Host
         private readonly JobStateMachine _stateMachine;
         private readonly JobCoordinator _coordinator;
         private readonly AgentSettingsService _settingsService;
+        private SolidWorksCadAgent.AgentHost.Design.DesignRoutes _designRoutes;
+
+        public void ConfigureDesignIntake(SolidWorksCadAgent.AgentHost.Design.DesignRoutes routes) =>
+            _designRoutes = routes ?? throw new ArgumentNullException(nameof(routes));
+
+        public async Task<Guid> PlanApprovedDesignAsync(string prompt, CancellationToken token)
+        {
+            if (_coordinator == null) throw new InvalidOperationException("The CAD planner is unavailable.");
+            return (await _coordinator.CreateAndPlanAsync(prompt, token, true).ConfigureAwait(false)).Job.Id;
+        }
 
         public AgentRoutes(SqliteJobRepository repository, ISolidWorksSession solidWorks)
             : this(repository, solidWorks, null, null, () => DateTime.UtcNow)
@@ -89,6 +99,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
 
             var method = (request.Method ?? string.Empty).ToUpperInvariant();
             var path = NormalizePath(request.Path);
+
+            if (path == "/designs" || path.StartsWith("/designs/", StringComparison.Ordinal))
+                return _designRoutes == null
+                    ? Json(503, new { error = new { code = "design_unavailable", message = "Design intake is unavailable." } })
+                    : await _designRoutes.HandleAsync(request, cancellationToken).ConfigureAwait(false);
 
             if (method == "GET" && path == "/health")
             {

@@ -5,13 +5,20 @@ namespace SolidWorksCadAgent.AgentHost.Host
     public static class HostRequestPolicy
     {
         public const long MaximumBodyBytes = 1024 * 1024;
+        public static long MaximumBodyBytesFor(string path)
+        {
+            var segments = (path ?? "").Split('?')[0].Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            return segments.Length == 3 && segments[0] == "designs" && Guid.TryParse(segments[1], out _) && segments[2] == "references"
+                ? 6 * 1024 * 1024 : MaximumBodyBytes;
+        }
 
         public static AgentResponse Validate(
             string method,
             string contentType,
             string origin,
             long contentLength,
-            bool hasEntityBody)
+            bool hasEntityBody,
+            string path = null)
         {
             if (!string.IsNullOrWhiteSpace(origin))
             {
@@ -34,9 +41,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return Error(411, "CONTENT_LENGTH_REQUIRED", "Request bodies must provide a Content-Length header.");
             }
 
-            if (contentLength > MaximumBodyBytes)
+            if (contentLength > MaximumBodyBytesFor(path))
             {
-                return Error(413, "REQUEST_TOO_LARGE", "The request body exceeds the one-megabyte limit.");
+                return Error(413, "REQUEST_TOO_LARGE", "The request body exceeds this route's size limit.");
             }
 
             return null;

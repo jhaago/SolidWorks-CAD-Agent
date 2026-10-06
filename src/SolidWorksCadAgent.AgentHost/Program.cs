@@ -7,6 +7,7 @@ using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.AgentHost.Security;
+using SolidWorksCadAgent.AgentHost.Design;
 using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Workspace;
 using SolidWorksCadAgent.SolidWorksBridge;
@@ -68,6 +69,15 @@ namespace SolidWorksCadAgent.AgentHost
                             realExecutorLifetime = bridge;
                             return bridge;
                         });
+
+                    var designRepository = new DesignSessionRepository(Path.Combine(dataDirectory, "design-intake.db"));
+                    designRepository.Initialize();
+                    var imageStore = new ReferenceImageStore(settings.WorkspaceRoot);
+                    var designService = new DesignIntakeService(designRepository, imageStore,
+                        new OpenAiImageDesignInterpreter(httpClient,
+                            () => secretStore.Get(OpenAiCadPlanningProvider.OpenAiCredentialTarget), settings.OpenAiModel),
+                        routes.PlanApprovedDesignAsync);
+                    routes.ConfigureDesignIntake(new DesignRoutes(designService, imageStore));
 
                     using (var server = new LocalHttpServer(settings.HostPrefix, routes))
                     {

@@ -20,6 +20,7 @@ appsettings.local.json
 
 # Generated CAD workspace
 Workspace/
+.design-intake/
 workspace/
 *.SLDPRT
 *.SLDASM

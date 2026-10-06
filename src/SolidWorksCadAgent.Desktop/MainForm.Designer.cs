@@ -42,8 +42,7 @@ namespace SolidWorksCadAgent.Desktop
 
             promptTextBox = new TextBox { Left = 18, Top = 82, Width = 920, Height = 76, Multiline = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             sendButton = ButtonAt("Send", 1040, 82, 110, SendButton_Click);
-            attachmentButton = ButtonAt("Images: V1 disabled", 950, 124, 200, null);
-            attachmentButton.Enabled = false;
+            attachmentButton = ButtonAt("Image / Design Intake", 950, 124, 200, DesignIntakeButton_Click);
 
             currentJobLabel = LabelAt("No current job", 18, 178, 900);
             currentJobLabel.Font = new Font(currentJobLabel.Font, FontStyle.Bold);

@@ -87,10 +87,10 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                 command.CommandText = @"
 INSERT INTO Jobs
 (Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
- OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc)
+ OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc, RequiresExplicitApproval)
 VALUES
 (@Id, @Prompt, @State, @PlanValidated, @HasUnresolvedAmbiguity, @AmbiguityMessage,
- @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc);";
+ @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc, @RequiresExplicitApproval);";
                 BindJob(command, job);
                 command.ExecuteNonQuery();
             }
@@ -542,7 +542,7 @@ WHERE Id = @Id;";
                 command.Transaction = transaction;
                 command.CommandText = @"
 SELECT Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
-       OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc
+       OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc, RequiresExplicitApproval
 FROM Jobs WHERE Id = @Id;";
                 Add(command, "@Id", GuidText(id));
 
@@ -562,7 +562,8 @@ FROM Jobs WHERE Id = @Id;";
                         IsSimulated = reader.GetInt32(8) != 0,
                         OutputPath = NullableString(reader, 9),
                         CreatedUtc = ParseDate(reader.GetString(10)),
-                        UpdatedUtc = ParseDate(reader.GetString(11))
+                        UpdatedUtc = ParseDate(reader.GetString(11)),
+                        RequiresExplicitApproval = reader.GetInt32(12) != 0
                     };
                 }
             }
@@ -728,6 +729,7 @@ VALUES
             Add(command, "@Prompt", job.Prompt);
             Add(command, "@State", (int)job.State);
             Add(command, "@PlanValidated", job.PlanValidated ? 1 : 0);
+            Add(command, "@RequiresExplicitApproval", job.RequiresExplicitApproval ? 1 : 0);
             Add(command, "@HasUnresolvedAmbiguity", job.HasUnresolvedAmbiguity ? 1 : 0);
             Add(command, "@AmbiguityMessage", job.AmbiguityMessage);
             Add(command, "@OverwriteRequested", job.OverwriteRequested ? 1 : 0);
@@ -827,6 +829,14 @@ VALUES
 
         private static void EnsureSchemaVersion(SQLiteConnection connection)
         {
+            if (!HasColumn(connection, "Jobs", "RequiresExplicitApproval"))
+            {
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "ALTER TABLE Jobs ADD COLUMN RequiresExplicitApproval INTEGER NOT NULL DEFAULT 0;";
+                    command.ExecuteNonQuery();
+                }
+            }
             if (!HasColumn(connection, "Jobs", "IsSimulated"))
             {
                 using (var command = connection.CreateCommand())
@@ -838,7 +848,7 @@ VALUES
 
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "PRAGMA user_version = 2;";
+                command.CommandText = "PRAGMA user_version = 3;";
                 command.ExecuteNonQuery();
             }
         }

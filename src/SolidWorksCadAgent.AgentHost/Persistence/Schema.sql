@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS Jobs (
     OverwriteRequested INTEGER NOT NULL,
     OverwriteAuthorized INTEGER NOT NULL,
     IsSimulated INTEGER NOT NULL DEFAULT 0,
+    RequiresExplicitApproval INTEGER NOT NULL DEFAULT 0,
     OutputPath TEXT NULL,
     CreatedUtc TEXT NOT NULL,
     UpdatedUtc TEXT NOT NULL

@@ -32,7 +32,7 @@ namespace SolidWorksCadAgent.Core.Jobs
                 return true;
             }
 
-            return settings.AutoMode && job.State == JobState.AwaitingApproval;
+            return settings.AutoMode && !job.RequiresExplicitApproval && job.State == JobState.AwaitingApproval;
         }
     }
 }

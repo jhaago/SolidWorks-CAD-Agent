@@ -368,6 +368,26 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(count, executor.CallCount);
         }
 
+        [TestMethod]
+        public async Task ImageDesignPlan_PersistsManualApprovalRequirement_DespiteAutoMode()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = CreateCoordinator(executor, true);
+            var snapshot = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None, true);
+            Assert.AreEqual(JobState.AwaitingApproval, snapshot.Job.State);
+            Assert.AreEqual(0, executor.ExecutedCommands.Count);
+            Assert.IsTrue((await _repository.GetAsync(snapshot.Job.Id)).RequiresExplicitApproval);
+            Assert.IsFalse(SolidWorksCadAgent.Core.Jobs.ApprovalPolicy.CanExecute(
+                (await _repository.GetAsync(snapshot.Job.Id)), new AgentSettings
+                {
+                    AutoMode = true
+                }
+));
+            var executed = await coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.ReadyForReview, executed.Job.State);
+            Assert.IsTrue(executor.ExecutedCommands.Count > 0);
+        }
+
         private const string AcceptancePrompt =
             "Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.";
 

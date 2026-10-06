@@ -56,9 +56,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
 
         public string WorkspaceRoot => _settings.WorkspaceRoot;
 
-        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken)
+        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false)
         {
-            var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
+            var job = await CreateNewJobAsync(prompt, cancellationToken, requiresExplicitApproval).ConfigureAwait(false);
             return await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false);
         }
 
@@ -103,7 +103,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             lock (_submittedSync) return Task.WhenAll(_submitted.ToArray());
         }
 
-        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken)
+        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false)
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
@@ -115,6 +115,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 Prompt = prompt.Trim(),
                 State = JobState.New,
                 IsSimulated = _executionMode == ExecutionMode.Simulation,
+                RequiresExplicitApproval = requiresExplicitApproval,
                 CreatedUtc = now,
                 UpdatedUtc = now
             };

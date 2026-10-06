@@ -290,7 +290,7 @@ PRAGMA user_version = 1;";
                     using (var command = connection.CreateCommand())
                     {
                         command.CommandText = "PRAGMA user_version;";
-                        Assert.AreEqual(2L, Convert.ToInt64(command.ExecuteScalar()));
+                        Assert.AreEqual(3L, Convert.ToInt64(command.ExecuteScalar()));
                     }
                 }
             }
@@ -316,6 +316,7 @@ PRAGMA user_version = 1;";
                     {
                         Id = jobId,
                         Prompt = "Simulated plate",
+                        RequiresExplicitApproval = true,
                         State = JobState.New,
                         CreatedUtc = DateTime.UtcNow,
                         UpdatedUtc = DateTime.UtcNow
@@ -331,6 +332,7 @@ PRAGMA user_version = 1;";
                     await reopened.InitializeAsync();
                     var loaded = await reopened.GetAsync(jobId);
                     Assert.IsTrue((bool)loaded.GetType().GetProperty("IsSimulated").GetValue(loaded));
+                    Assert.IsTrue(loaded.RequiresExplicitApproval);
                 }
             }
             finally

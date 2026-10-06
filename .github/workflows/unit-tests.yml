@@ -3,7 +3,7 @@ name: Unit Tests
 on:
   push:
     branches:
-      - feature/v1-solidworks-2020
+      - 'feature/**'
   pull_request:
 
 jobs:

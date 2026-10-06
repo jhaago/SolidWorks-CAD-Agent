@@ -116,7 +116,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     context.Request.ContentType,
                     context.Request.Headers["Origin"],
                     context.Request.ContentLength64,
-                    context.Request.HasEntityBody);
+                    context.Request.HasEntityBody,
+                    context.Request.RawUrl);
 
                 string body = null;
                 if (response == null && context.Request.HasEntityBody)
@@ -124,7 +125,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     body = await RequestBodyReader.ReadAsync(
                         context.Request.InputStream,
                         context.Request.ContentEncoding ?? Encoding.UTF8,
-                        HostRequestPolicy.MaximumBodyBytes,
+                        HostRequestPolicy.MaximumBodyBytesFor(context.Request.RawUrl),
                         TimeSpan.FromSeconds(15),
                         () => SafeAbort(context),
                         cancellationToken).ConfigureAwait(false);

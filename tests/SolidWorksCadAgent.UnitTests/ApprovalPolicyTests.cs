@@ -79,6 +79,20 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse(ApprovalPolicy.CanExecute(job, new AgentSettings { AutoMode = false }));
         }
 
+        [TestMethod]
+        public void DesignIntakeJob_RequiresCadApproval_EvenInAutoMode()
+        {
+            var job = ReadyPlan(JobState.AwaitingApproval);
+            job.RequiresExplicitApproval = true;
+            var settings = new AgentSettings
+            {
+                AutoMode = true
+            };
+            Assert.IsFalse(ApprovalPolicy.CanExecute(job, settings));
+            job.State = JobState.Approved;
+            Assert.IsTrue(ApprovalPolicy.CanExecute(job, settings));
+        }
+
         private static CadJob ReadyPlan(JobState state)
         {
             return new CadJob

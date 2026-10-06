@@ -52,6 +52,17 @@ namespace SolidWorksCadAgent.Desktop
         private async void LaunchButton_Click(object sender, EventArgs e) =>
             await RunUiActionAsync(async () => DisplaySolidWorks(await _client.LaunchSolidWorksAsync(_lifetime.Token)));
 
+        private void DesignIntakeButton_Click(object sender, EventArgs e)
+        {
+            if (_busy || !_hostAvailable) return;
+            using (var form = new DesignIntakeForm(async jobId =>
+            {
+                if (!IsDisposed && !_lifetime.IsCancellationRequested)
+                    await RunUiActionAsync(async () => DisplayJob(await _client.GetJobAsync(jobId, _lifetime.Token)));
+            }))
+                form.ShowDialog(this);
+        }
+
         private async void SendButton_Click(object sender, EventArgs e)
         {
             if (_busy || JobRunning) return;
@@ -269,6 +280,7 @@ namespace SolidWorksCadAgent.Desktop
         private void UpdateActions()
         {
             var enabled = !_busy && _hostAvailable;
+            attachmentButton.Enabled = enabled;
             sendButton.Enabled = attachButton.Enabled = launchButton.Enabled = enabled && !JobRunning;
             approveButton.Enabled = enabled && _currentJob?.State == "AwaitingApproval" &&
                 _currentJob.PlanValidated && _currentJob.CurrentRevisionId.HasValue;
