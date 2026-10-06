@@ -70,6 +70,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 _activeRequests.CopyTo(remaining);
             }
             await Task.WhenAll(remaining).ConfigureAwait(false);
+            await _routes.WaitForBackgroundJobsAsync().ConfigureAwait(false);
         }
 
         public void Dispose()

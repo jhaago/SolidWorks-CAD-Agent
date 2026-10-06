@@ -55,6 +55,26 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             return Task.CompletedTask;
         }
 
+        // Called once at host startup. Never replay CAD work after an interrupted process.
+        public Task<int> RecoverInterruptedJobsAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "UPDATE Jobs SET State = @Failed, UpdatedUtc = @Now WHERE State IN (@New, @Interpreting, @Approved, @Executing, @Verifying);";
+                Add(command, "@Failed", (int)JobState.Failed);
+                Add(command, "@Now", DateText(DateTime.UtcNow));
+                Add(command, "@New", (int)JobState.New);
+                Add(command, "@Interpreting", (int)JobState.Interpreting);
+                Add(command, "@Approved", (int)JobState.Approved);
+                Add(command, "@Executing", (int)JobState.Executing);
+                Add(command, "@Verifying", (int)JobState.Verifying);
+                return Task.FromResult(command.ExecuteNonQuery());
+            }
+        }
+
         public Task CreateAsync(CadJob job, CancellationToken cancellationToken = default(CancellationToken))
         {
             ThrowIfDisposed();

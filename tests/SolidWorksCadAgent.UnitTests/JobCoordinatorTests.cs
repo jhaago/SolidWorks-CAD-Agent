@@ -55,6 +55,84 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task SubmitAsync_ReturnsDurableIdentifierWithoutWaitingForPlanner()
+        {
+            var planner = new PendingPlanner();
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(_repository, planner, executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation });
+            var submitted = await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None);
+            Assert.AreEqual(JobState.New, submitted.Job.State);
+            Assert.IsNotNull(await _repository.GetAsync(submitted.Job.Id));
+            try
+            {
+                Assert.AreEqual(planner.Started.Task, await Task.WhenAny(planner.Started.Task, Task.Delay(2000)));
+                Assert.IsFalse(planner.Result.Task.IsCompleted);
+                Assert.AreEqual(0, executor.ExecutedCommands.Count);
+            }
+            finally { planner.Result.TrySetResult(await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None)); }
+            await coordinator.WaitForSubmittedJobsAsync();
+            Assert.AreEqual(JobState.AwaitingApproval, (await _repository.GetAsync(submitted.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task SubmitAsync_CancelDuringPlanningPreventsAutoExecution()
+        {
+            var planner = new PendingPlanner();
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(_repository, planner, executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation, AutoMode = true });
+            var submitted = await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None);
+            Assert.AreEqual(planner.Started.Task, await Task.WhenAny(planner.Started.Task, Task.Delay(2000)));
+            var current = await _repository.GetAsync(submitted.Job.Id);
+            var expected = current.State;
+            new SolidWorksCadAgent.Core.Jobs.JobStateMachine().Transition(current, JobState.Cancelled);
+            await _repository.TryUpdateFromStateAsync(current, expected, CancellationToken.None);
+            planner.Result.TrySetResult(await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None));
+            await coordinator.WaitForSubmittedJobsAsync();
+            Assert.AreEqual(JobState.Cancelled, (await _repository.GetAsync(submitted.Job.Id)).State);
+            Assert.AreEqual(0, executor.ExecutedCommands.Count);
+        }
+
+        [TestMethod]
+        public async Task SubmitAsync_PlannerFailurePersistsFailedState()
+        {
+            var planner = new PendingPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(), new AgentSettings());
+            var submitted = await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None);
+            planner.Result.TrySetException(new InvalidOperationException("test planner failure"));
+            await coordinator.WaitForSubmittedJobsAsync();
+            Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(submitted.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task SubmitAsync_ExecutionFailurePersistsFailedState()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                new ThrowingExecutor(), new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+            var submitted = await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None);
+            await coordinator.WaitForSubmittedJobsAsync();
+            Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(submitted.Job.Id)).State);
+        }
+
+        private sealed class ThrowingExecutor : ICadCommandExecutor
+        {
+            public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token) =>
+                throw new InvalidOperationException("test execution failure");
+        }
+
+        private sealed class PendingPlanner : ICadPlanningProvider
+        {
+            public readonly TaskCompletionSource<bool> Started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<CadPlanningResult> Result = new TaskCompletionSource<CadPlanningResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
+            {
+                Started.TrySetResult(true);
+                return Result.Task;
+            }
+        }
+
+        [TestMethod]
         public async Task ApproveAndExecuteAsync_CurrentRevision_BuildsVerifiesAndStopsReadyForReview()
         {
             var executor = new SimulatedCadCommandExecutor();

@@ -15,6 +15,29 @@ namespace SolidWorksCadAgent.UnitTests
     public class SqliteJobRepositoryTests
     {
         [TestMethod]
+        public async Task RecoverInterruptedJobs_FailsWorkInFlightAndPreservesReviewAndTerminalStates()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SolidWorks-Recovery-" + Guid.NewGuid().ToString("N") + ".db");
+            try
+            {
+                using (var repository = new SqliteJobRepository(path))
+                {
+                    await repository.InitializeAsync();
+                    var states = (JobState[])Enum.GetValues(typeof(JobState));
+                    var jobs = states.Select(state => new CadJob { Id = Guid.NewGuid(), Prompt = "Recovery test", State = state, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }).ToArray();
+                    foreach (var job in jobs) await repository.CreateAsync(job);
+                    Assert.AreEqual(5, await repository.RecoverInterruptedJobsAsync());
+                    foreach (var job in jobs)
+                    {
+                        var interrupted = job.State == JobState.New || job.State == JobState.Interpreting || job.State == JobState.Approved || job.State == JobState.Executing || job.State == JobState.Verifying;
+                        Assert.AreEqual(interrupted ? JobState.Failed : job.State, (await repository.GetAsync(job.Id)).State);
+                    }
+                }
+            }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
+
+        [TestMethod]
         public async Task FullJobHistory_RoundTripsAcrossRepositoryReopen()
         {
             var databasePath = Path.Combine(

@@ -24,7 +24,8 @@ namespace SolidWorksCadAgent.Core.Jobs
             {
                 [JobState.New] = new HashSet<JobState>
                 {
-                    JobState.Interpreting
+                    JobState.Interpreting,
+                    JobState.Failed
                 },
                 [JobState.Interpreting] = new HashSet<JobState>
                 {

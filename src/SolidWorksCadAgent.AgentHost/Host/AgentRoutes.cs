@@ -127,9 +127,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 if (method == "DELETE") return DeleteCredential();
             }
 
-            if (method == "POST" && path == "/jobs")
+            if (method == "POST" && (path == "/jobs" || path == "/jobs/submit"))
             {
-                return await CreateJobAsync(request.Body, cancellationToken).ConfigureAwait(false);
+                return await CreateJobAsync(request.Body, cancellationToken, path == "/jobs/submit").ConfigureAwait(false);
             }
 
             if (method == "GET" && path == "/jobs")
@@ -423,7 +423,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
             return JobResponse(200, job);
         }
 
-        private async Task<AgentResponse> CreateJobAsync(string body, CancellationToken cancellationToken)
+        public Task WaitForBackgroundJobsAsync() => _coordinator?.WaitForSubmittedJobsAsync() ?? Task.CompletedTask;
+
+        private async Task<AgentResponse> CreateJobAsync(string body, CancellationToken cancellationToken, bool submitOnly = false)
         {
             CreateJobRequest request;
             try
@@ -452,9 +454,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
             {
                 try
                 {
-                    var snapshot = await _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken)
+                    var snapshot = await (submitOnly
+                        ? _coordinator.SubmitAsync(request.Prompt, cancellationToken)
+                        : _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken))
                         .ConfigureAwait(false);
-                    return SnapshotResponse(201, snapshot);
+                    return SnapshotResponse(submitOnly ? 202 : 201, snapshot);
                 }
                 catch (JobCoordinatorException ex)
                 {

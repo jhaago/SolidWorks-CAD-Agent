@@ -18,6 +18,19 @@ namespace SolidWorksCadAgent.AgentHost
     {
         private static int Main()
         {
+            using (var instance = new Mutex(true, "Local\\SolidWorksCadAgent.AgentHost", out var first))
+            {
+                if (!first)
+                {
+                    Console.Error.WriteLine("The CAD Agent Host is already running. No stored jobs were changed.");
+                    return 1;
+                }
+                return Run();
+            }
+        }
+
+        private static int Run()
+        {
             var dataDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SolidWorksCadAgent");
@@ -35,6 +48,8 @@ namespace SolidWorksCadAgent.AgentHost
                 try
                 {
                     repository.InitializeAsync().GetAwaiter().GetResult();
+                    var interrupted = repository.RecoverInterruptedJobsAsync().GetAwaiter().GetResult();
+                    if (interrupted > 0) Console.WriteLine("Marked " + interrupted + " interrupted jobs as failed; no CAD commands were replayed.");
                     var routes = AgentHostComposition.CreateRoutesForMode(
                         repository,
                         settings,

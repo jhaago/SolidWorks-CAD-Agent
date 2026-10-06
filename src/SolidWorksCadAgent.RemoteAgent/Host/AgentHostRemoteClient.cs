@@ -16,13 +16,16 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
     {
         private static readonly Uri BaseAddress = new Uri("http://127.0.0.1:53741/");
         private readonly HttpClient client;
+        private RemoteResponse lastSolidWorksStatus;
 
-        public AgentHostRemoteClient()
+        public AgentHostRemoteClient() : this(new HttpClientHandler { UseProxy = false, MaxConnectionsPerServer = 8 }) { }
+
+        public AgentHostRemoteClient(HttpMessageHandler handler)
         {
-            client = new HttpClient(new HttpClientHandler { UseProxy = false })
+            client = new HttpClient(handler)
             {
                 BaseAddress = BaseAddress,
-                Timeout = TimeSpan.FromSeconds(5)
+                Timeout = TimeSpan.FromMilliseconds(750)
             };
         }
 
@@ -31,7 +34,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             try
             {
                 if (method == "GET" && path == "status") return BuildStatus();
-                if (method == "POST" && path == "jobs") return Send("POST", "jobs", body);
+                if (method == "POST" && path == "jobs") return Send("POST", "jobs/submit", body);
 
                 Guid id;
                 if (TryJobPath(path, out id, out var cancel))
@@ -54,13 +57,18 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 
         private RemoteResponse BuildStatus()
         {
-            var healthResponse = Send("GET", "health", null);
+            // Independent reads run together, bounded below the phone's two-second deadline.
+            var healthTask = SendAsync("GET", "health", null);
+            var settingsTask = SendAsync("GET", "settings", null);
+            var solidWorksTask = ReadSolidWorksStatusAsync();
+            var jobsTask = SendAsync("GET", "jobs?limit=25", null);
+            Task.WhenAll(healthTask, settingsTask, solidWorksTask, jobsTask).GetAwaiter().GetResult();
+            var healthResponse = healthTask.Result;
             if (healthResponse.Status < 200 || healthResponse.Status >= 300) return healthResponse;
-            var settingsResponse = Send("GET", "settings", null);
+            var settingsResponse = settingsTask.Result;
             if (settingsResponse.Status < 200 || settingsResponse.Status >= 300) return settingsResponse;
-            var solidWorksResponse = Send("GET", "solidworks/status", null);
-            if (solidWorksResponse.Status < 200 || solidWorksResponse.Status >= 300) return solidWorksResponse;
-            var jobsResponse = Send("GET", "jobs?limit=25", null);
+            var solidWorksResponse = solidWorksTask.Result;
+            var jobsResponse = jobsTask.Result;
             if (jobsResponse.Status < 200 || jobsResponse.Status >= 300) return jobsResponse;
 
             var health = JObject.Parse(healthResponse.Body);
@@ -80,7 +88,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                     running = (bool?)solidWorks["isRunning"] ?? false,
                     attached = (bool?)solidWorks["isConnected"] ?? false,
                     visible = (bool?)solidWorks["isVisible"] ?? false,
-                    version = (string)solidWorks["runtime"]?["displayVersion"],
+                    version = (string)(solidWorks["runtime"] as JObject)?["displayVersion"],
                     activeDocument = (string)solidWorks["activeDocument"]
                 },
                 activeJob = activeJob == null ? null : new
@@ -92,14 +100,33 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             });
         }
 
-        private RemoteResponse Send(string method, string path, string body)
+        private async Task<RemoteResponse> ReadSolidWorksStatusAsync()
+        {
+            try
+            {
+                var response = await SendAsync("GET", "solidworks/status", null).ConfigureAwait(false);
+                if (response.Status >= 200 && response.Status < 300)
+                {
+                    System.Threading.Interlocked.Exchange(ref lastSolidWorksStatus, response);
+                    return response;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException) { }
+            // CAD status shares the native dispatcher. Keep other job and heartbeat routes responsive.
+            return System.Threading.Volatile.Read(ref lastSolidWorksStatus) ?? Json(200, new { });
+        }
+
+        private RemoteResponse Send(string method, string path, string body) =>
+            SendAsync(method, path, body).GetAwaiter().GetResult();
+
+        private async Task<RemoteResponse> SendAsync(string method, string path, string body)
         {
             using (var request = new HttpRequestMessage(method == "GET" ? HttpMethod.Get : HttpMethod.Post, path))
             {
                 if (method == "POST") request.Content = new StringContent(body ?? "{}", Encoding.UTF8, "application/json");
-                using (var response = client.SendAsync(request).GetAwaiter().GetResult())
+                using (var response = await client.SendAsync(request).ConfigureAwait(false))
                 {
-                    var responseBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (string.IsNullOrWhiteSpace(responseBody)) responseBody = "{}";
                     JToken.Parse(responseBody);
                     return new RemoteResponse { Status = (int)response.StatusCode, Body = responseBody };

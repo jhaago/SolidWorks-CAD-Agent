@@ -25,6 +25,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
         private readonly SemaphoreSlim _executionGate = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _submissionSlots = new SemaphoreSlim(4, 4);
+        private readonly object _submittedSync = new object();
+        private readonly HashSet<Task> _submitted = new HashSet<Task>();
 
         public JobCoordinator(
             SqliteJobRepository repository,
@@ -53,6 +56,51 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
 
         public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken)
         {
+            var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
+            return await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Return a durable job before cloud planning, for clients with short transport deadlines.
+        public async Task<JobSnapshot> SubmitAsync(string prompt, CancellationToken cancellationToken)
+        {
+            if (!_submissionSlots.Wait(0))
+                throw new JobCoordinatorException("SUBMISSION_BUSY", "Four submitted jobs are already pending. Wait for a job to finish.");
+            try
+            {
+                var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
+                var receipt = await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                var work = Task.Run(async () =>
+                {
+                    try { await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false); }
+                    catch
+                    {
+                        // Errors are observable through the durable job, never an unobserved task exception.
+                        await FailIfCurrentAsync(job.Id, JobState.New, CancellationToken.None).ConfigureAwait(false);
+                        await FailIfCurrentAsync(job.Id, JobState.Interpreting, CancellationToken.None).ConfigureAwait(false);
+                        await FailIfCurrentAsync(job.Id, JobState.Approved, CancellationToken.None).ConfigureAwait(false);
+                        await FailIfCurrentAsync(job.Id, JobState.Executing, CancellationToken.None).ConfigureAwait(false);
+                        await FailIfCurrentAsync(job.Id, JobState.Verifying, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    finally { _submissionSlots.Release(); }
+                });
+                lock (_submittedSync) _submitted.Add(work);
+                _ = work.ContinueWith(completed =>
+                {
+                    var observed = completed.Exception;
+                    lock (_submittedSync) _submitted.Remove(completed);
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                return receipt;
+            }
+            catch { _submissionSlots.Release(); throw; }
+        }
+
+        public Task WaitForSubmittedJobsAsync()
+        {
+            lock (_submittedSync) return Task.WhenAll(_submitted.ToArray());
+        }
+
+        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken)
+        {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
 
@@ -67,6 +115,14 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 UpdatedUtc = now
             };
             await _repository.CreateAsync(job, cancellationToken).ConfigureAwait(false);
+            return job;
+        }
+
+        private async Task<JobSnapshot> PlanCreatedJobAsync(CadJob job, CancellationToken cancellationToken)
+        {
+            // Reload so a cancellation received immediately after submission cannot be resurrected.
+            job = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            if (job.State != JobState.New) return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
             if (!await TransitionAsync(job, JobState.Interpreting, cancellationToken).ConfigureAwait(false))
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 

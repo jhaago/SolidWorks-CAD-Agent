@@ -1,6 +1,6 @@
 # First live remote workstation test
 
-This milestone adds manual primary-monitor viewing and input through a separate Windows RemoteAgent and the Android Remote screen. It does not add live AI desktop control. Android Home/Jobs and demo Assist/Agent remain simulated. Remote capture, real input, emergency hotkey and mobile-data access require the physical test below; CI does not certify them.
+The Android Remote screen supports paired CAD prompt submission, job status and Stop AI through the separate Windows RemoteAgent. CAD execution uses AgentHost and native SOLIDWORKS; approval and clarification remain on the Windows desktop. See [the V2 Android test guide](android-prompt-testing-v2.md). Android Home/Jobs and demo Assist/Agent remain simulated. Remote capture, real input, emergency hotkey and mobile-data access require physical testing; CI does not certify them.
 
 ## Prerequisites and setup
 
