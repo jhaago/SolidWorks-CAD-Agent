@@ -145,6 +145,18 @@ namespace SolidWorksCadAgent.Desktop
             var text = new StringBuilder();
             var fields = new[] { "Summary", "Observations", "VisibleText", "VisibleDimensions", "Inferences", "Assumptions", "Unknowns", "MissingDimensions", "Dimensions", "Constraints", "FeatureIntent", "Materials", "SuggestedViews", "ModellingStrategy", "RequiredCadFeatures", "UnsupportedFeatures", "Confidence", "Warnings" };
             foreach (var field in fields) { text.AppendLine(System.Text.RegularExpressions.Regex.Replace(field, "([a-z])([A-Z])", "$1 $2")); var value = Token(brief, field); if (value is JArray list) { if (list.Count == 0) text.AppendLine("None reported."); foreach (var line in list) text.AppendLine("• " + line); } else text.AppendLine(value?.ToString() ?? "Not reported."); text.AppendLine(); }
+            text.AppendLine("Resolved unknowns");
+            var resolvedUnknowns = ArrayOf(brief, "ResolvedUnknowns");
+            if (resolvedUnknowns.Count == 0) text.AppendLine("None reported.");
+            foreach (var resolution in resolvedUnknowns.OfType<JObject>())
+                text.AppendLine("Unknown: " + TextOf(resolution, "Unknown")).AppendLine("Evidence: " + TextOf(resolution, "Evidence")).AppendLine();
+            text.AppendLine();
+            text.AppendLine("Resolved questions");
+            var resolvedQuestions = ArrayOf(brief, "ResolvedQuestions");
+            if (resolvedQuestions.Count == 0) text.AppendLine("None reported.");
+            foreach (var resolution in resolvedQuestions.OfType<JObject>())
+                text.AppendLine("Question ID: " + TextOf(resolution, "QuestionId")).AppendLine("Evidence: " + TextOf(resolution, "Evidence")).AppendLine();
+            text.AppendLine();
             text.AppendLine("Questions"); var questions = ArrayOf(brief, "Questions"); if (questions.Count == 0) text.AppendLine("None reported."); foreach (var question in questions.OfType<JObject>()) text.AppendLine((TextOf(question, "Critical") == "True" ? "CRITICAL · " : "") + TextOf(question, "Question")).AppendLine("Answer: " + (string.IsNullOrWhiteSpace(TextOf(question, "Answer")) ? "Not answered" : TextOf(question, "Answer"))).AppendLine(); return text.ToString();
         }
         private async Task AttachAsync()

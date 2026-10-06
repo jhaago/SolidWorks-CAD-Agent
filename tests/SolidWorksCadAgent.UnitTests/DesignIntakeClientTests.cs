@@ -91,6 +91,24 @@ namespace SolidWorksCadAgent.UnitTests
             }
                     });
         }
+        [TestMethod]
+        public void BriefFormattingDisplaysResolutionEvidenceAndOriginalQuestions()
+        {
+            var brief = new JObject
+            {
+                ["ResolvedUnknowns"] = new JArray(new JObject { ["Unknown"] = "Plate thickness", ["Evidence"] = "Make the plate 6 mm thick." }),
+                ["ResolvedQuestions"] = new JArray(new JObject { ["QuestionId"] = "hole-diameter", ["Evidence"] = "Use two 8 mm holes." }),
+                ["Questions"] = new JArray(new JObject { ["Question"] = "What hole diameter?", ["Answer"] = "8 mm" })
+            };
+            var method = typeof(SolidWorksCadAgent.Desktop.DesignIntakeForm).GetMethod("FormatBrief", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var text = (string)method.Invoke(null, new object[] { brief });
+            StringAssert.Contains(text, "Unknown: Plate thickness");
+            StringAssert.Contains(text, "Evidence: Make the plate 6 mm thick.");
+            StringAssert.Contains(text, "Question ID: hole-diameter");
+            StringAssert.Contains(text, "Evidence: Use two 8 mm holes.");
+            StringAssert.Contains(text, "What hole diameter?");
+            StringAssert.Contains(text, "Answer: 8 mm");
+        }
         private static void RunSta(Action action)
         {
             Exception error = null;

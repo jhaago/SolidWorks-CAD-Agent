@@ -94,6 +94,11 @@ namespace SolidWorksCadAgent.AgentHost.Design
                 r == null || string.IsNullOrWhiteSpace(r.Unknown) || r.Unknown.Length > 4000 ||
                 string.IsNullOrWhiteSpace(r.Evidence) || r.Evidence.Length > 4000))
                 Fail("invalid_interpretation", "The interpretation contains invalid unknown resolutions.");
+            if (b.ResolvedQuestions == null || b.ResolvedQuestions.Count > 100 || b.ResolvedQuestions.Any(r =>
+                r == null || string.IsNullOrWhiteSpace(r.QuestionId) || r.QuestionId.Length > 100 ||
+                string.IsNullOrWhiteSpace(r.Evidence) || r.Evidence.Length > 4000) ||
+                b.ResolvedQuestions.Select(r => r.QuestionId).Distinct(StringComparer.Ordinal).Count() != b.ResolvedQuestions.Count)
+                Fail("invalid_interpretation", "The interpretation contains invalid question resolutions.");
             if (b.Questions == null || b.Questions.Count > 3 || b.Questions.Any(q => q == null || string.IsNullOrWhiteSpace(q.Id) || q.Id.Length > 100 || string.IsNullOrWhiteSpace(q.Question) || q.Question.Length > 4000 || (q.Answer ?? "").Length > 4000) || b.Questions.Select(q => q.Id).Distinct().Count() != b.Questions.Count) Fail("invalid_interpretation", "The interpretation contains invalid questions.");
         }
 
@@ -130,13 +135,30 @@ namespace SolidWorksCadAgent.AgentHost.Design
                 Validate(b);
                 b = JsonConvert.DeserializeObject<DesignInterpretation>(JsonConvert.SerializeObject(b));
                 var previous = s.Revisions.LastOrDefault()?.Brief;
+                if (previous == null) b.ResolvedQuestions.Clear();
                 if (previous != null)
                 {
+                    b.ResolvedQuestions = b.ResolvedQuestions.Where(resolution =>
+                        previous.Questions.Any(q => q.Id == resolution.QuestionId) &&
+                        s.Messages.Any(m => m.Role == "user" &&
+                            m.Text.IndexOf(resolution.Evidence, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
                     foreach (var q in previous.Questions.Where(q => q.Critical && string.IsNullOrWhiteSpace(q.Answer)))
                     {
                         var next = b.Questions.FirstOrDefault(n => n.Id == q.Id);
-                        if (next == null) b.Questions.Insert(0, q);
-                        else next.Critical = true;
+                        var resolution = b.ResolvedQuestions.FirstOrDefault(r => r.QuestionId == q.Id);
+                        if (resolution != null)
+                        {
+                            if (next != null)
+                            {
+                                next.Critical = true;
+                                next.Answer = resolution.Evidence;
+                            }
+                            continue;
+                        }
+                        if (next == null)
+                            b.Questions.Insert(0, JsonConvert.DeserializeObject<DesignQuestion>(JsonConvert.SerializeObject(q)));
+                        else
+                            next.Critical = true;
                     }
                     if (b.Questions.Count > 3) Fail("invalid_interpretation", "Resolve existing critical questions before adding more questions.");
                     foreach (var unknown in previous.Unknowns)
@@ -205,13 +227,22 @@ namespace SolidWorksCadAgent.AgentHost.Design
             if (s.CadJobId.HasValue) Fail("cad_already_planned", "This design already has a CAD job.");
             if (s.ApprovedRevisionId != revisionId || s.State != "DesignApproved" || s.LastError != null) Fail("approval_required", "Approve the current design revision first.");
             if (r.Brief.UnsupportedFeatures.Count != 0) Fail("unsupported_features", "This design requires unsupported CAD features.");
-            var brief = "Create a CAD plan from this explicitly approved design brief. Require separate CAD plan approval before execution.\n" + JsonConvert.SerializeObject(r.Brief);
+            var brief = "Create a CAD plan from this explicitly approved design brief. Require separate CAD plan approval before execution.\n" + JsonConvert.SerializeObject(new
+            {
+                DesignId = s.Id,
+                DesignRevisionId = r.Id,
+                RevisionNumber = r.Number,
+                ReferenceIds = r.ReferenceIds,
+                ApprovedBrief = r.Brief
+            });
             s.CadJobId = await plan(brief, token).ConfigureAwait(false);
             s.State = "CADPlanCreated";
             return Save(s);
         });
     }
 }
+
+
 
 
 

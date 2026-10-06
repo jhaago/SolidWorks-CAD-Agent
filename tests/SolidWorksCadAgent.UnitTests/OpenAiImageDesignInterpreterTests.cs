@@ -109,6 +109,10 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse((bool)resolutionSchema["additionalProperties"]);
             CollectionAssert.AreEqual(new[] { "Unknown", "Evidence" }, ((JArray)resolutionSchema["required"]).Values<string>().ToArray());
             StringAssert.Contains((string)payload["instructions"], "verbatim Evidence");
+            var questionResolutionSchema = schema["properties"]["ResolvedQuestions"]["items"];
+            Assert.IsFalse((bool)questionResolutionSchema["additionalProperties"]);
+            CollectionAssert.AreEqual(new[] { "QuestionId", "Evidence" }, ((JArray)questionResolutionSchema["required"]).Values<string>().ToArray());
+            StringAssert.Contains((string)payload["instructions"], "VERBATIM quoted Evidence");
             var content = (JArray)payload["input"][0]["content"];
             Assert.AreEqual(2, content.Count(c => (string)c["type"] == "input_image"));
             StringAssert.Contains((string)content[2]["image_url"], "data:image/png;base64,AQID");
@@ -275,6 +279,42 @@ namespace SolidWorksCadAgent.UnitTests
             public override void SetLength(long value) => throw new NotSupportedException();
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
+        [TestMethod]
+        public void ParseInterpretation_AcceptsQuestionResolutionSeparateFromUnansweredQuestions()
+        {
+            var brief = Brief(); brief["Questions"] = new JArray();
+            brief["ResolvedQuestions"] = new JArray(new JObject { ["QuestionId"] = "thickness", ["Evidence"] = "Thickness is 3 mm" });
+            var result = OpenAiImageDesignInterpreter.ParseInterpretation(brief.ToString());
+            Assert.AreEqual(0, result.Questions.Count);
+            Assert.AreEqual("thickness", result.ResolvedQuestions[0].QuestionId);
+            Assert.AreEqual("Thickness is 3 mm", result.ResolvedQuestions[0].Evidence);
+        }
+        [DataTestMethod]
+        [DataRow("[{\"QuestionId\":42,\"Evidence\":\"3 mm\"}]")]
+        [DataRow("[{\"QuestionId\":\"thickness\",\"Evidence\":false}]")]
+        [DataRow("[{\"QuestionId\":\"thickness\"}]")]
+        [DataRow("[{\"QuestionId\":\"thickness\",\"Evidence\":\"3 mm\",\"Extra\":true}]")]
+        [DataRow("[{\"QuestionId\":\"thickness\",\"Evidence\":\"3 mm\"},{\"QuestionId\":\"thickness\",\"Evidence\":\"3 mm\"}]")]
+        [DataRow("[null]")]
+        [DataRow("null")]
+        public void ParseInterpretation_RejectsInvalidQuestionResolutionTokens(string resolutions)
+        {
+            var brief = Brief(); brief["ResolvedQuestions"] = JToken.Parse(resolutions);
+            Assert.ThrowsException<OpenAiPlanningException>(() => OpenAiImageDesignInterpreter.ParseInterpretation(brief.ToString()));
+        }
+        [TestMethod]
+        public void ParseInterpretation_RequiresAndBoundsQuestionResolutions()
+        {
+            var brief = Brief(); brief.Remove("ResolvedQuestions");
+            Assert.ThrowsException<OpenAiPlanningException>(() => OpenAiImageDesignInterpreter.ParseInterpretation(brief.ToString()));
+            foreach (var resolution in new[] { new JObject { ["QuestionId"] = new string('x', 101), ["Evidence"] = "3 mm" }, new JObject { ["QuestionId"] = "thickness", ["Evidence"] = new string('x', 4001) }, new JObject { ["QuestionId"] = "", ["Evidence"] = "3 mm" } })
+            {
+                brief["ResolvedQuestions"] = new JArray(resolution);
+                Assert.ThrowsException<OpenAiPlanningException>(() => OpenAiImageDesignInterpreter.ParseInterpretation(brief.ToString()));
+            }
+            brief["ResolvedQuestions"] = new JArray(Enumerable.Range(0, 101).Select(i => new JObject { ["QuestionId"] = i.ToString(), ["Evidence"] = "3 mm" }));
+            Assert.ThrowsException<OpenAiPlanningException>(() => OpenAiImageDesignInterpreter.ParseInterpretation(brief.ToString()));
+        }
         private sealed class Handler : HttpMessageHandler
         {
             private readonly string _body;
@@ -301,8 +341,3 @@ namespace SolidWorksCadAgent.UnitTests
         }
     }
 }
-
-
-
-
-

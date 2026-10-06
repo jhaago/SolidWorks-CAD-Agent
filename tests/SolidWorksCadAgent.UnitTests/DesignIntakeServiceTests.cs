@@ -28,6 +28,51 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
         [TestMethod]
+        public async Task OmittedCriticalQuestionsResolveOnlyWithMatchingUserEvidence()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var repo = new DesignSessionRepository(Path.Combine(dir, "design-intake.db"));
+                repo.Initialize();
+                var provider = new Provider();
+                foreach (string id in new[] { "width", "height", "thickness" })
+                    provider.Result.Questions.Add(new DesignQuestion { Id = id, Question = "Specify " + id, Critical = true });
+                var service = new DesignIntakeService(repo, new ReferenceImageStore(dir), provider,
+                    (brief, token) => Task.FromResult(Guid.NewGuid()));
+                var session = await service.CreateAsync("Plate");
+                await service.AddReferenceAsync(session.Id, "front.png", ImageBytes, "", "");
+                session = await service.DiscussAsync(session.Id, "Interpret this plate");
+                Guid initialRevision = session.Revisions[0].Id;
+                provider.Result = new DesignInterpretation { Summary = "Plate with dimensions" };
+                provider.Result.ResolvedQuestions.Add(new DesignQuestionResolution { QuestionId = "material", Evidence = "steel" });
+                provider.Result.ResolvedQuestions.Add(new DesignQuestionResolution { QuestionId = "width", Evidence = "Width is 999 mm" });
+                session = await service.DiscussAsync(session.Id, "Use steel");
+                Assert.AreEqual("NeedsClarification", session.State);
+                Assert.AreEqual(3, session.Revisions[1].Brief.Questions.Count);
+                Assert.AreEqual(0, session.Revisions[1].Brief.ResolvedQuestions.Count);
+                provider.Result = new DesignInterpretation { Summary = "Plate with confirmed dimensions" };
+                foreach (string id in new[] { "width", "height", "thickness" })
+                    provider.Result.ResolvedQuestions.Add(new DesignQuestionResolution
+                    {
+                        QuestionId = id,
+                        Evidence = "Width 100 mm, height 60 mm, thickness 10 mm"
+                    });
+                session = await service.DiscussAsync(session.Id, "Width 100 mm, height 60 mm, thickness 10 mm");
+                Assert.AreEqual("AwaitingDesignApproval", session.State);
+                Assert.AreEqual(0, session.Revisions[2].Brief.Questions.Count);
+                Assert.AreEqual(3, session.Revisions[2].Brief.ResolvedQuestions.Count);
+                Assert.AreEqual(initialRevision, session.Revisions[0].Id);
+                Assert.IsTrue(session.Revisions[0].Brief.Questions.TrueForAll(q => q.Answer == null));
+                await service.ApproveAsync(session.Id, session.Revisions[2].Id);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+        [TestMethod]
         public async Task UnknownResolutionRequiresMatchingUnknownAndUserEvidence()
         {
             string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -83,9 +128,11 @@ namespace SolidWorksCadAgent.UnitTests
                 repo.Initialize();
                 var p = new Provider();
                 int calls = 0;
+                string capturedPrompt = null;
                 var service = new DesignIntakeService(repo, new ReferenceImageStore(dir), p, (brief, t) =>
                 {
                     calls++;
+                    capturedPrompt = brief;
                     return Task.FromResult(Guid.NewGuid());
                 });
                 var s = await service.CreateAsync("Plate");
@@ -105,6 +152,12 @@ namespace SolidWorksCadAgent.UnitTests
                 await service.ApproveAsync(s.Id, current);
                 s = await service.PlanCadAsync(s.Id, current);
                 Assert.AreEqual(1, calls);
+                Assert.IsTrue(capturedPrompt.Contains(s.Id.ToString()));
+                Assert.IsTrue(capturedPrompt.Contains(current.ToString()));
+                Assert.IsTrue(capturedPrompt.Contains(s.References[0].Id.ToString()));
+                Assert.IsTrue(capturedPrompt.Contains("\"RevisionNumber\":2"));
+                Assert.IsFalse(capturedPrompt.Contains(old.ToString()));
+                Assert.IsFalse(capturedPrompt.Contains(s.References[0].RelativePath));
                 Assert.IsTrue(repo.Get(s.Id).CadJobId.HasValue);
                 await Assert.ThrowsExceptionAsync<DesignIntakeException>(() => service.PlanCadAsync(s.Id, current));
             }
@@ -267,5 +320,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
     }
 }
+
+
 
 

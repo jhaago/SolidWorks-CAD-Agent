@@ -42,12 +42,18 @@ namespace SolidWorksCadAgent.Contracts.Design
         public List<string> RequiredCadFeatures { get; set; } = new List<string>();
         public List<string> UnsupportedFeatures { get; set; } = new List<string>();
         public List<DesignQuestion> Questions { get; set; } = new List<DesignQuestion>();
+        public List<DesignQuestionResolution> ResolvedQuestions { get; set; } = new List<DesignQuestionResolution>();
         public string Confidence { get; set; }
         public List<string> Warnings { get; set; } = new List<string>();
     }
     public sealed class DesignUnknownResolution
     {
         public string Unknown { get; set; }
+        public string Evidence { get; set; }
+    }
+    public sealed class DesignQuestionResolution
+    {
+        public string QuestionId { get; set; }
         public string Evidence { get; set; }
     }
     public sealed class DesignMessage
