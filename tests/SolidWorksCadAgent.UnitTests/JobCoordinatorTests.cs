@@ -299,6 +299,171 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task TypedLegacySubset_InvalidCircleIsRejectedBeforeAnyExecutorCall()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "Invalid circle diameter.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddCircle, Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 0.0 }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Create a part with a circle", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.AreEqual(0, executor.CallCount);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "diameterMm");
+        }
+
+        [TestMethod]
+        public async Task TypedLegacySubsetExecutesWithSamePersistedAndDispatchedParameters()
+        {
+            var executor = new CapturingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "A typed-subset smoke plan.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddCircle, Parameters = JObject.FromObject(new { centerXmm = 2.5, centerYmm = -4.0, diameterMm = 8.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddLine, Parameters = JObject.FromObject(new { startXmm = -12.5, startYmm = 3.0, endXmm = 4.25, endYmm = 9.5 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.ExitSketch, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.Extrude, Parameters = JObject.FromObject(new { depthMm = 10.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.SavePart, Parameters = JObject.FromObject(new { path = "typed-operation.sldprt" }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Create a circular boss", CancellationToken.None);
+            Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
+            var persisted = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(planned.Revisions.Single().PlanJson);
+            Assert.AreEqual(7, persisted.ProposedCommands.Count);
+            Assert.IsNull(JObject.Parse(planned.Revisions.Single().PlanJson)["ProposedCommands"][0]["operationVersion"]);
+
+            var completed = await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.ReadyForReview, completed.Job.State);
+            Assert.AreEqual(CadCommandNames.NewPart, executor.Received[0].Command);
+            Assert.AreEqual(CadCommandNames.CreateSketch, executor.Received[1].Command);
+            Assert.AreEqual("Top Plane", (string)executor.Received[1].Parameters["plane"]);
+            Assert.AreEqual(CadCommandNames.AddCircle, executor.Received[2].Command);
+            Assert.AreEqual(plan.ProposedCommands[2].Parameters.ToString(), executor.Received[2].Parameters.ToString());
+            Assert.AreEqual(CadCommandNames.AddLine, executor.Received[3].Command);
+            Assert.AreEqual(plan.ProposedCommands[3].Parameters.ToString(), executor.Received[3].Parameters.ToString());
+            Assert.AreEqual(planned.Job.Id, executor.Received[0].ExecutionId);
+        }
+
+        [TestMethod]
+        public async Task TypedLegacySubset_DegenerateLineIsRejectedBeforeAnyExecutorCall()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "A zero-length line is invalid.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddLine, Parameters = JObject.FromObject(new { startXmm = 1.0, startYmm = 2.0, endXmm = 1.0, endYmm = 2.0 }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Draw a line with identical endpoints", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.AreEqual(0, executor.CallCount);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "Start and end");
+        }
+
+        [TestMethod]
+        public async Task InvalidLifecyclePlanIsRejectedBeforeAnyExecutorCall()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "The sketch must close before the part is saved.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddRectangle, Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 40.0, heightMm = 20.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.SavePart, Parameters = JObject.FromObject(new { path = "open-sketch.sldprt" }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Create and save a rectangle", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.AreEqual(0, executor.CallCount);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "ExitSketch");
+        }
+
+        [TestMethod]
+        public async Task FeatureWithoutSupportedClosedProfileIsRejectedBeforeAnyExecutorCall()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "A line-only sketch has no profile with proven closure.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddLine, Parameters = JObject.FromObject(new { startXmm = 0.0, startYmm = 0.0, endXmm = 20.0, endYmm = 0.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.ExitSketch, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.Extrude, Parameters = JObject.FromObject(new { depthMm = 10.0 }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Extrude an open line", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.AreEqual(0, executor.CallCount);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "supported closed profile primitive");
+        }
+
+        [TestMethod]
+        public async Task ModelChangeAfterFinalSaveIsRejectedBeforeAnyExecutorCall()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = new CadPlanningResult
+            {
+                Summary = "A model change cannot follow the final saved artifact.",
+                ProposedCommands = new System.Collections.Generic.List<CadCommandEnvelope>
+                {
+                    new CadCommandEnvelope { Command = CadCommandNames.NewPart, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.AddRectangle, Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 40.0, heightMm = 20.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.ExitSketch, Parameters = new JObject() },
+                    new CadCommandEnvelope { Command = CadCommandNames.Extrude, Parameters = JObject.FromObject(new { depthMm = 10.0 }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.SavePart, Parameters = JObject.FromObject(new { path = "finalized-part.sldprt" }) },
+                    new CadCommandEnvelope { Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }) }
+                }
+            };
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Create, save, then modify a part", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.AreEqual(0, executor.CallCount);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "final model-changing operation");
+        }
+
+        [TestMethod]
         public async Task ApproveAndExecuteAsync_TwoJobs_NeverExecuteCadCommandsConcurrently()
         {
             var executor = new BlockingSuccessfulExecutor();
@@ -417,6 +582,22 @@ namespace SolidWorksCadAgent.UnitTests
                 if (command == CadCommandNames.GetBoundingBox) return CadCommandResult.Ok(new { SizeXmm = 100.0, SizeYmm = 60.0, SizeZmm = 10.0 });
                 if (command == CadCommandNames.GetRebuildErrors) return CadCommandResult.Ok(new { HasErrors = false });
                 return CadCommandResult.Ok(new { Completed = true });
+            }
+        }
+
+        private sealed class CapturingSuccessfulExecutor : RecordingSuccessfulExecutor
+        {
+            public System.Collections.Generic.List<CadCommandEnvelope> Received { get; } = new System.Collections.Generic.List<CadCommandEnvelope>();
+
+            public override Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken)
+            {
+                Received.Add(new CadCommandEnvelope
+                {
+                    Command = command.Command,
+                    Parameters = command.Parameters == null ? new JObject() : (JObject)command.Parameters.DeepClone(),
+                    ExecutionId = command.ExecutionId
+                });
+                return base.ExecuteAsync(command, cancellationToken);
             }
         }
 

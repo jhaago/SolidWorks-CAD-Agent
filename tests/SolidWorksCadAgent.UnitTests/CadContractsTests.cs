@@ -54,8 +54,8 @@ namespace SolidWorksCadAgent.UnitTests
             var expected = new[]
             {
                 "AttachSolidWorks", "LaunchSolidWorks", "NewPart", "OpenPart", "SavePart", "CloseDocument",
-                "CreateSketch", "AddLine", "AddArc", "AddRectangle", "AddCircle", "AddSlot", "AddRegularPolygon", "ExitSketch", "Extrude",
-                "CutExtrude", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree"
+                "CreateSketch", "CreateSketchOnFace", "AddLine", "AddArc", "AddRectangle", "AddCircle", "AddSlot", "AddRegularPolygon", "ExitSketch", "Extrude",
+                "CutExtrude", "FilletEdges", "ChamferEdges", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree"
             };
 
             var values = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)

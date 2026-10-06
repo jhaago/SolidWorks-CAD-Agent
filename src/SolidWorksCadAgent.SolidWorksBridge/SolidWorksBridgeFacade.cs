@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using SolidWorksCadAgent.Contracts.Cad;
@@ -18,6 +19,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         private readonly CadCommandRegistry _registry;
         private readonly SemaphoreSlim _commandGate = new SemaphoreSlim(1, 1);
         private bool _disposed;
+
+        public IReadOnlyCollection<string> RegisteredCommandNames => _registry.CommandNames;
 
         public SolidWorksBridgeFacade()
             : this(new SolidWorksSession(), new WorkspacePolicy(new AgentSettings().WorkspaceRoot), true)

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -10,6 +12,7 @@ namespace SolidWorksCadAgent.Core.Commands
     public sealed class CadCommandRegistry
     {
         private readonly Dictionary<string, ICadCommandHandler> _handlers;
+        private readonly ReadOnlyCollection<string> _commandNames;
 
         public CadCommandRegistry(IEnumerable<ICadCommandHandler> handlers)
         {
@@ -38,7 +41,11 @@ namespace SolidWorksCadAgent.Core.Commands
 
                 _handlers.Add(handler.Name, handler);
             }
+
+            _commandNames = Array.AsReadOnly(_handlers.Keys.OrderBy(name => name, StringComparer.Ordinal).ToArray());
         }
+
+        public IReadOnlyCollection<string> CommandNames => _commandNames;
 
         public async Task<CadCommandResult> ExecuteAsync(
             CadCommandEnvelope command,

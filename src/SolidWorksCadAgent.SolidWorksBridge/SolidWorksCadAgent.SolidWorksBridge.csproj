@@ -15,6 +15,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Draft edge finishing still lacks the persistent semantic face/edge resolver. Keep the WIP source in-tree, but out of both interop build paths until its topology dependencies are implemented. -->
+    <Compile Remove="Commands\EdgeFinishingCommandHandlers.cs" />
     <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
     <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
   </ItemGroup>

@@ -9,6 +9,7 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string SavePart = "SavePart";
         public const string CloseDocument = "CloseDocument";
         public const string CreateSketch = "CreateSketch";
+        public const string CreateSketchOnFace = "CreateSketchOnFace";
         public const string AddLine = "AddLine";
         public const string AddArc = "AddArc";
         public const string AddRectangle = "AddRectangle";
@@ -18,6 +19,8 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string ExitSketch = "ExitSketch";
         public const string Extrude = "Extrude";
         public const string CutExtrude = "CutExtrude";
+        public const string FilletEdges = "FilletEdges";
+        public const string ChamferEdges = "ChamferEdges";
         public const string Rebuild = "Rebuild";
         public const string GetBoundingBox = "GetBoundingBox";
         public const string GetBodyCount = "GetBodyCount";
@@ -25,4 +28,3 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetFeatureTree = "GetFeatureTree";
     }
 }
-

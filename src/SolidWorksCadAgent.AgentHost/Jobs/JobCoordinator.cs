@@ -485,12 +485,25 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             CancellationToken cancellationToken)
         {
             var started = _utcNow();
-            var result = await _executor.ExecuteAsync(new CadCommandEnvelope
+            var commandToExecute = command;
+            if (LegacyCadOperationAdapter.TryAdapt(command, out var operation, out var adaptationError))
             {
-                Command = command.Command,
-                Parameters = command.Parameters,
-                ExecutionId = jobId
-            }, cancellationToken).ConfigureAwait(false);
+                commandToExecute = operation.ToCommandEnvelope();
+            }
+
+            var result = adaptationError == null
+                ? await _executor.ExecuteAsync(new CadCommandEnvelope
+                {
+                    Command = commandToExecute.Command,
+                    Parameters = commandToExecute.Parameters,
+                    ExecutionId = jobId
+                }, cancellationToken).ConfigureAwait(false)
+                : new CadCommandResult
+                {
+                    Success = false,
+                    Data = new JObject(),
+                    Error = adaptationError
+                };
             await _repository.AppendCommandAsync(new CommandExecutionRecord
             {
                 Id = Guid.NewGuid(),
@@ -544,9 +557,18 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
             foreach (var command in plan.ProposedCommands)
             {
+                if (LegacyCadOperationAdapter.TryAdapt(command, out _, out var adaptationError))
+                    continue;
+                if (adaptationError != null)
+                {
+                    errors.Add(adaptationError.Message);
+                    continue;
+                }
+
                 var error = CadPlanningCommandContract.Validate(command);
                 if (error != null) errors.Add(error);
             }
+            errors.AddRange(CadPlanLifecycleValidator.Validate(plan.ProposedCommands));
             return errors;
         }
 

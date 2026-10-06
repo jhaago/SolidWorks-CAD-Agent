@@ -2,6 +2,10 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## CAD architecture and expansion blueprint
+
+The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md) for the repository review, architectural debt, testing hierarchy and future-agent rules, and [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md) for dependencies and the next ten increments. The current tree builds in both interop modes, while face-sketch and finishing work remains unregistered and unverified; the review distinguishes historical native evidence from these drafts.
+
 ## PC V2 development
 
 The latest CAD capability increment is on `feature/v2-cad-profiles-and-pockets`, based on the image-design intake V2 line. It adds native rotated obround slots, regular polygon profiles and depth-controlled blind cuts through the existing approved planner. See [capabilities, examples and precise placement limits](docs/prismatic-cad-capabilities.md).
