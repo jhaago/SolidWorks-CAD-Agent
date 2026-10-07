@@ -1,6 +1,6 @@
 # CAD implementation handoff
 
-Updated 2026-10-07. Source base revision: `10ea19b66ebd7b21fe5e14ad5b5f269ce8a1e6c9` plus reviewed local changes for increments 1g and 2. The unrelated whitespace-only change in `PrismaticCapabilityTests.cs` is excluded from publication. No deployment or merge was made.
+Updated 2026-10-07. Reviewed implementation revision: `7820cc1` on `feature/v2-face-sketches-and-finishing`, pushed to GitHub. The unrelated whitespace-only change in `PrismaticCapabilityTests.cs` remains uncommitted and was excluded. No deployment or merge was made.
 
 ## Current bounded slice and publication review
 
