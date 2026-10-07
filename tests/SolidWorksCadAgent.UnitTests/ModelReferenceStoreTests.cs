@@ -146,6 +146,45 @@ namespace SolidWorksCadAgent.UnitTests
             finally { TryDeleteDatabase(path); }
         }
 
+        [TestMethod]
+        public async Task FindModelByCanonicalPathAsync_IsCaseInsensitive()
+        {
+            var path = TempDatabasePath();
+            try
+            {
+                using (var repository = await OpenRepository(path))
+                {
+                    var model = NewModel(Guid.NewGuid());
+                    model.CanonicalPath = Path.Combine(Path.GetTempPath(), "ManagedPart.SLDPRT");
+                    await repository.RegisterModelAsync(model, default(System.Threading.CancellationToken));
+                    var found = await repository.FindModelByCanonicalPathAsync(model.CanonicalPath.ToUpperInvariant(), default(System.Threading.CancellationToken));
+                    Assert.IsNotNull(found);
+                    Assert.AreEqual(model.ModelId, found.ModelId);
+                }
+            }
+            finally { TryDeleteDatabase(path); }
+        }
+
+        [TestMethod]
+        public async Task FindModelByCanonicalPathAsync_RejectsAmbiguousMatches()
+        {
+            var path = TempDatabasePath();
+            try
+            {
+                using (var repository = await OpenRepository(path))
+                {
+                    var canonicalPath = Path.Combine(Path.GetTempPath(), "DuplicateManagedPart.SLDPRT");
+                    var first = NewModel(Guid.NewGuid()); first.CanonicalPath = canonicalPath;
+                    var second = NewModel(Guid.NewGuid()); second.CanonicalPath = canonicalPath;
+                    await repository.RegisterModelAsync(first, default(System.Threading.CancellationToken));
+                    await repository.RegisterModelAsync(second, default(System.Threading.CancellationToken));
+                    await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                        repository.FindModelByCanonicalPathAsync(canonicalPath, default(System.Threading.CancellationToken)));
+                }
+            }
+            finally { TryDeleteDatabase(path); }
+        }
+
         private static async Task<SqliteJobRepository> OpenRepository(string path)
         {
             var repository = new SqliteJobRepository(path);

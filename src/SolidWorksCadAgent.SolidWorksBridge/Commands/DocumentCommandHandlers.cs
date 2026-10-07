@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,8 +51,41 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("NEW_PART_FAILED", "Execute", "SOLIDWORKS did not create a new part document.");
                 }
 
+                var modelId = DocumentContext(Session).ManagedModelId;
+                if (modelId.HasValue)
+                {
+                    try
+                    {
+                        var propertyManager = model.Extension.CustomPropertyManager[""];
+                        var addResult = propertyManager.Add3(
+                            "SolidWorksCadAgent.ModelId",
+                            (int)swCustomInfoType_e.swCustomInfoText,
+                            modelId.Value.ToString("D"),
+                            (int)swCustomPropertyAddOption_e.swCustomPropertyOnlyIfNew);
+                        string value;
+                        string resolvedValue;
+                        bool wasResolved;
+                        bool isLinked;
+                        var getResult = propertyManager.Get6("SolidWorksCadAgent.ModelId", false, out value, out resolvedValue, out wasResolved, out isLinked);
+                        if (getResult == (int)swCustomInfoGetResult_e.swCustomInfoGetResult_NotPresent ||
+                            !Guid.TryParse(value, out var storedModelId) || storedModelId != modelId.Value)
+                        {
+                            try { swApp.CloseDoc(model.GetTitle()); }
+                            catch { }
+                            return Failure("MODEL_ID_STAMP_FAILED", "Execute", "The managed model ID custom property could not be added and verified.",
+                                "Add3 result=" + addResult + "; Get6 result=" + getResult);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        try { swApp.CloseDoc(model.GetTitle()); }
+                        catch { }
+                        return Failure("MODEL_ID_STAMP_FAILED", "Execute", "SOLIDWORKS failed while writing or verifying the managed model ID property.", ex.Message);
+                    }
+                }
+
                 BindDocument(model);
-                return Ok(new { documentTitle = model.GetTitle(), template });
+                return Ok(new { documentTitle = model.GetTitle(), template, configurationKey = model.ConfigurationManager.ActiveConfiguration.Name });
 #else
                 return InteropUnavailable();
 #endif

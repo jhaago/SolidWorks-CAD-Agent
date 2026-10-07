@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -230,6 +232,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (plan == null)
                 throw new JobCoordinatorException("INVALID_PLAN", "The persisted CAD plan could not be loaded.");
             plan = NormalizePlan(plan);
+            RequireCurrentPlanValid(plan);
 
             if (!await TransitionAsync(snapshot.Job, JobState.Approved, cancellationToken, revisionId).ConfigureAwait(false))
                 throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while approval was being processed.");
@@ -409,23 +412,63 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         {
             if (!ApprovalPolicy.CanExecute(job, _settings))
                 throw new JobCoordinatorException("APPROVAL_REQUIRED", "The CAD job has not passed the execution approval policy.");
+            RequireCurrentPlanValid(plan);
             if (!await TransitionAsync(job, JobState.Executing, cancellationToken).ConfigureAwait(false))
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 
             var sequence = 0;
+            CadModelIdentityRecord managedModel = null;
             foreach (var command in plan.ProposedCommands)
             {
                 var current = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
                 if (current == null || current.State == JobState.Cancelled)
                     return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 
-                var executableCommand = PrepareForExecution(current, command);
-                var result = await ExecuteAndRecordAsync(job.Id, revision.RevisionNumber, ++sequence, executableCommand, cancellationToken)
-                    .ConfigureAwait(false);
+                if (_executionMode == ExecutionMode.Real && command.Command == CadCommandNames.NewPart)
+                {
+                    managedModel = CreatePendingModelIdentity();
+                    await _repository.RegisterModelAsync(managedModel, cancellationToken).ConfigureAwait(false);
+                }
+
+                var modelRevisionId = managedModel != null && ChangesManagedModel(command.Command) ? Guid.NewGuid() : (Guid?)null;
+                var outputEntityId = managedModel != null && command.Command == CadCommandNames.CreateSketch ? Guid.NewGuid() : (Guid?)null;
+                if (outputEntityId.HasValue)
+                {
+                    await _repository.AddEntityBindingAsync(CreatePendingSketchBinding(managedModel, outputEntityId.Value, modelRevisionId.Value), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                var executableCommand = PrepareForExecution(current, command, managedModel?.ModelId, outputEntityId);
+                CadCommandResult result;
+                try
+                {
+                    result = await ExecuteAndRecordAsync(job.Id, revision.RevisionNumber, ++sequence, executableCommand, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    await MarkIdentityUncertainAsync(managedModel, outputEntityId, CancellationToken.None).ConfigureAwait(false);
+                    throw;
+                }
                 if (!result.Success)
                 {
+                    await MarkIdentityUncertainAsync(managedModel, outputEntityId, CancellationToken.None).ConfigureAwait(false);
                     await FailIfCurrentAsync(job.Id, JobState.Executing, cancellationToken).ConfigureAwait(false);
                     return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (managedModel != null)
+                {
+                    try
+                    {
+                        await UpdateManagedModelAfterCommandAsync(managedModel, command.Command, result, modelRevisionId, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        await MarkIdentityUncertainAsync(managedModel, outputEntityId, CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
                 }
             }
 
@@ -433,7 +476,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (job.State == JobState.Cancelled || !await TransitionAsync(job, JobState.Verifying, cancellationToken).ConfigureAwait(false))
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 
-            var verificationPassed = await VerifyAsync(job, revision.RevisionNumber, sequence, cancellationToken).ConfigureAwait(false);
+            var verificationPassed = await VerifyAsync(job, revision.RevisionNumber, sequence, managedModel?.ModelId, cancellationToken).ConfigureAwait(false);
             job = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
             if (job.State == JobState.Cancelled)
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
@@ -449,6 +492,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             CadJob job,
             int revisionNumber,
             int sequence,
+            Guid? managedModelId,
             CancellationToken cancellationToken)
         {
             var checks = new[]
@@ -460,7 +504,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var allPassed = true;
             foreach (var check in checks)
             {
-                var command = new CadCommandEnvelope { Command = check.Command, Parameters = new JObject() };
+                var command = new CadCommandEnvelope { Command = check.Command, Parameters = new JObject(), ManagedModelId = managedModelId };
                 var result = await ExecuteAndRecordAsync(job.Id, revisionNumber, ++sequence, command, cancellationToken)
                     .ConfigureAwait(false);
                 var passed = EvaluateVerification(check.Name, result);
@@ -500,7 +544,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 {
                     Command = commandToExecute.Command,
                     Parameters = commandToExecute.Parameters,
-                    ExecutionId = jobId
+                    ExecutionId = jobId,
+                    ManagedModelId = command.ManagedModelId,
+                    OutputEntityId = command.OutputEntityId
                 }, cancellationToken).ConfigureAwait(false)
                 : new CadCommandResult
                 {
@@ -545,7 +591,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             return _repository.GetSnapshotAsync(jobId, cancellationToken);
         }
 
-        private static List<string> ValidatePlan(CadPlanningResult plan)
+        private List<string> ValidatePlan(CadPlanningResult plan)
         {
             var errors = new List<string>();
             if (plan == null)
@@ -572,16 +618,140 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 var error = CadPlanningCommandContract.Validate(command);
                 if (error != null) errors.Add(error);
             }
-            errors.AddRange(CadPlanLifecycleValidator.Validate(plan.ProposedCommands));
+            errors.AddRange(CadPlanLifecycleValidator.Validate(plan.ProposedCommands, _executionMode));
             return errors;
         }
 
-        private static CadCommandEnvelope PrepareForExecution(CadJob job, CadCommandEnvelope command)
+        private void RequireCurrentPlanValid(CadPlanningResult plan)
         {
-            if (command.Command != CadCommandNames.SavePart) return command;
+            var errors = ValidatePlan(plan);
+            if (errors.Count > 0)
+                throw new JobCoordinatorException("INVALID_PLAN", "The saved CAD plan no longer passes current preflight: " + string.Join(" ", errors));
+        }
+
+        private CadCommandEnvelope PrepareForExecution(CadJob job, CadCommandEnvelope command, Guid? managedModelId, Guid? outputEntityId)
+        {
             var parameters = command.Parameters == null ? new JObject() : (JObject)command.Parameters.DeepClone();
-            parameters["allowOverwrite"] = job.OverwriteAuthorized;
-            return new CadCommandEnvelope { Command = command.Command, Parameters = parameters };
+            if (command.Command == CadCommandNames.SavePart)
+                parameters["allowOverwrite"] = job.OverwriteAuthorized;
+            return new CadCommandEnvelope
+            {
+                Command = command.Command,
+                Parameters = parameters,
+                ManagedModelId = managedModelId,
+                OutputEntityId = outputEntityId
+            };
+        }
+
+        private CadModelIdentityRecord CreatePendingModelIdentity()
+        {
+            var now = _utcNow();
+            return new CadModelIdentityRecord
+            {
+                ModelId = Guid.NewGuid(),
+                DocumentKind = "Part",
+                Status = CadModelIdentityStatus.Pending,
+                CustomPropertyKey = "SolidWorksCadAgent.ModelId",
+                CurrentModelRevisionId = Guid.NewGuid(),
+                ConfigurationKey = "Pending",
+                RegistryVersion = 1,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            };
+        }
+
+        private CadEntityReferenceBinding CreatePendingSketchBinding(CadModelIdentityRecord model, Guid entityId, Guid revisionId)
+        {
+            var now = _utcNow();
+            return new CadEntityReferenceBinding
+            {
+                ModelId = model.ModelId,
+                EntityId = entityId,
+                EntityKind = "Sketch",
+                ConfigurationKey = model.ConfigurationKey,
+                NativeObjectKind = "SketchFeature",
+                ReferenceFormatVersion = 3,
+                CreatedAtModelRevisionId = revisionId,
+                Status = CadEntityReferenceStatus.Pending,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            };
+        }
+
+        private async Task UpdateManagedModelAfterCommandAsync(
+            CadModelIdentityRecord model,
+            string command,
+            CadCommandResult result,
+            Guid? modelRevisionId,
+            CancellationToken cancellationToken)
+        {
+            if (modelRevisionId.HasValue) model.CurrentModelRevisionId = modelRevisionId.Value;
+            if (command == CadCommandNames.NewPart)
+            {
+                model.ConfigurationKey = (string)result.Data?["configurationKey"] ?? "Default";
+                model.Status = CadModelIdentityStatus.ActiveUnsaved;
+            }
+            else if (command == CadCommandNames.SavePart)
+            {
+                var path = (string)result.Data?["path"];
+                if (string.IsNullOrWhiteSpace(path)) throw new InvalidOperationException("SavePart succeeded without returning a saved path for the managed model.");
+                model.CanonicalPath = Path.GetFullPath(path);
+                model.LastSavedSha256 = ComputeFileSha256(model.CanonicalPath);
+                model.Status = CadModelIdentityStatus.ActiveSaved;
+            }
+            else if (model.Status != CadModelIdentityStatus.Pending)
+            {
+                model.Status = CadModelIdentityStatus.ActiveUnsaved;
+            }
+            model.UpdatedUtc = _utcNow();
+            await _repository.UpdateModelAsync(model, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task MarkIdentityUncertainAsync(CadModelIdentityRecord model, Guid? outputEntityId, CancellationToken cancellationToken)
+        {
+            if (model == null) return;
+            model.Status = CadModelIdentityStatus.Uncertain;
+            model.UpdatedUtc = _utcNow();
+            await _repository.UpdateModelAsync(model, cancellationToken).ConfigureAwait(false);
+            if (outputEntityId.HasValue)
+            {
+                var binding = await _repository.GetEntityBindingAsync(model.ModelId, outputEntityId.Value, model.ConfigurationKey, cancellationToken)
+                    .ConfigureAwait(false);
+                if (binding != null)
+                {
+                    binding.Status = CadEntityReferenceStatus.Uncertain;
+                    binding.UpdatedUtc = _utcNow();
+                    await _repository.UpdateEntityBindingAsync(binding, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static bool ChangesManagedModel(string command)
+        {
+            switch (command)
+            {
+                case CadCommandNames.NewPart:
+                case CadCommandNames.CreateSketch:
+                case CadCommandNames.AddLine:
+                case CadCommandNames.AddArc:
+                case CadCommandNames.AddRectangle:
+                case CadCommandNames.AddCircle:
+                case CadCommandNames.AddSlot:
+                case CadCommandNames.AddRegularPolygon:
+                case CadCommandNames.ExitSketch:
+                case CadCommandNames.Extrude:
+                case CadCommandNames.CutExtrude:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static string ComputeFileSha256(string path)
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var sha256 = SHA256.Create())
+                return BitConverter.ToString(sha256.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
         }
 
         private static CadPlanningResult NormalizePlan(CadPlanningResult plan)

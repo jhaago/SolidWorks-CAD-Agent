@@ -622,6 +622,28 @@ VALUES
             }
         }
 
+        public Task<CadModelIdentityRecord> FindModelByCanonicalPathAsync(string canonicalPath, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            RequireText(canonicalPath, nameof(canonicalPath), 4096);
+            var normalizedPath = Path.GetFullPath(canonicalPath);
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT ModelId, ParentModelId, DocumentKind, Status, CustomPropertyKey, CanonicalPath, LastSavedSha256, CurrentModelRevisionId, ConfigurationKey, SolidWorksRevision, RegistryVersion, CreatedUtc, UpdatedUtc FROM ManagedModels WHERE CanonicalPath = @CanonicalPath COLLATE NOCASE LIMIT 2;";
+                Add(command, "@CanonicalPath", normalizedPath);
+                using (var reader = command.ExecuteReader())
+                {
+                    if (!reader.Read()) return Task.FromResult<CadModelIdentityRecord>(null);
+                    var model = ReadModel(reader);
+                    if (reader.Read())
+                        throw new InvalidOperationException("More than one managed model is registered at the canonical path; refusing an ambiguous identity match.");
+                    return Task.FromResult(model);
+                }
+            }
+        }
+
         public Task UpdateModelAsync(CadModelIdentityRecord model, CancellationToken token)
         {
             ThrowIfDisposed();

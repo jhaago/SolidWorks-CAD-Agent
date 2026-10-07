@@ -57,6 +57,40 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public void ExistingOpenedPartCannotBeModifiedBeforeManagedCopyExists()
+        {
+            var errors = CadPlanLifecycleValidator.Validate(new[]
+            {
+                Command(CadCommandNames.OpenPart),
+                Command(CadCommandNames.CreateSketch),
+                Command(CadCommandNames.AddRectangle),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude),
+                Command(CadCommandNames.SavePart)
+            });
+
+            Assert.AreEqual(5, errors.Count);
+            StringAssert.Contains(errors[0], "read-only");
+            StringAssert.Contains(errors[4], "managed working copy");
+        }
+
+        [TestMethod]
+        public void NewPartAfterReadOnlyOpenRestoresManagedMutationPath()
+        {
+            var errors = CadPlanLifecycleValidator.Validate(new[]
+            {
+                Command(CadCommandNames.OpenPart),
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch),
+                Command(CadCommandNames.AddRectangle),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude)
+            });
+
+            Assert.AreEqual(0, errors.Count);
+        }
+
+        [TestMethod]
         public void DuplicateSketchAndExitWithoutSketchAreRejected()
         {
             var errors = CadPlanLifecycleValidator.Validate(new[]

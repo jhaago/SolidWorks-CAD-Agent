@@ -65,7 +65,8 @@ namespace SolidWorksCadAgent.AgentHost
                         {
                             var bridge = new SolidWorksBridgeFacade(
                                 session,
-                                new WorkspacePolicy(settings.WorkspaceRoot));
+                                new WorkspacePolicy(settings.WorkspaceRoot),
+                                repository);
                             realExecutorLifetime = bridge;
                             return bridge;
                         });

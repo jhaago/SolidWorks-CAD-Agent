@@ -135,6 +135,25 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
 
+        [TestMethod]
+        public async Task ManagedIdentityMetadata_WithoutReferenceStore_IsRejectedBeforeSta()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteAsync(new CadCommandEnvelope
+                {
+                    Command = CadCommandNames.NewPart,
+                    Parameters = new JObject(),
+                    ManagedModelId = Guid.NewGuid()
+                }, CancellationToken.None);
+
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
         private sealed class RecordingSession : ISolidWorksSession
         {
             public int ApplicationInvocationCount { get; private set; }

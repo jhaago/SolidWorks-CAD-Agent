@@ -9,6 +9,7 @@ namespace SolidWorksCadAgent.Core.References
     {
         Task RegisterModelAsync(CadModelIdentityRecord model, CancellationToken token);
         Task<CadModelIdentityRecord> GetModelAsync(Guid modelId, CancellationToken token);
+        Task<CadModelIdentityRecord> FindModelByCanonicalPathAsync(string canonicalPath, CancellationToken token);
         Task UpdateModelAsync(CadModelIdentityRecord model, CancellationToken token);
         Task AddEntityBindingAsync(CadEntityReferenceBinding binding, CancellationToken token);
         Task<CadEntityReferenceBinding> GetEntityBindingAsync(Guid modelId, Guid entityId, string configurationKey, CancellationToken token);

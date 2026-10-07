@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Core;
 
 namespace SolidWorksCadAgent.Core.Commands
 {
@@ -18,7 +19,17 @@ namespace SolidWorksCadAgent.Core.Commands
             Closed
         }
 
-        public static IReadOnlyList<string> Validate(IEnumerable<CadCommandEnvelope> commands)
+        private enum ProfileKind
+        {
+            None,
+            Rectangle,
+            Circle,
+            Unsupported
+        }
+
+        public static IReadOnlyList<string> Validate(
+            IEnumerable<CadCommandEnvelope> commands,
+            ExecutionMode executionMode = ExecutionMode.Real)
         {
             var errors = new List<string>();
             if (commands == null) return errors;
@@ -28,14 +39,19 @@ namespace SolidWorksCadAgent.Core.Commands
             var document = DocumentState.Unknown;
             var sketchOpen = false;
             var sketchHasClosedProfilePrimitive = false;
+            var sketchProfileKind = ProfileKind.None;
             var completedProfileAvailable = false;
+            var completedProfileKind = ProfileKind.None;
             var savePartCompleted = false;
+            var openedExistingPartIsReadOnly = false;
             var index = 0;
 
             foreach (var envelope in commands)
             {
                 index++;
                 var command = envelope?.Command;
+                if (openedExistingPartIsReadOnly && ModifiesOpenedExistingPart(command))
+                    Add(errors, index, command, "An opened existing part is read-only in this workflow; create an approved managed working copy before modifying or saving it.");
                 if (savePartCompleted && ChangesModelOrDocumentTarget(command))
                 {
                     Add(errors, index, command, "SavePart is the final model-changing operation; no later CAD modification or document switch is allowed.");
@@ -45,13 +61,30 @@ namespace SolidWorksCadAgent.Core.Commands
                 switch (command)
                 {
                     case CadCommandNames.NewPart:
+                        openedExistingPartIsReadOnly = false;
+                        if (sketchOpen)
+                        {
+                            Add(errors, index, command, "ExitSketch before changing the active document.");
+                        }
+                        else
+                        {
+                            document = DocumentState.Open;
+                            completedProfileAvailable = false;
+                            completedProfileKind = ProfileKind.None;
+                        }
+                        break;
+
                     case CadCommandNames.OpenPart:
+                        if (executionMode == ExecutionMode.Simulation && command == CadCommandNames.OpenPart)
+                            Add(errors, index, command, "OpenPart is unavailable in simulation mode.");
                         if (sketchOpen)
                             Add(errors, index, command, "ExitSketch before changing the active document.");
                         else
                         {
                             document = DocumentState.Open;
+                            openedExistingPartIsReadOnly = command == CadCommandNames.OpenPart;
                             completedProfileAvailable = false;
+                            completedProfileKind = ProfileKind.None;
                         }
                         break;
 
@@ -63,7 +96,9 @@ namespace SolidWorksCadAgent.Core.Commands
                         else
                         {
                             document = DocumentState.Closed;
+                            openedExistingPartIsReadOnly = false;
                             completedProfileAvailable = false;
+                            completedProfileKind = ProfileKind.None;
                         }
                         break;
 
@@ -75,7 +110,9 @@ namespace SolidWorksCadAgent.Core.Commands
                         {
                             sketchOpen = true;
                             sketchHasClosedProfilePrimitive = false;
+                            sketchProfileKind = ProfileKind.None;
                             completedProfileAvailable = false;
+                            completedProfileKind = ProfileKind.None;
                         }
                         break;
 
@@ -84,17 +121,33 @@ namespace SolidWorksCadAgent.Core.Commands
                         if (RequireDocument(errors, index, command, document)) break;
                         if (!sketchOpen)
                             Add(errors, index, command, "Profile geometry requires an open sketch created earlier in the plan.");
+                        else
+                            sketchProfileKind = ProfileKind.Unsupported;
                         break;
 
-                    case CadCommandNames.AddRectangle:
-                    case CadCommandNames.AddCircle:
                     case CadCommandNames.AddSlot:
                     case CadCommandNames.AddRegularPolygon:
                         if (RequireDocument(errors, index, command, document)) break;
                         if (!sketchOpen)
                             Add(errors, index, command, "Profile geometry requires an open sketch created earlier in the plan.");
                         else
+                        {
                             sketchHasClosedProfilePrimitive = true;
+                            sketchProfileKind = AddProfile(sketchProfileKind, ProfileKind.Unsupported);
+                        }
+                        break;
+
+                    case CadCommandNames.AddRectangle:
+                    case CadCommandNames.AddCircle:
+                        if (RequireDocument(errors, index, command, document)) break;
+                        if (!sketchOpen)
+                            Add(errors, index, command, "Profile geometry requires an open sketch created earlier in the plan.");
+                        else
+                        {
+                            sketchHasClosedProfilePrimitive = true;
+                            sketchProfileKind = AddProfile(sketchProfileKind,
+                                command == CadCommandNames.AddRectangle ? ProfileKind.Rectangle : ProfileKind.Circle);
+                        }
                         break;
 
                     case CadCommandNames.ExitSketch:
@@ -105,7 +158,9 @@ namespace SolidWorksCadAgent.Core.Commands
                         {
                             sketchOpen = false;
                             completedProfileAvailable = sketchHasClosedProfilePrimitive;
+                            completedProfileKind = completedProfileAvailable ? sketchProfileKind : ProfileKind.None;
                             sketchHasClosedProfilePrimitive = false;
+                            sketchProfileKind = ProfileKind.None;
                         }
                         break;
 
@@ -117,16 +172,33 @@ namespace SolidWorksCadAgent.Core.Commands
                         else if (!completedProfileAvailable)
                             Add(errors, index, command, "Feature creation requires a completed sketch containing a supported closed profile primitive.");
                         else
+                        {
+                            if (executionMode == ExecutionMode.Simulation && command == CadCommandNames.Extrude && completedProfileKind != ProfileKind.Rectangle)
+                                Add(errors, index, command, "Simulation supports Extrude only with a single rectangle profile.");
+                            if (executionMode == ExecutionMode.Simulation && command == CadCommandNames.CutExtrude)
+                            {
+                                if (completedProfileKind != ProfileKind.Circle)
+                                    Add(errors, index, command, "Simulation supports CutExtrude only with a single circular profile.");
+                                if ((string)envelope?.Parameters?["endCondition"] == "Blind")
+                                    Add(errors, index, command, "Simulation does not support Blind CutExtrude.");
+                            }
                             completedProfileAvailable = false;
+                            completedProfileKind = ProfileKind.None;
+                        }
                         break;
 
                     case CadCommandNames.SavePart:
-                    case CadCommandNames.Rebuild:
                         if (RequireDocument(errors, index, command, document)) break;
-                        if (command == CadCommandNames.SavePart && sketchOpen)
+                        if (executionMode == ExecutionMode.Simulation)
+                            Add(errors, index, command, "SavePart is unavailable in simulation mode.");
+                        if (sketchOpen)
                             Add(errors, index, command, "ExitSketch before saving the document.");
-                        else if (command == CadCommandNames.SavePart)
+                        else
                             savePartCompleted = true;
+                        break;
+
+                    case CadCommandNames.Rebuild:
+                        RequireDocument(errors, index, command, document);
                         break;
                 }
             }
@@ -170,6 +242,31 @@ namespace SolidWorksCadAgent.Core.Commands
                     return false;
             }
         }
+
+        private static bool ModifiesOpenedExistingPart(string command)
+        {
+            switch (command)
+            {
+                case CadCommandNames.SavePart:
+                case CadCommandNames.CreateSketch:
+                case CadCommandNames.AddLine:
+                case CadCommandNames.AddArc:
+                case CadCommandNames.AddRectangle:
+                case CadCommandNames.AddCircle:
+                case CadCommandNames.AddSlot:
+                case CadCommandNames.AddRegularPolygon:
+                case CadCommandNames.ExitSketch:
+                case CadCommandNames.Extrude:
+                case CadCommandNames.CutExtrude:
+                case CadCommandNames.Rebuild:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static ProfileKind AddProfile(ProfileKind existing, ProfileKind added) =>
+            existing == ProfileKind.None ? added : ProfileKind.Unsupported;
 
         private static void Add(List<string> errors, int index, string command, string message) =>
             errors.Add("Command " + index + " (" + command + "): " + message);

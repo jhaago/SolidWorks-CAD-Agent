@@ -1,4 +1,5 @@
 using System;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -59,12 +60,14 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual("IMAGE_PLANNING_UNAVAILABLE", error.Code);
         }
         private string _databasePath;
+        private string _workspace;
         private SqliteJobRepository _repository;
 
         [TestInitialize]
         public async Task Initialize()
         {
             _databasePath = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-Coordinator-" + Guid.NewGuid().ToString("N") + ".db");
+            _workspace = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-Coordinator-" + Guid.NewGuid().ToString("N"));
             _repository = new SqliteJobRepository(_databasePath);
             await _repository.InitializeAsync();
         }
@@ -76,6 +79,7 @@ namespace SolidWorksCadAgent.UnitTests
             TryDelete(_databasePath);
             TryDelete(_databasePath + "-wal");
             TryDelete(_databasePath + "-shm");
+            if (Directory.Exists(_workspace)) Directory.Delete(_workspace, true);
         }
 
         [TestMethod]
@@ -90,6 +94,232 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsTrue(snapshot.Job.PlanValidated);
             Assert.AreEqual(1, snapshot.Revisions.Count);
             Assert.AreEqual(0, executor.ExecutedCommands.Count);
+        }
+
+        [TestMethod]
+        public async Task SimulationSavePlan_RequiresClarificationBeforeApprovalOrExecution()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = await new DeterministicCadPlanningProvider().PlanAsync(
+                new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None);
+            plan.ProposedCommands.Add(new CadCommandEnvelope
+            {
+                Command = CadCommandNames.SavePart,
+                Parameters = JObject.FromObject(new { path = "phone-tests/Plate.sldprt", allowOverwrite = false })
+            });
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = Path.GetTempPath() });
+
+            var planned = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            Assert.IsFalse(planned.Job.PlanValidated);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "SavePart");
+            Assert.AreEqual(0, executor.CallCount);
+            var persisted = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(planned.Revisions.Single().PlanJson);
+            Assert.AreEqual(plan.ProposedCommands.Count, persisted.ProposedCommands.Count);
+            Assert.AreEqual(CadCommandNames.SavePart, persisted.ProposedCommands.Last().Command);
+            Assert.AreEqual("phone-tests/Plate.sldprt", (string)persisted.ProposedCommands.Last().Parameters["path"]);
+            Assert.IsFalse((bool)persisted.ProposedCommands.Last().Parameters["allowOverwrite"]);
+        }
+
+        [TestMethod]
+        public async Task SimulationOpenPart_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(Command(CadCommandNames.OpenPart, new { path = "phone-tests/Existing.sldprt" }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = Path.GetTempPath() });
+
+            var planned = await coordinator.CreateAndPlanAsync("Open the existing part", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            Assert.IsFalse(planned.Job.PlanValidated);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "OpenPart");
+            Assert.AreEqual(0, executor.CallCount);
+            var persisted = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(planned.Revisions.Single().PlanJson);
+            Assert.AreEqual(CadCommandNames.OpenPart, persisted.ProposedCommands.Single().Command);
+            Assert.AreEqual("phone-tests/Existing.sldprt", (string)persisted.ProposedCommands.Single().Parameters["path"]);
+        }
+
+        [TestMethod]
+        public async Task RealOpenPartPlan_RemainsAwaitingApprovalWithLegacyPath()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(Command(CadCommandNames.OpenPart, new { path = "phone-tests/Existing.sldprt" }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = Path.GetTempPath() });
+
+            var planned = await coordinator.CreateAndPlanAsync("Open the existing part", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
+            Assert.IsTrue(planned.Job.PlanValidated);
+            Assert.AreEqual(0, executor.CallCount);
+            var persisted = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(planned.Revisions.Single().PlanJson);
+            Assert.AreEqual(CadCommandNames.OpenPart, persisted.ProposedCommands.Single().Command);
+            Assert.AreEqual("phone-tests/Existing.sldprt", (string)persisted.ProposedCommands.Single().Parameters["path"]);
+            await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
+            Assert.IsTrue(executor.CallCount > 0, "A valid read-only OpenPart plan must remain executable after approval revalidation.");
+        }
+
+        [TestMethod]
+        public async Task ApprovalRevalidatesPersistedOpenPartPlanBeforeAnyCadCommand()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(Command(CadCommandNames.OpenPart, new { path = "phone-tests/Existing.sldprt" }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+            var planned = await coordinator.CreateAndPlanAsync("Open an existing part", CancellationToken.None);
+            Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
+
+            // Represents an AwaitingApproval revision persisted before the read-only OpenPart rule existed.
+            var historical = Plan(
+                Command(CadCommandNames.OpenPart, new { path = "phone-tests/Existing.sldprt" }),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }));
+            using (var connection = new SQLiteConnection(new SQLiteConnectionStringBuilder { DataSource = _databasePath, Version = 3 }.ConnectionString))
+            {
+                connection.Open();
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "UPDATE Revisions SET PlanJson = @plan WHERE Id = @id";
+                    command.Parameters.AddWithValue("@plan", Newtonsoft.Json.JsonConvert.SerializeObject(historical));
+                    command.Parameters.AddWithValue("@id", planned.Revisions.Single().Id.ToString("D"));
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+            }
+
+            var error = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None));
+            Assert.AreEqual("INVALID_PLAN", error.Code);
+            StringAssert.Contains(error.Message, "read-only");
+            Assert.AreEqual(0, executor.CallCount);
+            Assert.AreEqual(JobState.AwaitingApproval, (await _repository.GetAsync(planned.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task SimulationCustomProfileBoss_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddSlot, new { centerXmm = 0.0, centerYmm = 0.0, lengthMm = 30.0, widthMm = 10.0, angleDegrees = 0.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude, new { depthMm = 10.0 }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Extrude a slotted profile", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "Extrude");
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task SimulationCircleBoss_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddCircle, new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 12.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude, new { depthMm = 10.0 }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Extrude a circular profile", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "rectangle profile");
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task SimulationCustomProfileCut_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 40.0, heightMm = 20.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude, new { depthMm = 8.0 }),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddSlot, new { centerXmm = 0.0, centerYmm = 0.0, lengthMm = 12.0, widthMm = 4.0, angleDegrees = 0.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.CutExtrude, new { endCondition = "ThroughAll" }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Cut a slot through a plate", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "CutExtrude");
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task SimulationRectangleCut_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 40.0, heightMm = 20.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude, new { depthMm = 8.0 }),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 10.0, heightMm = 4.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.CutExtrude, new { endCondition = "ThroughAll" }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Cut a rectangular opening", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "circular profile");
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task SimulationBlindCircleCut_RequiresClarificationBeforeExecutorCalls()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var plan = Plan(
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 40.0, heightMm = 20.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.Extrude, new { depthMm = 8.0 }),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddCircle, new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 6.0 }),
+                Command(CadCommandNames.ExitSketch),
+                Command(CadCommandNames.CutExtrude, new { endCondition = "Blind", depthMm = 2.0 }));
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var planned = await coordinator.CreateAndPlanAsync("Make a blind circular pocket", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+            StringAssert.Contains(planned.Job.AmbiguityMessage, "Blind");
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task SimulationRectangleBossAndCircleThroughAllCut_StillExecute()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation });
+
+            var completed = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+
+            Assert.AreEqual(JobState.ReadyForReview, completed.Job.State);
+            Assert.IsTrue(executor.ExecutedCommands.Any(command => command.Command == CadCommandNames.Extrude));
+            Assert.IsTrue(executor.ExecutedCommands.Any(command => command.Command == CadCommandNames.CutExtrude));
         }
 
         [TestMethod]
@@ -362,7 +592,7 @@ namespace SolidWorksCadAgent.UnitTests
         [TestMethod]
         public async Task TypedLegacySubsetExecutesWithSamePersistedAndDispatchedParameters()
         {
-            var executor = new CapturingSuccessfulExecutor();
+            var executor = new CapturingSuccessfulExecutor(_workspace);
             var plan = new CadPlanningResult
             {
                 Summary = "A typed-subset smoke plan.",
@@ -378,10 +608,11 @@ namespace SolidWorksCadAgent.UnitTests
                 }
             };
             var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
-                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Simulation });
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
 
             var planned = await coordinator.CreateAndPlanAsync("Create a circular boss", CancellationToken.None);
             Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
+            Assert.IsFalse(planned.Job.IsSimulated);
             var persisted = Newtonsoft.Json.JsonConvert.DeserializeObject<CadPlanningResult>(planned.Revisions.Single().PlanJson);
             Assert.AreEqual(7, persisted.ProposedCommands.Count);
             Assert.IsNull(JObject.Parse(planned.Revisions.Single().PlanJson)["ProposedCommands"][0]["operationVersion"]);
@@ -401,7 +632,7 @@ namespace SolidWorksCadAgent.UnitTests
         [TestMethod]
         public async Task TypedLegacySubset_DegenerateLineIsRejectedBeforeAnyExecutorCall()
         {
-            var executor = new RecordingSuccessfulExecutor();
+            var executor = new RecordingSuccessfulExecutor(_workspace);
             var plan = new CadPlanningResult
             {
                 Summary = "A zero-length line is invalid.",
@@ -550,7 +781,8 @@ namespace SolidWorksCadAgent.UnitTests
             var savedPlan = await new DeterministicCadPlanningProvider().PlanAsync(new CadPlanningRequest { Prompt = AcceptancePrompt }, CancellationToken.None);
             savedPlan.ProposedCommands.Add(new CadCommandEnvelope { Command = CadCommandNames.SavePart,
                 Parameters = JObject.FromObject(new { path = "phone-tests/Plate.sldprt", allowOverwrite = false }) });
-            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(savedPlan), executor, new AgentSettings { ExecutionMode = ExecutionMode.Simulation });
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(savedPlan), executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
             var first = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
             var built = await coordinator.ApproveAndExecuteAsync(first.Job.Id, first.Revisions.Single().Id, CancellationToken.None);
             var count = executor.CallCount;
@@ -594,6 +826,18 @@ namespace SolidWorksCadAgent.UnitTests
         private const string AcceptancePrompt =
             "Create a 100 x 60 x 10 mm rectangular plate with one centred Ø20 through-hole.";
 
+        private static CadPlanningResult Plan(params CadCommandEnvelope[] commands) => new CadPlanningResult
+        {
+            Summary = "A simulation capability preflight test plan.",
+            ProposedCommands = commands.ToList()
+        };
+
+        private static CadCommandEnvelope Command(string name, object parameters = null) => new CadCommandEnvelope
+        {
+            Command = name,
+            Parameters = parameters == null ? new JObject() : JObject.FromObject(parameters)
+        };
+
         private sealed class FixedPlanningProvider : ICadPlanningProvider
         {
             private readonly CadPlanningResult _plan;
@@ -604,11 +848,28 @@ namespace SolidWorksCadAgent.UnitTests
 
         private class RecordingSuccessfulExecutor : ICadCommandExecutor
         {
+            private readonly string _workspace;
+            public RecordingSuccessfulExecutor(string workspace = null)
+            {
+                _workspace = workspace ?? Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent-FakeSave-" + Guid.NewGuid().ToString("N"));
+            }
             public int CallCount { get; protected set; }
             public virtual Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref _callCount);
                 CallCount = _callCount;
+                if (command.Command == CadCommandNames.SavePart)
+                {
+                    var requestedPath = command.Parameters?["path"]?.Value<string>() ?? "fake-save.sldprt";
+                    if (Path.IsPathRooted(requestedPath)) requestedPath = Path.GetFileName(requestedPath);
+                    var path = Path.GetFullPath(Path.Combine(_workspace, requestedPath));
+                    var workspacePrefix = Path.GetFullPath(_workspace).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    if (!path.StartsWith(workspacePrefix, StringComparison.OrdinalIgnoreCase))
+                        path = Path.Combine(_workspace, Path.GetFileName(requestedPath));
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.WriteAllBytes(path, new byte[] { 83, 87, 65, 71 });
+                    return Task.FromResult(CadCommandResult.Ok(new { path }));
+                }
                 return Task.FromResult(ResultFor(command.Command));
             }
 
@@ -625,6 +886,7 @@ namespace SolidWorksCadAgent.UnitTests
 
         private sealed class CapturingSuccessfulExecutor : RecordingSuccessfulExecutor
         {
+            public CapturingSuccessfulExecutor(string workspace = null) : base(workspace) { }
             public System.Collections.Generic.List<CadCommandEnvelope> Received { get; } = new System.Collections.Generic.List<CadCommandEnvelope>();
 
             public override Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken)
