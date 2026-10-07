@@ -1,7 +1,3 @@
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;
-
 CREATE TABLE IF NOT EXISTS Jobs (
     Id TEXT PRIMARY KEY NOT NULL,
     Prompt TEXT NOT NULL,
@@ -76,6 +72,40 @@ CREATE TABLE IF NOT EXISTS JobInputImages (
     FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS ManagedModels (
+    ModelId TEXT PRIMARY KEY NOT NULL,
+    ParentModelId TEXT NULL,
+    DocumentKind TEXT NOT NULL,
+    Status TEXT NOT NULL,
+    CustomPropertyKey TEXT NOT NULL,
+    CanonicalPath TEXT NULL,
+    LastSavedSha256 TEXT NULL,
+    CurrentModelRevisionId TEXT NOT NULL,
+    ConfigurationKey TEXT NOT NULL,
+    SolidWorksRevision TEXT NULL,
+    RegistryVersion INTEGER NOT NULL,
+    CreatedUtc TEXT NOT NULL,
+    UpdatedUtc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS EntityReferenceBindings (
+    ModelId TEXT NOT NULL,
+    EntityId TEXT NOT NULL,
+    EntityKind TEXT NOT NULL,
+    ConfigurationKey TEXT NOT NULL,
+    NativeObjectKind TEXT NOT NULL,
+    ReferenceFormatVersion INTEGER NOT NULL,
+    NativeReferenceBytes BLOB NULL,
+    CreatedAtModelRevisionId TEXT NOT NULL,
+    LastResolvedModelRevisionId TEXT NULL,
+    SemanticFingerprintJson TEXT NULL,
+    Status TEXT NOT NULL,
+    CreatedUtc TEXT NOT NULL,
+    UpdatedUtc TEXT NOT NULL,
+    PRIMARY KEY (ModelId, EntityId, ConfigurationKey),
+    FOREIGN KEY (ModelId) REFERENCES ManagedModels(ModelId) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS IX_Revisions_JobId_RevisionNumber
     ON Revisions(JobId, RevisionNumber);
 CREATE INDEX IF NOT EXISTS IX_CommandExecutions_JobId_Revision_Sequence
@@ -86,3 +116,5 @@ CREATE INDEX IF NOT EXISTS IX_Attachments_JobId_Revision
     ON Attachments(JobId, RevisionNumber);
 CREATE INDEX IF NOT EXISTS IX_Jobs_UpdatedUtc_Id
     ON Jobs(UpdatedUtc DESC, Id DESC);
+CREATE INDEX IF NOT EXISTS IX_ManagedModels_CanonicalPath
+    ON ManagedModels(CanonicalPath);

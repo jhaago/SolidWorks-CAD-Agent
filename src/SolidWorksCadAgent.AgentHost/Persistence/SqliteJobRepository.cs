@@ -9,12 +9,14 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core.Ai;
+using SolidWorksCadAgent.Core.References;
 
 namespace SolidWorksCadAgent.AgentHost.Persistence
 {
-    public sealed class SqliteJobRepository : IDisposable
+    public sealed class SqliteJobRepository : IDisposable, IModelReferenceStore
     {
         private readonly string _databasePath;
         private readonly string _connectionString;
@@ -47,10 +49,28 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             {
                 using (var command = connection.CreateCommand())
                 {
-                    command.CommandText = LoadSchema();
-                    command.ExecuteNonQuery();
+                    command.CommandText = "PRAGMA journal_mode = WAL;";
+                    command.ExecuteScalar();
                 }
-                EnsureSchemaVersion(connection);
+                using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+                {
+                    try
+                    {
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.Transaction = transaction;
+                            command.CommandText = LoadSchema();
+                            command.ExecuteNonQuery();
+                        }
+                        EnsureSchemaVersion(connection, transaction);
+                        transaction.Commit();
+                    }
+                    catch
+                    {
+                        transaction.Rollback();
+                        throw;
+                    }
+                }
             }
 
             return Task.CompletedTask;
@@ -556,6 +576,154 @@ WHERE Id = @Id;";
             _disposed = true;
         }
 
+        public Task RegisterModelAsync(CadModelIdentityRecord model, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            ValidateModel(model);
+            try
+            {
+                using (var connection = OpenConnection())
+                using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+                using (var command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    command.CommandText = @"
+INSERT INTO ManagedModels
+(ModelId, ParentModelId, DocumentKind, Status, CustomPropertyKey, CanonicalPath, LastSavedSha256,
+ CurrentModelRevisionId, ConfigurationKey, SolidWorksRevision, RegistryVersion, CreatedUtc, UpdatedUtc)
+VALUES
+(@ModelId, @ParentModelId, @DocumentKind, @Status, @CustomPropertyKey, @CanonicalPath, @LastSavedSha256,
+ @CurrentModelRevisionId, @ConfigurationKey, @SolidWorksRevision, @RegistryVersion, @CreatedUtc, @UpdatedUtc);";
+                    BindModel(command, model);
+                    command.ExecuteNonQuery();
+                    transaction.Commit();
+                }
+            }
+            catch (SQLiteException exception) when (exception.ResultCode == SQLiteErrorCode.Constraint)
+            {
+                throw new InvalidOperationException("The model identity is already registered or violates a registry constraint.", exception);
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<CadModelIdentityRecord> GetModelAsync(Guid modelId, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            GuidText(modelId);
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT ModelId, ParentModelId, DocumentKind, Status, CustomPropertyKey, CanonicalPath, LastSavedSha256, CurrentModelRevisionId, ConfigurationKey, SolidWorksRevision, RegistryVersion, CreatedUtc, UpdatedUtc FROM ManagedModels WHERE ModelId = @ModelId;";
+                Add(command, "@ModelId", GuidText(modelId));
+                using (var reader = command.ExecuteReader())
+                    return Task.FromResult(reader.Read() ? ReadModel(reader) : null);
+            }
+        }
+
+        public Task UpdateModelAsync(CadModelIdentityRecord model, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            ValidateModel(model);
+            using (var connection = OpenConnection())
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = @"
+UPDATE ManagedModels SET ParentModelId = @ParentModelId, DocumentKind = @DocumentKind, Status = @Status,
+ CustomPropertyKey = @CustomPropertyKey, CanonicalPath = @CanonicalPath, LastSavedSha256 = @LastSavedSha256,
+ CurrentModelRevisionId = @CurrentModelRevisionId, ConfigurationKey = @ConfigurationKey,
+ SolidWorksRevision = @SolidWorksRevision, RegistryVersion = @RegistryVersion, UpdatedUtc = @UpdatedUtc
+WHERE ModelId = @ModelId;";
+                BindModel(command, model);
+                if (command.ExecuteNonQuery() != 1)
+                    throw new KeyNotFoundException("The model identity is not registered: " + model.ModelId + ".");
+                transaction.Commit();
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task AddEntityBindingAsync(CadEntityReferenceBinding binding, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            ValidateBinding(binding, false);
+            try
+            {
+                using (var connection = OpenConnection())
+                using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+                using (var command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    command.CommandText = @"
+INSERT INTO EntityReferenceBindings
+(ModelId, EntityId, EntityKind, ConfigurationKey, NativeObjectKind, ReferenceFormatVersion,
+ NativeReferenceBytes, CreatedAtModelRevisionId, LastResolvedModelRevisionId, SemanticFingerprintJson,
+ Status, CreatedUtc, UpdatedUtc)
+VALUES
+(@ModelId, @EntityId, @EntityKind, @ConfigurationKey, @NativeObjectKind, @ReferenceFormatVersion,
+ @NativeReferenceBytes, @CreatedAtModelRevisionId, @LastResolvedModelRevisionId, @SemanticFingerprintJson,
+ @Status, @CreatedUtc, @UpdatedUtc);";
+                    BindEntityBinding(command, binding, CloneBytes(binding.NativeReferenceBytes));
+                    command.ExecuteNonQuery();
+                    transaction.Commit();
+                }
+            }
+            catch (SQLiteException exception) when (exception.ResultCode == SQLiteErrorCode.Constraint)
+            {
+                throw new InvalidOperationException("The entity reference is already registered or its model is not registered.", exception);
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<CadEntityReferenceBinding> GetEntityBindingAsync(Guid modelId, Guid entityId, string configurationKey, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            GuidText(modelId);
+            GuidText(entityId);
+            RequireText(configurationKey, nameof(configurationKey), 128);
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"SELECT ModelId, EntityId, EntityKind, ConfigurationKey, NativeObjectKind, ReferenceFormatVersion,
+NativeReferenceBytes, CreatedAtModelRevisionId, LastResolvedModelRevisionId, SemanticFingerprintJson, Status, CreatedUtc, UpdatedUtc
+FROM EntityReferenceBindings WHERE ModelId = @ModelId AND EntityId = @EntityId AND ConfigurationKey = @ConfigurationKey;";
+                Add(command, "@ModelId", GuidText(modelId));
+                Add(command, "@EntityId", GuidText(entityId));
+                Add(command, "@ConfigurationKey", configurationKey);
+                using (var reader = command.ExecuteReader())
+                    return Task.FromResult(reader.Read() ? ReadBinding(reader) : null);
+            }
+        }
+
+        public Task UpdateEntityBindingAsync(CadEntityReferenceBinding binding, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            ValidateBinding(binding, true);
+            using (var connection = OpenConnection())
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = @"
+UPDATE EntityReferenceBindings SET EntityKind = @EntityKind, NativeObjectKind = @NativeObjectKind,
+ ReferenceFormatVersion = @ReferenceFormatVersion, NativeReferenceBytes = COALESCE(@NativeReferenceBytes, NativeReferenceBytes),
+ CreatedAtModelRevisionId = @CreatedAtModelRevisionId, LastResolvedModelRevisionId = @LastResolvedModelRevisionId,
+ SemanticFingerprintJson = @SemanticFingerprintJson, Status = @Status, UpdatedUtc = @UpdatedUtc
+WHERE ModelId = @ModelId AND EntityId = @EntityId AND ConfigurationKey = @ConfigurationKey;";
+                BindEntityBinding(command, binding, CloneBytes(binding.NativeReferenceBytes));
+                if (command.ExecuteNonQuery() != 1)
+                    throw new KeyNotFoundException("The entity reference is not registered for this model and configuration.");
+                transaction.Commit();
+            }
+            return Task.CompletedTask;
+        }
+
         private SQLiteConnection OpenConnection()
         {
             var connection = new SQLiteConnection(_connectionString);
@@ -860,20 +1028,26 @@ VALUES
             }
         }
 
-        private static void EnsureSchemaVersion(SQLiteConnection connection)
+        private static void EnsureSchemaVersion(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            if (!HasColumn(connection, "Jobs", "RequiresExplicitApproval"))
+            var currentVersion = GetSchemaVersion(connection, transaction);
+            if (currentVersion > 5)
+                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (5).");
+
+            if (!HasColumn(connection, transaction, "Jobs", "RequiresExplicitApproval"))
             {
                 using (var command = connection.CreateCommand())
                 {
+                    command.Transaction = transaction;
                     command.CommandText = "ALTER TABLE Jobs ADD COLUMN RequiresExplicitApproval INTEGER NOT NULL DEFAULT 0;";
                     command.ExecuteNonQuery();
                 }
             }
-            if (!HasColumn(connection, "Jobs", "IsSimulated"))
+            if (!HasColumn(connection, transaction, "Jobs", "IsSimulated"))
             {
                 using (var command = connection.CreateCommand())
                 {
+                    command.Transaction = transaction;
                     command.CommandText = "ALTER TABLE Jobs ADD COLUMN IsSimulated INTEGER NOT NULL DEFAULT 0;";
                     command.ExecuteNonQuery();
                 }
@@ -881,15 +1055,27 @@ VALUES
 
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "PRAGMA user_version = 4;";
+                command.Transaction = transaction;
+                command.CommandText = "PRAGMA user_version = 5;";
                 command.ExecuteNonQuery();
             }
         }
 
-        private static bool HasColumn(SQLiteConnection connection, string table, string column)
+        private static long GetSchemaVersion(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
+                command.CommandText = "PRAGMA user_version;";
+                return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static bool HasColumn(SQLiteConnection connection, SQLiteTransaction transaction, string table, string column)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
                 command.CommandText = "PRAGMA table_info(" + table + ");";
                 using (var reader = command.ExecuteReader())
                 {
@@ -901,6 +1087,142 @@ VALUES
             }
             return false;
         }
+
+        private static void BindModel(SQLiteCommand command, CadModelIdentityRecord model)
+        {
+            Add(command, "@ModelId", GuidText(model.ModelId));
+            Add(command, "@ParentModelId", model.ParentModelId.HasValue ? GuidText(model.ParentModelId.Value) : null);
+            Add(command, "@DocumentKind", model.DocumentKind);
+            Add(command, "@Status", model.Status.ToString());
+            Add(command, "@CustomPropertyKey", model.CustomPropertyKey);
+            Add(command, "@CanonicalPath", model.CanonicalPath);
+            Add(command, "@LastSavedSha256", model.LastSavedSha256);
+            Add(command, "@CurrentModelRevisionId", GuidText(model.CurrentModelRevisionId));
+            Add(command, "@ConfigurationKey", model.ConfigurationKey);
+            Add(command, "@SolidWorksRevision", model.SolidWorksRevision);
+            Add(command, "@RegistryVersion", model.RegistryVersion);
+            Add(command, "@CreatedUtc", DateText(model.CreatedUtc));
+            Add(command, "@UpdatedUtc", DateText(model.UpdatedUtc));
+        }
+
+        private static CadModelIdentityRecord ReadModel(SQLiteDataReader reader)
+        {
+            return new CadModelIdentityRecord
+            {
+                ModelId = Guid.Parse(reader.GetString(0)),
+                ParentModelId = reader.IsDBNull(1) ? (Guid?)null : Guid.Parse(reader.GetString(1)),
+                DocumentKind = reader.GetString(2),
+                Status = ParseEnum<CadModelIdentityStatus>(reader.GetString(3), "model identity status"),
+                CustomPropertyKey = reader.GetString(4),
+                CanonicalPath = NullableString(reader, 5),
+                LastSavedSha256 = NullableString(reader, 6),
+                CurrentModelRevisionId = Guid.Parse(reader.GetString(7)),
+                ConfigurationKey = reader.GetString(8),
+                SolidWorksRevision = NullableString(reader, 9),
+                RegistryVersion = reader.GetInt32(10),
+                CreatedUtc = ParseDate(reader.GetString(11)),
+                UpdatedUtc = ParseDate(reader.GetString(12))
+            };
+        }
+
+        private static void BindEntityBinding(SQLiteCommand command, CadEntityReferenceBinding binding, byte[] bytes)
+        {
+            Add(command, "@ModelId", GuidText(binding.ModelId));
+            Add(command, "@EntityId", GuidText(binding.EntityId));
+            Add(command, "@EntityKind", binding.EntityKind);
+            Add(command, "@ConfigurationKey", binding.ConfigurationKey);
+            Add(command, "@NativeObjectKind", binding.NativeObjectKind);
+            Add(command, "@ReferenceFormatVersion", binding.ReferenceFormatVersion);
+            Add(command, "@NativeReferenceBytes", bytes);
+            Add(command, "@CreatedAtModelRevisionId", GuidText(binding.CreatedAtModelRevisionId));
+            Add(command, "@LastResolvedModelRevisionId", binding.LastResolvedModelRevisionId.HasValue ? GuidText(binding.LastResolvedModelRevisionId.Value) : null);
+            Add(command, "@SemanticFingerprintJson", binding.SemanticFingerprintJson);
+            Add(command, "@Status", binding.Status.ToString());
+            Add(command, "@CreatedUtc", DateText(binding.CreatedUtc));
+            Add(command, "@UpdatedUtc", DateText(binding.UpdatedUtc));
+        }
+
+        private static CadEntityReferenceBinding ReadBinding(SQLiteDataReader reader)
+        {
+            return new CadEntityReferenceBinding
+            {
+                ModelId = Guid.Parse(reader.GetString(0)),
+                EntityId = Guid.Parse(reader.GetString(1)),
+                EntityKind = reader.GetString(2),
+                ConfigurationKey = reader.GetString(3),
+                NativeObjectKind = reader.GetString(4),
+                ReferenceFormatVersion = reader.GetInt32(5),
+                NativeReferenceBytes = reader.IsDBNull(6) ? null : CloneBytes((byte[])reader.GetValue(6)),
+                CreatedAtModelRevisionId = Guid.Parse(reader.GetString(7)),
+                LastResolvedModelRevisionId = reader.IsDBNull(8) ? (Guid?)null : Guid.Parse(reader.GetString(8)),
+                SemanticFingerprintJson = NullableString(reader, 9),
+                Status = ParseEnum<CadEntityReferenceStatus>(reader.GetString(10), "entity reference status"),
+                CreatedUtc = ParseDate(reader.GetString(11)),
+                UpdatedUtc = ParseDate(reader.GetString(12))
+            };
+        }
+
+        private static TEnum ParseEnum<TEnum>(string value, string description) where TEnum : struct
+        {
+            TEnum parsed;
+            if (!Enum.TryParse(value, false, out parsed) || !Enum.IsDefined(typeof(TEnum), parsed))
+                throw new InvalidOperationException("The stored " + description + " is not supported: " + value + ".");
+            return parsed;
+        }
+
+        private static void ValidateModel(CadModelIdentityRecord model)
+        {
+            if (model == null) throw new ArgumentNullException(nameof(model));
+            GuidText(model.ModelId);
+            if (model.ParentModelId.HasValue) GuidText(model.ParentModelId.Value);
+            RequireText(model.DocumentKind, nameof(model.DocumentKind), 64);
+            if (!Enum.IsDefined(typeof(CadModelIdentityStatus), model.Status))
+                throw new ArgumentOutOfRangeException(nameof(model.Status));
+            RequireText(model.CustomPropertyKey, nameof(model.CustomPropertyKey), 128);
+            if (model.CanonicalPath != null) RequireText(model.CanonicalPath, nameof(model.CanonicalPath), 4096);
+            if (model.LastSavedSha256 != null) RequireText(model.LastSavedSha256, nameof(model.LastSavedSha256), 128);
+            GuidText(model.CurrentModelRevisionId);
+            RequireText(model.ConfigurationKey, nameof(model.ConfigurationKey), 128);
+            if (model.SolidWorksRevision != null) RequireText(model.SolidWorksRevision, nameof(model.SolidWorksRevision), 128);
+            if (model.RegistryVersion <= 0) throw new ArgumentOutOfRangeException(nameof(model.RegistryVersion));
+            DateText(model.CreatedUtc);
+            DateText(model.UpdatedUtc);
+        }
+
+        private static void ValidateBinding(CadEntityReferenceBinding binding, bool updating)
+        {
+            if (binding == null) throw new ArgumentNullException(nameof(binding));
+            GuidText(binding.ModelId);
+            GuidText(binding.EntityId);
+            RequireText(binding.EntityKind, nameof(binding.EntityKind), 128);
+            RequireText(binding.ConfigurationKey, nameof(binding.ConfigurationKey), 128);
+            RequireText(binding.NativeObjectKind, nameof(binding.NativeObjectKind), 128);
+            if (binding.ReferenceFormatVersion <= 0) throw new ArgumentOutOfRangeException(nameof(binding.ReferenceFormatVersion));
+            if (!Enum.IsDefined(typeof(CadEntityReferenceStatus), binding.Status))
+                throw new ArgumentOutOfRangeException(nameof(binding.Status));
+            GuidText(binding.CreatedAtModelRevisionId);
+            if (binding.LastResolvedModelRevisionId.HasValue) GuidText(binding.LastResolvedModelRevisionId.Value);
+            DateText(binding.CreatedUtc);
+            DateText(binding.UpdatedUtc);
+            if (binding.NativeReferenceBytes != null && (binding.NativeReferenceBytes.Length == 0 || binding.NativeReferenceBytes.Length > MaximumNativeReferenceBytes))
+                throw new ArgumentException("Native reference bytes must contain between 1 and " + MaximumNativeReferenceBytes + " bytes.", nameof(binding.NativeReferenceBytes));
+            if (!updating && binding.Status == CadEntityReferenceStatus.Active && binding.NativeReferenceBytes == null)
+                throw new ArgumentException("An active entity reference requires native reference bytes.", nameof(binding.NativeReferenceBytes));
+            if (binding.SemanticFingerprintJson != null && binding.SemanticFingerprintJson.Length > MaximumSemanticFingerprintJsonLength)
+                throw new ArgumentException("The semantic fingerprint exceeds the supported length.", nameof(binding.SemanticFingerprintJson));
+        }
+
+        private const int MaximumNativeReferenceBytes = 1024 * 1024;
+        private const int MaximumSemanticFingerprintJsonLength = 256 * 1024;
+
+        private static string RequireText(string value, string name, int maximumLength)
+        {
+            if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("A non-empty value is required.", name);
+            if (value.Length > maximumLength) throw new ArgumentException("The value exceeds the supported length of " + maximumLength + ".", name);
+            return value;
+        }
+
+        private static byte[] CloneBytes(byte[] bytes) => bytes == null ? null : (byte[])bytes.Clone();
 
         private void ThrowIfDisposed()
         {
