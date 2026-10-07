@@ -1,6 +1,6 @@
 # CAD model and entity reference identity
 
-**Status:** User-approved design and inline implementation plan (2026-10-07); schema v5, managed model identity lifecycle and production managed-sketch token capture/resolution are implemented. Created-sketch save/reopen/rename/rebuild and wrong-document, deleted-sketch and manual-copy collision cases passed on SOLIDWORKS 2020. Explicit consumer selection remains pending.
+**Status:** User-approved reference-identity direction (2026-10-07). Schema v5, managed identity, native sketch capture/resolution and a Bridge-internal one-sketch selection scope are implemented. The version-2 feature-consumer contract below is the proposed migration design; no version-2 plan or feature command is executable or planner-advertised yet.
 
 ## Goal
 
@@ -52,6 +52,33 @@ Do not add native tokens or trusted identity fields to historical plan JSON, and
 Before planner-produced reference-bearing plans are accepted, add a distinct, explicitly versioned plan representation. Version 2 should represent operations, operation-local output keys and typed logical references. Output keys are scoped to one plan; the Host normalizes them to GUIDs and persists the normalized approved plan before execution. The model may propose symbolic links inside the candidate plan, but it cannot choose authoritative model IDs, native tokens, workspace paths or overwrite authority. Unsupported versions and dangling/duplicate output keys are rejected before approval. Approval is revision-bound and is invalidated if the base model or reference contract changes.
 
 Migration is additive: retain the existing `CadPlanningResult`/`CadCommandEnvelope` deserializer for historical rows, introduce new model/reference tables and a versioned plan document, and migrate SQLite from schema v4 transactionally with rollback on failure. Do not rewrite old `PlanJson`, auto-attach current native selections, or invent entity bindings for historical executions. Old jobs remain viewable and do not become eligible for reference-based edits merely because the Host has migrated.
+
+## Proposed version-2 feature-consumer contract (next migration)
+
+**Decision to review:** keep the existing unversioned `CadPlanningResult` and `CadCommandEnvelope` as version 1. A missing version never means “use a logical sketch ID.” Introduce a distinct plan document with required root `planVersion: 2`; do not put `operationVersion` or `sketchEntityId` inside the version-1 `Parameters` object. The latter is already rejected by planner validation and, after the current contract-hardening slice, by direct Bridge and simulation `Extrude` execution. The version-2 plan and executor are not implemented in this slice.
+
+The alternatives were (a) adding an optional sketch GUID to the existing `Extrude`/`CutExtrude` parameters, and (b) changing a version field on the existing envelope alone. Both fail the same-plan case: the Host currently assigns the sketch GUID only when `CreateSketch` executes. They also risk making historical plans change meaning or letting a v2-shaped request reach a v1 current-selection handler. A distinct version-2 plan with a plan-local output key solves the planning-time dependency, while retaining the existing command and registry boundaries for execution.
+
+A candidate v2 plan uses ordered steps. Each step has a unique `stepKey`, exact command name, explicit `operationVersion` and validated parameters. A `CreateSketch` step may declare one `outputKey` of kind `Sketch`; version-2 `Extrude` and `CutExtrude` require exactly one `inputs.profileSketch` with `{kind:"Sketch", outputKey:"..."}`. The output key is scoped only to that plan revision. It is a symbolic dependency, never a native token, feature display name, entity index or trusted model ID. A minimal candidate is:
+
+```json
+{
+  "planVersion": 2,
+  "steps": [
+    {"stepKey":"s1","command":"NewPart","operationVersion":1,"parameters":{}},
+    {"stepKey":"s2","command":"CreateSketch","operationVersion":1,"parameters":{"plane":"Top Plane"},"outputKey":"plate-profile"},
+    {"stepKey":"s3","command":"AddRectangle","operationVersion":1,"parameters":{"centerXmm":0,"centerYmm":0,"widthMm":100,"heightMm":60}},
+    {"stepKey":"s4","command":"ExitSketch","operationVersion":1,"parameters":{}},
+    {"stepKey":"s5","command":"Extrude","operationVersion":2,"parameters":{"depthMm":10},"inputs":{"profileSketch":{"kind":"Sketch","outputKey":"plate-profile"}}}
+  ]
+}
+```
+
+Before offering approval, the Host validates the whole candidate: exact supported plan/operation versions; unique step/output keys; references to a prior, closed sketch in the same planned model and configuration; supported profile geometry; a single consumer for this first feature path; and no dangling, forward, wrong-kind or duplicate references. The Host then assigns each output a GUID and persists an immutable normalized approved v2 plan in the existing `Revisions.PlanJson` column. In that normalized form, `inputs.profileSketch` contains the Host-generated entity GUID and retains the symbolic key only as review evidence. The model ID remains Host-controlled; the planner cannot assign it. No SQLite schema migration is needed solely for this plan shape, but every plan reader, approval path, revision renderer and execution path must dispatch by the root version before v2 can be persisted. Unknown root versions and malformed normalized plans fail before approval or mutation; they never fall back to the v1 deserializer.
+
+For execution, the Host passes the resolved GUID as trusted execution context to a **version-aware extension of the existing command registry**. A version-2 feature handler must call the Bridge selection scope and create the feature within that same STA callback. It must never lower to the legacy `Extrude` or `CutExtrude` handler: those handlers still consume SOLIDWORKS' current selection. `CadOperationDescriptor.OperationVersion == 1` remains the only advertised planner operation until the v2 handler, Host normalization, simulation policy and native verifier are all registered consistently. Simulation must reject v2 if it cannot verify its geometry; it must not silently execute v1. A native failure after feature creation begins is uncertain, stops the plan and is never retried blindly.
+
+Migration acceptance requires golden historical plan JSON to deserialize and execute with the same v1 semantics; v1 requests carrying reference fields to fail before native dispatch; unknown/missing v2 versions, duplicate/dangling/wrong-kind/output-order references and mixed-model references to fail before approval; and a valid normalized v2 plan to select the intended owned sketch even when another sketch or stale selection exists. Native tests must verify feature geometry, rebuild, no selection leak, document/configuration mismatch and deleted reference rejection. Only then can the v2 capability be planner-advertised or marked native verified.
 
 ## First implementation slice
 

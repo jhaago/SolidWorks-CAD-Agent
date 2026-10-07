@@ -20,12 +20,12 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
         public override CadError Validate(JObject parameters)
         {
-            if (!TryGetFiniteDouble(parameters, "depthMm", out var depth) || depth <= 0.0)
+            var error = CadPlanningCommandContract.Validate(new CadCommandEnvelope
             {
-                return InvalidParameter("depthMm must be a finite number greater than zero.");
-            }
-
-            return null;
+                Command = CadCommandNames.Extrude,
+                Parameters = parameters
+            });
+            return error == null ? null : InvalidParameter(error);
         }
 
         public override Task<CadCommandResult> ExecuteAsync(

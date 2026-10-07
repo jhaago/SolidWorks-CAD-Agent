@@ -97,6 +97,22 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
         [TestMethod]
+        public async Task LegacyExtrudeRejectsSketchReferenceInsteadOfUsingCurrentSelection()
+        {
+            var session = new NeverInvokeSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteAsync(new CadCommandEnvelope
+                {
+                    Command = CadCommandNames.Extrude,
+                    Parameters = JObject.FromObject(new { depthMm = 10.0, sketchEntityId = Guid.NewGuid().ToString("D") })
+                }, CancellationToken.None);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("INVALID_PARAMETERS", result.Error.Code);
+                Assert.AreEqual(0, session.Invocations);
+            }
+        }
+        [TestMethod]
         public void ValidProfilesAndBothCutEndConditionsValidateWithoutCom()
         {
             var session = new NeverInvokeSession();

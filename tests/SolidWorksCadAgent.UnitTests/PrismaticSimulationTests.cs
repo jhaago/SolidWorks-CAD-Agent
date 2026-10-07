@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -58,6 +59,20 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual("INVALID_PARAMETERS", result.Error.Code);
             var exit = await executor.ExecuteAsync(Command("ExitSketch", new { }), CancellationToken.None);
             Assert.AreEqual("EMPTY_SKETCH", exit.Error.Code);
+        }
+        [TestMethod]
+        public async Task LegacyExtrudeRejectsSketchReferenceWithoutConsumingProfile()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            await Run(executor, "NewPart", new { });
+            await Run(executor, "CreateSketch", new { plane = "Top Plane" });
+            await Run(executor, "AddRectangle", new { centerXmm = 0, centerYmm = 0, widthMm = 30, heightMm = 20 });
+            await Run(executor, "ExitSketch", new { });
+            var invalid = await executor.ExecuteAsync(Command("Extrude",
+                new { depthMm = 5, sketchEntityId = Guid.NewGuid().ToString("D") }), CancellationToken.None);
+            Assert.AreEqual("INVALID_PARAMETERS", invalid.Error.Code);
+            var valid = await executor.ExecuteAsync(Command("Extrude", new { depthMm = 5 }), CancellationToken.None);
+            Assert.IsTrue(valid.Success, valid.Error?.Message);
         }
 
         private static CadCommandEnvelope Command(string name, object p) => new CadCommandEnvelope { Command = name, Parameters = JObject.FromObject(p) };

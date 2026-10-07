@@ -1,6 +1,12 @@
 # CAD implementation handoff
 
-Updated 2026-10-07. Reviewed implementation revision: `7820cc1` on `feature/v2-face-sketches-and-finishing`, pushed to GitHub. The unrelated whitespace-only change in `PrismaticCapabilityTests.cs` remains uncommitted and was excluded. No deployment or merge was made.
+Updated 2026-10-07. Source base revision for this local slice: `be624e7` on `feature/v2-face-sketches-and-finishing`; Task 7a is recorded as a separate local commit. The pre-existing unrelated whitespace-only change in `PrismaticCapabilityTests.cs` is preserved. This slice has not been pushed, deployed or merged.
+
+## Current bounded slice: version-2 feature-consumer contract groundwork
+
+- **Increment 2, Task 7a** (`FT-001`, `FT-002`, `AG-003`, `AG-016`, `AG-017`). Legacy `Extrude` now uses the planner's exact version-1 parameter validation in the Bridge and simulator. A direct request containing `sketchEntityId` fails before COM dispatch or simulated geometry mutation; a subsequent valid simulated extrude still succeeds. `CutExtrude` already rejected extra parameters. Historical unversioned feature JSON remains version 1 and validates unchanged. No v2 operation is executable or advertised.
+- Expanded the existing [reference-identity design](superpowers/specs/2026-10-07-cad-reference-identity-design.md) with a concrete proposed v2 plan shape, plan-local sketch output keys, Host GUID normalization before approval, strict root-version dispatch, and a version-aware extension of the existing executor registry. This is a design decision for review, not an implemented persisted-plan migration. The current JSON.NET v1 reader does not provide v2 root-version dispatch; v2 data must not be persisted until that guard exists.
+- Verification: the two new direct-execution tests failed against the baseline and passed after the guard change. Full unit suite **454/454 passed** outside the restricted sandbox; both full solution build modes passed with **0 warnings/errors**. The controlled owned-document SOLIDWORKS 2020 `PrismaticCapabilityTests` passed **2/2** after the validator change (TRX: `tests/SolidWorksCadAgent.IntegrationTests/TestResults/prismatic-v1-contract-regression.trx`), confirming the established valid v1 extrusion/cut scenarios still work. The v2 plan/consumer has no native evidence.
 
 ## Current bounded slice and publication review
 
@@ -30,8 +36,8 @@ Updated 2026-10-07. Reviewed implementation revision: `7820cc1` on `feature/v2-f
 
 ## Not complete
 
-Created-sketch capture/resolution and these negative native cases are verified only for the controlled SOLIDWORKS 2020 scenario. No feature command consumes the logical sketch ID for selection, so plan-level blocking of downstream feature mutation is not yet native verified. Explicit selection scopes, topology references, move/missing-property/hash-mismatch native identity cases, existing-model mutation, SaveAs-copy lineage and rollback remain unsupported or unverified.
+Created-sketch capture/resolution and one Bridge selection scope are verified only for the controlled SOLIDWORKS 2020 scenario. No feature command consumes the logical sketch ID for selection, so plan-level blocking of downstream feature mutation is not yet native verified. Broad topology references, move/missing-property/hash-mismatch native identity cases, existing-model mutation, SaveAs-copy lineage and rollback remain unsupported or unverified.
 
 ## Exact next slice
 
-**Increment 2, next bounded slice: versioned typed feature-consumer contract design.** Decide the new extrude/cut operation version, explicit sketch-ID input semantics and compatibility lowering for historical plans before code changes. Acceptance: documented migration and tests demonstrating old plan JSON still means current-selection behavior while only new typed commands may consume `WithSelectedSketchAsync`; no implicit reinterpretation of absent IDs. Follow with a separate implementation/native geometry slice.
+**Increment 2, next bounded slice after review of the proposed v2 contract: root-version reader and candidate-plan preflight only.** Add distinct v2 DTO parsing and fail-closed root-version dispatch; reject unknown versions, duplicate/dangling/forward/wrong-kind output keys and unsupported operation versions before approval. Preserve historical unversioned `PlanJson` bytes/semantics. Do not yet advertise or execute v2 features. Acceptance requires positive and negative parser/normalizer tests and persisted historical-plan regression tests; the later feature-consumer slice must undergo controlled native SOLIDWORKS geometry verification.

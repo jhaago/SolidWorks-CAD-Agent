@@ -183,6 +183,12 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
 
         private CadCommandResult Extrude(JObject parameters)
         {
+            var contractError = CadPlanningCommandContract.Validate(new CadCommandEnvelope
+            {
+                Command = CadCommandNames.Extrude,
+                Parameters = parameters
+            });
+            if (contractError != null) return Failure("INVALID_PARAMETERS", contractError);
             if (_completedSketch == "Custom") return Failure("SIMULATION_PROFILE_UNSUPPORTED", "Custom line/arc profile solids require real SOLIDWORKS execution; this simulator does not verify their geometry.");
             if (_completedSketch != "Rectangle") return Failure("INVALID_SKETCH_PROFILE", "Extrude requires a completed rectangle sketch.");
             if (!TryPositive(parameters, "depthMm", out var depth))

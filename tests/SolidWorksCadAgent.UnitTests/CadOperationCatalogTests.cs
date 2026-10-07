@@ -74,6 +74,25 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public void HistoricalFeatureCommandsRemainVersionOneAndRejectReferenceParameters()
+        {
+            foreach (var json in new[]
+            {
+                "{\"command\":\"Extrude\",\"parameters\":{\"depthMm\":10}}",
+                "{\"command\":\"CutExtrude\",\"parameters\":{\"endCondition\":\"ThroughAll\"}}"
+            })
+            {
+                var historical = JsonConvert.DeserializeObject<CadCommandEnvelope>(json);
+                Assert.IsNull(CadPlanningCommandContract.Validate(historical));
+                Assert.AreEqual(1, CadOperationCatalog.Find(historical.Command).OperationVersion);
+                Assert.IsFalse(JsonConvert.SerializeObject(historical).Contains("OperationVersion"));
+                historical.Parameters["sketchEntityId"] = Guid.NewGuid().ToString("D");
+                Assert.IsNotNull(CadPlanningCommandContract.Validate(historical),
+                    "An unversioned feature cannot silently acquire a logical sketch reference.");
+            }
+        }
+
+        [TestMethod]
         public void EveryCatalogOperationReachesItsExistingParameterValidator()
         {
             foreach (var descriptor in CadOperationCatalog.Descriptors)
