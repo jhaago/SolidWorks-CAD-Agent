@@ -7,4 +7,7 @@ namespace SolidWorksCadAgent.Core.Ai
     {
         Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken cancellationToken);
     }
+
+    /** Marker for planners that actually include attached images in their planning request. */
+    public interface IImageCadPlanningProvider : ICadPlanningProvider { }
 }

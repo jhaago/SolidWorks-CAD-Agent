@@ -56,7 +56,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                 var get = path == "display/frame" || path == "session/status" || path == "agent/status" || (isAgentJob && (agentJobAction == null || agentJobAction == "artifact"));
                 if (request.Method != (get ? "GET" : "POST"))
                     throw Error(405, "method_unavailable", "This request method is unsupported.");
-                if (!RemoteRequestPolicy.IsBodyBounded(request.Body ?? ""))
+                if (!RemoteRequestPolicy.IsBodyBounded(request.Body ?? "", request.Path))
                     throw Error(413, "request_large", "The remote request is too large.");
                 if (!get && !(request.ContentType ?? "").Split(';')[0].Trim().Equals("application/json", StringComparison.OrdinalIgnoreCase))
                     throw Error(415, "content_type", "Use JSON for remote requests.");
@@ -87,7 +87,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                             Token(request, "Session"),
                             "POST",
                             "jobs",
-                            JsonConvert.SerializeObject(new { prompt = ReadPrompt(request) }, RemoteJson.Settings));
+                            ReadJobBody(request));
                     default:
                         if (isAgentJob)
                         {
@@ -130,14 +130,20 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             return response;
         }
 
-        private static string ReadPrompt(RemoteRequest request)
+        private static string ReadJobBody(RemoteRequest request)
         {
             var payload = JObject.Parse(request.Body ?? "{}");
             var prompt = payload["prompt"]?.Type == JTokenType.String ? (string)payload["prompt"] : null;
             prompt = prompt?.Trim();
             if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 2000)
                 throw Error(400, "prompt_invalid", "Enter a CAD instruction of 1–2000 characters.");
-            return prompt;
+            if (payload["image"] == null) return JsonConvert.SerializeObject(new { prompt }, RemoteJson.Settings);
+            var image = payload["image"] as JObject;
+            var mediaType = image?["mediaType"]?.Type == JTokenType.String ? (string)image["mediaType"] : null;
+            var encoded = image?["dataBase64"]?.Type == JTokenType.String ? (string)image["dataBase64"] : null;
+            if ((mediaType != "image/jpeg" && mediaType != "image/png") || string.IsNullOrEmpty(encoded) || encoded.Length > 5592408)
+                throw Error(400, "image_invalid", "Attach one JPEG or PNG image of at most 4 MiB.");
+            return JsonConvert.SerializeObject(new { prompt, image = new { mediaType, dataBase64 = encoded } }, RemoteJson.Settings);
         }
 
         private static string LifecycleBody(RemoteRequest request, string action)

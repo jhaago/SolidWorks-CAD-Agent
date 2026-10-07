@@ -68,6 +68,7 @@ All paths below are relative to repository root. These pointers apply to every r
 | E08 | Image interpreter/intake/store/routes/client tests in [308-test report](windows-validation-image-intake-2026-10-06.md) | Fake interpreter/HTTP/service tests, not geometric simulation | Synthetic image clarification tested live with provider; stopped before design approval/CAD planning. No image-to-native certification |
 | E09 | `SimulatedCadCommandExecutorTests`, `PrismaticSimulationTests`, composition/coordinator tests | Basic plate state workflow passes historically; no B-rep, reference or regeneration solver | None; simulation never promotes native verification |
 | E10 | `tests/SolidWorksCadAgent.UnitTests/Remote/` and remote client tests | Fake input/HTTP/session lifecycle | Manual phone/desktop evidence remains scenario-specific in remote docs, not CAD geometry evidence |
+| E11 | [2026-10-07 desktop follow-up](windows-validation-desktop-smoke-2026-10-07.md): 419/419 unit tests; artifact open-handle regression; native bundle validation; image-backed Host clarification/replan | No geometric simulation claim | Installed native Host produced a prismatic part with clean body/bounds/rebuild checks and served its saved bytes while SOLIDWORKS held it open. Installed image-backed planner recognized a synthetic sketch and resolved clarification, but no image-derived CAD commands ran. Paired phone paths remain untested. |
 | WIP | `FaceFeatureValidation.cs`, excluded `EdgeFinishingCommandHandlers.cs`, and face/finishing tests remain draft material | No registered simulation implementation; `CreateSketchOnFace`, `FilletEdges`, and `ChamferEdges` are intentionally not in planner or executor registry | Post-reconciliation builds succeed in both interop modes; 410/410 unit tests pass outside the restricted sandbox. Native face/finishing scenarios remain pending and have not been run. Draft code presence is not support evidence. |
 
 Source review found no existing comprehensive matrix; [prismatic capability notes](prismatic-cad-capabilities.md) remain useful detailed usage/evidence for that slice. This master checklist supersedes their role as a project-wide inventory.
@@ -85,7 +86,7 @@ Source review found no existing comprehensive matrix; [prismatic capability note
 | DOC-007 | Set/read document display units | PLANNED | IModelDoc2 unit preferences | G0, G2 | P1 | — | Current units depend on template. |
 | DOC-008 | Document properties and options | UNSUPPORTED | IModelDoc2 / IModelDocExtension | G0, G2 | P2 | — | Typed scoped options; do not mutate application defaults implicitly. |
 | DOC-009 | Open native part | REAL SOLIDWORKS VERIFIED | FILE-H: OpenDoc6 | Workspace policy | P0 | E01,E02 | Only .sldprt in workspace; bind returned document. |
-| DOC-010 | Save native part | REAL SOLIDWORKS VERIFIED | FILE-H: IModelDocExtension.SaveAs | Owned part / workspace | P0 | E01,E02 | Native save tested; current artifact finalization is not revision-safe. |
+| DOC-010 | Save native part | REAL SOLIDWORKS VERIFIED | FILE-H: IModelDocExtension.SaveAs | Owned part / workspace | P0 | E01,E02,E11 | Native save and open-document artifact delivery tested; immutable revision finalization is still missing. |
 | DOC-011 | Save as separate native part path | REAL SOLIDWORKS VERIFIED | FILE-H: SaveAs | DOC-010 | P0 | E01,E02 | Server-controlled overwrite; no generic copy/pack-and-go policy. |
 | DOC-012 | Close owned document | REAL SOLIDWORKS VERIFIED | FILE-H: ISldWorks.CloseDoc | Document binding | P0 | E01,E02 | Native owned close/reopen tested; general dirty-document policy missing. |
 | DOC-013 | Rebuild changed features only | UNSUPPORTED | IModelDoc2.EditRebuild3 | G0, G2 | P0 | — | Current Rebuild command always uses ForceRebuild3. |
@@ -106,7 +107,7 @@ Source review found no existing comprehensive matrix; [prismatic capability note
 | DOC-028 | Guard owned active document identity | REAL SOLIDWORKS VERIFIED | SESSION: SolidWorksDocumentContext | DOC-001 or DOC-009 | P0 | E01,E03 | COM identity and Host ExecutionId; does not detect edits inside same document. |
 | DOC-029 | Runtime compatibility / capability gating | PARTIAL | SESSION: SolidWorksCompatibility | G0 | P0 | E05 | Year classification exists; no per-operation execution enforcement. |
 | DOC-030 | Workspace path / overwrite control | AUTOMATED TESTED | Core WorkspacePolicy / Host approval | G0 | P0 | E03 | Traversal/reparse/extension checks; .sldprt only. Historical tests; no fresh suite claim. |
-| DOC-031 | Verified immutable artifact publication | PLANNED | Host finalization + manifest | G2, G4 | P0 | — | Save/reopen/hash tied to model revision; G5 subsequently adds crash reconciliation. |
+| DOC-031 | Verified immutable artifact publication | PARTIAL | HOST: AgentRoutes.ArtifactAsync; manifest absent | G2, G4 | P0 | E11 | Open-document download works for the tested saved part, but no immutable revision manifest exists; G5 subsequently adds crash reconciliation. |
 | DOC-032 | Document configuration / dirty state tracking | PLANNED | IModelDoc2 / IConfigurationManager | G1, G2 | P0 | — | Needed for safe edits and external-change detection. |
 | DOC-033 | Manual-control / automation mutation lease | PLANNED | Host + RemoteAgent interlock | G1, G2 | P0 | — | Remote input currently independent of CAD execution gate. |
 | DOC-034 | Pack and Go / referenced-document packaging | UNSUPPORTED | IPackAndGo | G1, G6, ASM-001 | P3 | — | Important omitted workflow: portable assemblies and drawings. |
@@ -540,7 +541,7 @@ Source review found no existing comprehensive matrix; [prismatic capability note
 | AG-031 | Intent provenance / assumption management | PARTIAL | DesignInterpretation / plan assumptions | G0, G3 | P1 | E08 | Prose provenance exists; typed parameter/evidence links missing. |
 | AG-032 | Multi-step engineering clarification | AUTOMATED TESTED | HOST design intake / job revisions | Current UI and provider | P0 | E07,E08 | Evidence-backed answers; quoted text provenance is not full semantic proof. |
 | AG-033 | Simulation workflow with honest unsupported outcomes | SIMULATION TESTED | SIM: SimulatedCadCommandExecutor | Simulation mode | P0 | E09 | Plate only; refuses native output, custom-profile solids and blind pockets. |
-| AG-034 | Remote paired CAD lifecycle | AUTOMATED TESTED | RemoteAgent narrow forwarding / Host | Pairing + Host | P2 | E10 | Manual remote desktop control is separate from CAD observation. |
+| AG-034 | Remote paired CAD lifecycle | AUTOMATED TESTED | RemoteAgent narrow forwarding / Host | Pairing + Host | P2 | E10,E11 | Installed Host image-backed jobs and clarification passed; paired-phone gallery/camera and download are still unverified. Manual remote desktop control is separate from CAD observation. |
 
 ## Image / hand-sketch to CAD
 
@@ -548,17 +549,17 @@ Source review found no existing comprehensive matrix; [prismatic capability note
 |---|---|---|---|---|---|---|---|
 | IMG-001 | PNG/JPEG image ingestion | AUTOMATED TESTED | IMAGE-H: ReferenceImageStore | Workspace image policy | P3 | E08 | Decode, size/type/path/hash checks; actual reference upload used historically. |
 | IMG-002 | Hand-sketch ingestion as raster | PARTIAL | IMAGE-H: same PNG/JPEG path | IMG-001 | P3 | E08 | Input route accepts raster; representative handwriting corpus not verified. |
-| IMG-003 | Primitive recognition | PARTIAL | IMAGE-H: multimodal interpretation | IMG-001 | P3 | E08 | Synthetic rectangle/hole interpreted; no typed recognized-primitive geometry. |
+| IMG-003 | Primitive recognition | PARTIAL | IMAGE-H / AI-H: multimodal interpretation | IMG-001 | P3 | E08,E11 | Synthetic rectangle/hole interpreted in an installed normal CAD job; no typed recognized-primitive geometry. |
 | IMG-004 | Line recognition | PARTIAL | IMAGE-H: observations/inferences | IMG-003 | P3 | E08 | Descriptive evidence only; no vector extraction accuracy claim. |
 | IMG-005 | Circle/arc recognition | PARTIAL | IMAGE-H: observations/inferences | IMG-003 | P3 | E08 | Synthetic central circle; general arcs/occlusion not certified. |
-| IMG-006 | Dimension recognition | PARTIAL | IMAGE-H: VisibleDimensions | IMG-001 | P3 | E08 | String output, uncertainty/user clarification; no calibrated OCR accuracy. |
+| IMG-006 | Dimension recognition | PARTIAL | IMAGE-H: VisibleDimensions; AI-H normal job | IMG-001 | P3 | E08,E11 | Installed planner read 100 × 60 mm and Ø20 labels from one synthetic image; no calibrated OCR accuracy. |
 | IMG-007 | Annotation recognition | PARTIAL | IMAGE-H: observations / visible text | IMG-001 | P3 | E08 | No structured annotation-to-entity links. |
 | IMG-008 | Text recognition | PARTIAL | IMAGE-H: VisibleText | IMG-001 | P3 | E08 | Multimodal descriptive extraction; handwriting benchmark absent. |
 | IMG-009 | Perspective correction | UNSUPPORTED | Image transform/hypothesis stage | IMG-001 | P3 | — | No implemented rectification pipeline. |
 | IMG-010 | Distortion handling / camera calibration | UNSUPPORTED | Calibration/uncertainty stage | IMG-009 | P3 | — | Avoid false precision. |
 | IMG-011 | Scale inference with confidence | UNSUPPORTED | Evidence-linked scale hypothesis | IMG-006/009 | P3 | — | User confirmation or reliable dimension reference required. |
-| IMG-012 | Ambiguity detection | AUTOMATED TESTED | IMAGE-H: Unknowns/Questions | IMG-001 | P3 | E08 | Tested clarification workflow; completeness of perception not guaranteed. |
-| IMG-013 | Missing-dimension detection | AUTOMATED TESTED | IMAGE-H: MissingDimensions | IMG-001 | P3 | E08 | Scoped to geometry purpose; no arbitrary reconstruction guarantee. |
+| IMG-012 | Ambiguity detection | AUTOMATED TESTED | IMAGE-H: Unknowns/Questions; AI-H normal job | IMG-001 | P3 | E08,E11 | Installed normal image job asked about hole location and cut type; completeness of perception not guaranteed. |
+| IMG-013 | Missing-dimension detection | AUTOMATED TESTED | IMAGE-H: MissingDimensions; AI-H normal job | IMG-001 | P3 | E08,E11 | Installed normal image job requested absent thickness; no arbitrary reconstruction guarantee. |
 | IMG-014 | Clarification dialogue / preserved answers | AUTOMATED TESTED | IMAGE-H: DesignIntakeService | IMG-012/013 | P3 | E08 | Critical questions retained; resolution evidence checked against user text. |
 | IMG-015 | Typed structured sketch representation | PLANNED | Contracts sketch/recognition DTOs | G1, G3, IMG-003 | P3 | — | Current brief strings are not geometry definitions. |
 | IMG-016 | Constraint inference | PARTIAL | IMAGE-H: Constraints strings | IMG-015, G3 | P3 | E08 | Descriptive guesses only; native solver validation still required. |

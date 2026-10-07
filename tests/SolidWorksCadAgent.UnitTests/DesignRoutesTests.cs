@@ -48,11 +48,14 @@ namespace SolidWorksCadAgent.UnitTests
             }
         }
         [TestMethod]
-        public void ImageUploadEnvelope_IsBoundedWithoutIncreasingOtherRouteLimits()
+        public void ImageUploadEnvelope_IsBoundedOnlyForDesignReferencesAndJobs()
         {
             var path = "/designs/" + Guid.NewGuid() + "/references";
             Assert.IsNull(HostRequestPolicy.Validate("POST", "application/json", null, 2 * 1024 * 1024, true, path));
-            Assert.AreEqual(413, HostRequestPolicy.Validate("POST", "application/json", null, 2 * 1024 * 1024, true, "/jobs").StatusCode);
+            Assert.IsNull(HostRequestPolicy.Validate("POST", "application/json", null, 2 * 1024 * 1024, true, "/jobs"));
+            Assert.IsNull(HostRequestPolicy.Validate("POST", "application/json", null, 2 * 1024 * 1024, true, "/jobs/submit"));
+            Assert.AreEqual(413, HostRequestPolicy.Validate("POST", "application/json", null, 2 * 1024 * 1024, true, "/settings").StatusCode);
+            Assert.AreEqual(413, HostRequestPolicy.Validate("POST", "application/json", null, 7 * 1024 * 1024, true, "/jobs").StatusCode);
             Assert.AreEqual(413, HostRequestPolicy.Validate("POST", "application/json", null, 7 * 1024 * 1024, true, path).StatusCode);
             Assert.AreEqual(403, HostRequestPolicy.Validate("POST", "application/json", "http://untrusted", 100, true, path).StatusCode);
         }

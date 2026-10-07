@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +15,7 @@ using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.AgentHost.Simulation;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Security;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
@@ -21,6 +24,18 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class AgentRoutesTests
     {
+        private sealed class ImagePlanner : IImageCadPlanningProvider
+        {
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
+            {
+                Assert.IsNotNull(request.Image);
+                return Task.FromResult(new CadPlanningResult
+                {
+                    Summary = "Image received; dimensions need clarification.",
+                    Ambiguities = new System.Collections.Generic.List<string> { "What is the width?" }
+                });
+            }
+        }
         private string _databasePath;
         private SqliteJobRepository _repository;
         private AgentRoutes _routes;
@@ -102,6 +117,7 @@ namespace SolidWorksCadAgent.UnitTests
             var body = JObject.Parse(response.JsonBody);
             Assert.AreEqual("ok", (string)body["status"]);
             Assert.AreEqual(1, (int)body["schemaVersion"]);
+            Assert.IsFalse((bool)body["jobInputImages"]);
         }
 
         [TestMethod]
@@ -117,6 +133,87 @@ namespace SolidWorksCadAgent.UnitTests
             var saved = await _repository.GetAsync(jobId);
             Assert.AreEqual("Create a plate", saved.Prompt);
             Assert.AreEqual(JobState.New, saved.State);
+        }
+
+        [TestMethod]
+        public async Task Artifact_DownloadsSavedPartWhileNativeEditorKeepsWritableHandleOpen()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "CAD-open-artifact-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var file = Path.Combine(root, "open-part.sldprt");
+            File.WriteAllBytes(file, new byte[] { 4, 5, 6, 7 });
+            var job = new CadJob { Id = Guid.NewGuid(), Prompt = "part", State = JobState.ReadyForReview,
+                CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow };
+            await _repository.CreateAsync(job);
+            await _repository.AppendRevisionAsync(new JobRevision { Id = Guid.NewGuid(), JobId = job.Id,
+                RevisionNumber = 1, Prompt = "part", PlanJson = "{}", InterpretationJson = "{}", CreatedUtc = DateTime.UtcNow });
+            await _repository.AppendCommandAsync(new CommandExecutionRecord
+            {
+                Id = Guid.NewGuid(), JobId = job.Id, RevisionNumber = 1, SequenceNumber = 1,
+                CommandName = "SavePart", Success = true, ParametersJson = "{}",
+                ResultJson = new JObject { ["path"] = file }.ToString(),
+                StartedUtc = DateTime.UtcNow, CompletedUtc = DateTime.UtcNow
+            });
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = root });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            try
+            {
+                using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+                {
+                    var response = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                    Assert.AreEqual(200, response.StatusCode, response.JsonBody);
+                    CollectionAssert.AreEqual(new byte[] { 4, 5, 6, 7 },
+                        Convert.FromBase64String((string)JObject.Parse(response.JsonBody)["base64"]));
+                }
+                using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    var response = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                    Assert.AreEqual(409, response.StatusCode);
+                    Assert.AreEqual("ARTIFACT_UNAVAILABLE", (string)JObject.Parse(response.JsonBody)["error"]["code"]);
+                }
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        [TestMethod]
+        public async Task CreateJob_ImageIsStoredWithJobAndInvalidImageIsRejected()
+        {
+            var coordinator = new JobCoordinator(_repository, new ImagePlanner(), new SimulatedCadCommandExecutor(),
+                new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var health = await routes.HandleAsync(new AgentRequest("GET", "/health", null), CancellationToken.None);
+            Assert.IsTrue((bool)JObject.Parse(health.JsonBody)["jobInputImages"]);
+            byte[] jpeg;
+            using (var bitmap = new Bitmap(4, 3))
+            using (var buffer = new MemoryStream())
+            {
+                bitmap.Save(buffer, ImageFormat.Jpeg);
+                jpeg = buffer.ToArray();
+            }
+            var body = new JObject
+            {
+                ["prompt"] = "Create a bracket from this sketch",
+                ["image"] = new JObject { ["mediaType"] = "image/jpeg", ["dataBase64"] = Convert.ToBase64String(jpeg) }
+            }.ToString();
+            var created = await routes.HandleAsync(new AgentRequest("POST", "/jobs", body), CancellationToken.None);
+            Assert.AreEqual(201, created.StatusCode);
+            var id = Guid.Parse((string)JObject.Parse(created.JsonBody)["id"]);
+            var image = await _repository.GetInputImageAsync(id);
+            Assert.AreEqual("image/jpeg", image.MediaType);
+            CollectionAssert.AreEqual(jpeg, image.Bytes);
+
+            var invalid = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                "{\"prompt\":\"bracket\",\"image\":{\"mediaType\":\"image/png\",\"dataBase64\":\"AAAA\"}}"), CancellationToken.None);
+            Assert.AreEqual(400, invalid.StatusCode);
+            Assert.AreEqual("INVALID_IMAGE", (string)JObject.Parse(invalid.JsonBody)["error"]["code"]);
+            var mismatched = new JObject { ["prompt"] = "bracket", ["image"] = new JObject
+            {
+                ["mediaType"] = "image/png", ["dataBase64"] = Convert.ToBase64String(jpeg)
+            } }.ToString();
+            var mismatchResponse = await routes.HandleAsync(new AgentRequest("POST", "/jobs", mismatched), CancellationToken.None);
+            Assert.AreEqual(400, mismatchResponse.StatusCode);
+            Assert.AreEqual("INVALID_IMAGE", (string)JObject.Parse(mismatchResponse.JsonBody)["error"]["code"]);
         }
 
         [TestMethod]

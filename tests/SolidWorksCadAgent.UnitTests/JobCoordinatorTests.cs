@@ -20,6 +20,44 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class JobCoordinatorTests
     {
+        private sealed class CapturingPlanner : IImageCadPlanningProvider
+        {
+            public readonly System.Collections.Generic.List<CadPlanningRequest> Requests = new System.Collections.Generic.List<CadPlanningRequest>();
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
+            {
+                Requests.Add(request);
+                return new DeterministicCadPlanningProvider().PlanAsync(request, token);
+            }
+        }
+
+        [TestMethod]
+        public async Task ImageStaysWithJobAcrossPlanRevision()
+        {
+            var planner = new CapturingPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(),
+                new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            var image = new CadPlanningImage { MediaType = "image/jpeg", Bytes = new byte[] { 1, 2, 3 } };
+            var initial = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None, image: image);
+            Assert.AreEqual(JobState.AwaitingApproval, initial.Job.State);
+            var revised = await coordinator.RequestChangesAsync(initial.Job.Id, initial.Revisions.Last().Id,
+                "Make it 20 mm wider", CancellationToken.None);
+            Assert.AreEqual(2, planner.Requests.Count);
+            CollectionAssert.AreEqual(image.Bytes, planner.Requests[0].Image.Bytes);
+            CollectionAssert.AreEqual(image.Bytes, planner.Requests[1].Image.Bytes);
+            Assert.AreEqual(initial.Job.Id, revised.Job.Id);
+        }
+
+        [TestMethod]
+        public async Task DeterministicPlannerRejectsImageInsteadOfPlanningFromTextOnly()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            Assert.IsFalse(coordinator.SupportsImageInputs);
+            var error = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None,
+                    image: new CadPlanningImage { MediaType = "image/jpeg", Bytes = new byte[] { 1, 2, 3 } }));
+            Assert.AreEqual("IMAGE_PLANNING_UNAVAILABLE", error.Code);
+        }
         private string _databasePath;
         private SqliteJobRepository _repository;
 

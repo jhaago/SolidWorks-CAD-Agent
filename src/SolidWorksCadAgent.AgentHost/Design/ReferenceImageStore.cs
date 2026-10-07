@@ -46,7 +46,7 @@ namespace SolidWorksCadAgent.AgentHost.Design
             using (var h = SHA256.Create()) return BitConverter.ToString(h.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
         }
 
-        private static string Validate(byte[] bytes)
+        public static string ValidateImage(byte[] bytes)
         {
             if (bytes == null || bytes.Length == 0 || bytes.Length > MaxImageBytes) Fail("image_size", "Each image must contain at most 4 MiB.");
             bool png = bytes.Length >= 8 && bytes.Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
@@ -78,7 +78,7 @@ namespace SolidWorksCadAgent.AgentHost.Design
 
         public DesignReference Save(Guid sessionId, string filename, byte[] bytes, string label, string viewType)
         {
-            string media = Validate(bytes);
+            string media = ValidateImage(bytes);
             var extension = Path.GetExtension(filename ?? "").ToLowerInvariant();
             if (extension != ".png" && extension != ".jpg" && extension != ".jpeg") Fail("unsupported_image_type", "Use a PNG or JPEG filename.");
             if ((media == "image/png") != (extension == ".png")) Fail("invalid_image", "Image bytes do not match the filename extension.");
@@ -114,7 +114,7 @@ namespace SolidWorksCadAgent.AgentHost.Design
             var info = new FileInfo(path);
             if (info.Length != reference.ByteLength || info.Length > MaxImageBytes) Fail("image_integrity", "A reference image has changed.");
             byte[] bytes = File.ReadAllBytes(path);
-            if (Hash(bytes) != reference.Sha256 || Validate(bytes) != reference.MediaType) Fail("image_integrity", "A reference image has changed.");
+            if (Hash(bytes) != reference.Sha256 || ValidateImage(bytes) != reference.MediaType) Fail("image_integrity", "A reference image has changed.");
             return bytes;
         }
     }

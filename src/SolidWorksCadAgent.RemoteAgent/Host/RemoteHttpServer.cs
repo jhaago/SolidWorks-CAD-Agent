@@ -43,14 +43,15 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             finally { try {context.Response.Close();}catch{} }
         }
         private async Task<RemoteResponse> ReadAndRoute(HttpListenerContext context) {
-            if(context.Request.ContentLength64>RemoteRequestPolicy.BodyLimit) return new RemoteResponse {Status=413,Body="{\"code\":\"request_large\",\"message\":\"The remote request is too large.\"}"};
+            var bodyLimit = RemoteRequestPolicy.BodyLimitFor(context.Request.RawUrl);
+            if(context.Request.ContentLength64>bodyLimit) return new RemoteResponse {Status=413,Body="{\"code\":\"request_large\",\"message\":\"The remote request is too large.\"}"};
             using(var memory=new MemoryStream()) {
-                var buffer=new byte[4096]; var deadline=Task.Delay(2000,stopping.Token);
+                var buffer=new byte[4096]; var deadline=Task.Delay(bodyLimit>RemoteRequestPolicy.BodyLimit ? 30000 : 2000,stopping.Token);
                 while(true) {
                     var read=context.Request.InputStream.ReadAsync(buffer,0,buffer.Length);
                     if(await Task.WhenAny(read,deadline).ConfigureAwait(false)!=read) {context.Request.InputStream.Close();return new RemoteResponse {Status=408,Body="{\"code\":\"request_timeout\",\"message\":\"The remote request timed out.\"}"};}
                     int count=await read.ConfigureAwait(false); if(count==0) break;
-                    if(memory.Length+count>RemoteRequestPolicy.BodyLimit) return new RemoteResponse {Status=413,Body="{\"code\":\"request_large\",\"message\":\"The remote request is too large.\"}"};
+                    if(memory.Length+count>bodyLimit) return new RemoteResponse {Status=413,Body="{\"code\":\"request_large\",\"message\":\"The remote request is too large.\"}"};
                     memory.Write(buffer,0,count);
                 }
                 return routes.Handle(new RemoteRequest {Method=context.Request.HttpMethod,Path=context.Request.RawUrl,Authorization=context.Request.Headers["Authorization"],

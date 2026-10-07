@@ -7,6 +7,13 @@ namespace SolidWorksCadAgent.Core.Ai
     {
         public string Prompt { get; set; }
         public IReadOnlyList<string> Clarifications { get; set; } = new List<string>();
+        public CadPlanningImage Image { get; set; }
+    }
+
+    public sealed class CadPlanningImage
+    {
+        public string MediaType { get; set; }
+        public byte[] Bytes { get; set; }
     }
 
     public sealed class CadPlanningUsage

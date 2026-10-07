@@ -55,21 +55,22 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         }
 
         public string WorkspaceRoot => _settings.WorkspaceRoot;
+        public bool SupportsImageInputs => _planningProvider is IImageCadPlanningProvider;
 
-        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false)
+        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null)
         {
-            var job = await CreateNewJobAsync(prompt, cancellationToken, requiresExplicitApproval).ConfigureAwait(false);
+            var job = await CreateNewJobAsync(prompt, cancellationToken, requiresExplicitApproval, image).ConfigureAwait(false);
             return await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false);
         }
 
         // Return a durable job before cloud planning, for clients with short transport deadlines.
-        public async Task<JobSnapshot> SubmitAsync(string prompt, CancellationToken cancellationToken)
+        public async Task<JobSnapshot> SubmitAsync(string prompt, CancellationToken cancellationToken, CadPlanningImage image = null)
         {
             if (!_submissionSlots.Wait(0))
                 throw new JobCoordinatorException("SUBMISSION_BUSY", "Four submitted jobs are already pending. Wait for a job to finish.");
             try
             {
-                var job = await CreateNewJobAsync(prompt, cancellationToken).ConfigureAwait(false);
+                var job = await CreateNewJobAsync(prompt, cancellationToken, false, image).ConfigureAwait(false);
                 var receipt = await SnapshotAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
                 TrackBackground(job.Id, () => PlanCreatedJobAsync(job, cancellationToken));
                 return receipt;
@@ -103,10 +104,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             lock (_submittedSync) return Task.WhenAll(_submitted.ToArray());
         }
 
-        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false)
+        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null)
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            if (image != null && !SupportsImageInputs)
+                throw new JobCoordinatorException("IMAGE_PLANNING_UNAVAILABLE", "The active CAD planner cannot interpret pictures.");
 
             var now = _utcNow();
             var job = new CadJob
@@ -119,7 +122,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 CreatedUtc = now,
                 UpdatedUtc = now
             };
-            await _repository.CreateAsync(job, cancellationToken).ConfigureAwait(false);
+            await _repository.CreateAsync(job, image, cancellationToken).ConfigureAwait(false);
             return job;
         }
 
@@ -135,7 +138,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             try
             {
                 plan = await _planningProvider.PlanAsync(
-                    new CadPlanningRequest { Prompt = job.Prompt },
+                    new CadPlanningRequest { Prompt = job.Prompt, Image = await _repository.GetInputImageAsync(job.Id, cancellationToken).ConfigureAwait(false) },
                     cancellationToken).ConfigureAwait(false);
             }
             catch
@@ -301,7 +304,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 plan = await _planningProvider.PlanAsync(new CadPlanningRequest
                 {
                     Prompt = snapshot.Job.Prompt,
-                    Clarifications = clarifications
+                    Clarifications = clarifications,
+                    Image = await _repository.GetInputImageAsync(jobId, cancellationToken).ConfigureAwait(false)
                 }, cancellationToken).ConfigureAwait(false);
             }
             catch

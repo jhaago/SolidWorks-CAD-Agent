@@ -6,6 +6,13 @@ namespace SolidWorksCadAgent.Contracts.Jobs
     public sealed class CreateJobRequest
     {
         public string Prompt { get; set; }
+        public JobInputImageRequest Image { get; set; }
+    }
+
+    public sealed class JobInputImageRequest
+    {
+        public string MediaType { get; set; }
+        public string DataBase64 { get; set; }
     }
 
     public sealed class JobDto

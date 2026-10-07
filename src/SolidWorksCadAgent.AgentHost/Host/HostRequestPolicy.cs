@@ -8,7 +8,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
         public static long MaximumBodyBytesFor(string path)
         {
             var segments = (path ?? "").Split('?')[0].Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            return segments.Length == 3 && segments[0] == "designs" && Guid.TryParse(segments[1], out _) && segments[2] == "references"
+            return (segments.Length == 3 && segments[0] == "designs" && Guid.TryParse(segments[1], out _) && segments[2] == "references") ||
+                   (segments.Length == 2 && segments[0] == "jobs" && segments[1] == "submit") ||
+                   (segments.Length == 1 && segments[0] == "jobs")
                 ? 6 * 1024 * 1024 : MaximumBodyBytes;
         }
 

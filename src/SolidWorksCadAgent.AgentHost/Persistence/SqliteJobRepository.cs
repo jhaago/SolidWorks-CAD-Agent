@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core.Ai;
 
 namespace SolidWorksCadAgent.AgentHost.Persistence
 {
@@ -76,14 +77,19 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
         }
 
         public Task CreateAsync(CadJob job, CancellationToken cancellationToken = default(CancellationToken))
+            => CreateAsync(job, null, cancellationToken);
+
+        public Task CreateAsync(CadJob job, CadPlanningImage image, CancellationToken cancellationToken = default(CancellationToken))
         {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             ValidateJob(job);
 
             using (var connection = OpenConnection())
+            using (var transaction = connection.BeginTransaction())
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = @"
 INSERT INTO Jobs
 (Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
@@ -93,9 +99,36 @@ VALUES
  @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc, @RequiresExplicitApproval);";
                 BindJob(command, job);
                 command.ExecuteNonQuery();
+                if (image != null)
+                {
+                    using (var input = connection.CreateCommand())
+                    {
+                        input.Transaction = transaction;
+                        input.CommandText = "INSERT INTO JobInputImages (JobId, MediaType, ImageBytes) VALUES (@JobId, @MediaType, @ImageBytes);";
+                        Add(input, "@JobId", GuidText(job.Id));
+                        Add(input, "@MediaType", image.MediaType);
+                        Add(input, "@ImageBytes", image.Bytes);
+                        input.ExecuteNonQuery();
+                    }
+                }
+                transaction.Commit();
             }
 
             return Task.CompletedTask;
+        }
+
+        public Task<CadPlanningImage> GetInputImageAsync(Guid jobId, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            using (var connection = OpenConnection())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT MediaType, ImageBytes FROM JobInputImages WHERE JobId = @JobId;";
+                Add(command, "@JobId", GuidText(jobId));
+                using (var reader = command.ExecuteReader())
+                    return Task.FromResult(reader.Read() ? new CadPlanningImage { MediaType = reader.GetString(0), Bytes = (byte[])reader.GetValue(1) } : null);
+            }
         }
 
         public Task<CadJob> GetAsync(Guid id, CancellationToken cancellationToken = default(CancellationToken))
@@ -848,7 +881,7 @@ VALUES
 
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "PRAGMA user_version = 3;";
+                command.CommandText = "PRAGMA user_version = 4;";
                 command.ExecuteNonQuery();
             }
         }

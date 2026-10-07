@@ -8,11 +8,13 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost.Ai;
+using SolidWorksCadAgent.AgentHost.Design;
 using SolidWorksCadAgent.AgentHost.Configuration;
 using SolidWorksCadAgent.AgentHost.Jobs;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
+using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Jobs;
 using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
@@ -111,6 +113,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 {
                     status = "ok",
                     schemaVersion = 1,
+                    jobInputImages = _coordinator?.SupportsImageInputs == true,
                     executionMode = (_settingsService?.ActiveExecutionMode ?? ExecutionMode.Real).ToString(),
                     bridgeCapability = BridgeBuildCapabilities.Capability
                 });
@@ -224,12 +227,14 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 path = policy.ResolveForRead(path);
                 if (Path.GetFileName(path).Length > 128)
                     return Error(409, "ARTIFACT_FILENAME_INVALID", "The saved filename is too long for remote download.");
-                // Open without sharing writes, bound allocation before reading, and recheck path policy.
-                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                // SOLIDWORKS retains a writable handle while the saved document is open.
+                // Allow that handle, then reject a file that changes during our bounded read.
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
                     policy.ResolveForRead(path);
                     if (stream.Length < 1 || stream.Length > 4 * 1024 * 1024)
                         return Error(413, "ARTIFACT_TOO_LARGE", "Native CAD downloads are limited to four MiB.");
+                    var lastWriteUtc = File.GetLastWriteTimeUtc(path);
                     var bytes = new byte[(int)stream.Length];
                     var offset = 0;
                     while (offset < bytes.Length)
@@ -238,6 +243,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
                         if (count == 0) throw new IOException("Incomplete file read.");
                         offset += count;
                     }
+                    if (stream.Length != bytes.Length || File.GetLastWriteTimeUtc(path) != lastWriteUtc)
+                        return Error(409, "ARTIFACT_UNAVAILABLE", "The native CAD artifact changed while it was being read.");
+                    policy.ResolveForRead(path);
                     return Json(200, new { fileName = Path.GetFileName(path), contentType = "application/octet-stream", byteLength = bytes.Length, base64 = Convert.ToBase64String(bytes) });
                 }
             }
@@ -504,6 +512,25 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 return Error(400, "PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
             }
 
+            CadPlanningImage image = null;
+            if (request.Image != null)
+            {
+                var encoded = request.Image.DataBase64;
+                if (string.IsNullOrEmpty(encoded) || encoded.Length > ((ReferenceImageStore.MaxImageBytes + 2) / 3) * 4)
+                    return Error(413, "IMAGE_TOO_LARGE", "The CAD reference image must be at most 4 MiB.");
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(encoded); }
+                catch (FormatException) { return Error(400, "INVALID_IMAGE", "The CAD reference image is not valid base64."); }
+                try
+                {
+                    var actualType = ReferenceImageStore.ValidateImage(bytes);
+                    if (actualType != request.Image.MediaType)
+                        return Error(400, "INVALID_IMAGE", "The image media type does not match its bytes.");
+                }
+                catch (DesignIntakeException ex) { return Error(400, "INVALID_IMAGE", ex.Message); }
+                image = new CadPlanningImage { MediaType = request.Image.MediaType, Bytes = bytes };
+            }
+
             if (_settingsService?.ExecutionModeRestartRequired == true)
             {
                 return Error(
@@ -517,8 +544,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 try
                 {
                     var snapshot = await (submitOnly
-                        ? _coordinator.SubmitAsync(request.Prompt, cancellationToken)
-                        : _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken))
+                        ? _coordinator.SubmitAsync(request.Prompt, cancellationToken, image)
+                        : _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken, image: image))
                         .ConfigureAwait(false);
                     return SnapshotResponse(submitOnly ? 202 : 201, snapshot);
                 }
@@ -532,6 +559,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 }
             }
 
+            if (image != null)
+                return Error(409, "IMAGE_PLANNING_UNAVAILABLE", "The active CAD planner cannot interpret pictures.");
             var now = _utcNow();
             var job = new CadJob
             {
@@ -541,7 +570,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 CreatedUtc = now,
                 UpdatedUtc = now
             };
-            await _repository.CreateAsync(job, cancellationToken).ConfigureAwait(false);
+            await _repository.CreateAsync(job, image, cancellationToken).ConfigureAwait(false);
             return Json(201, new { id = job.Id, state = job.State.ToString() });
         }
 

@@ -69,6 +69,13 @@ CREATE TABLE IF NOT EXISTS Attachments (
     FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS JobInputImages (
+    JobId TEXT PRIMARY KEY NOT NULL,
+    MediaType TEXT NOT NULL,
+    ImageBytes BLOB NOT NULL,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS IX_Revisions_JobId_RevisionNumber
     ON Revisions(JobId, RevisionNumber);
 CREATE INDEX IF NOT EXISTS IX_CommandExecutions_JobId_Revision_Sequence

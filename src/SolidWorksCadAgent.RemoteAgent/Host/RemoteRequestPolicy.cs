@@ -10,7 +10,9 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
         public static bool IsAllowedPrefix(Uri uri) => uri!=null && uri.IsAbsoluteUri && uri.Scheme=="http" &&
             uri.Host=="127.0.0.1" && uri.Port>=1024 && uri.AbsolutePath=="/" &&
             string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment);
-        public static bool IsBodyBounded(string body) => body!=null && Encoding.UTF8.GetByteCount(body)<=BodyLimit;
+        public static int BodyLimitFor(string path) => string.Equals((path ?? "").Split('?')[0], "/remote/v1/agent/jobs", StringComparison.Ordinal)
+            ? 6 * 1024 * 1024 : BodyLimit;
+        public static bool IsBodyBounded(string body, string path = null) => body!=null && Encoding.UTF8.GetByteCount(body)<=BodyLimitFor(path);
     }
     public sealed class RemoteRequest
     {

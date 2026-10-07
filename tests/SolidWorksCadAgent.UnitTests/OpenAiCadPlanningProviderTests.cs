@@ -67,6 +67,23 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task PlanAsync_AttachesImageToNormalCadPlanningRequest()
+        {
+            var handler = new RecordingHandler(PlanResponse("Needs a dimension", new JArray(), new JArray("What is the width?"), new JArray()));
+            var provider = new OpenAiCadPlanningProvider(new HttpClient(handler), () => "test-secret-key", "gpt-5.6-sol");
+            await provider.PlanAsync(new CadPlanningRequest
+            {
+                Prompt = "Model the bracket in this sketch",
+                Clarifications = new[] { "Use a width of 40 mm" },
+                Image = new CadPlanningImage { MediaType = "image/jpeg", Bytes = new byte[] { 1, 2, 3 } }
+            }, CancellationToken.None);
+            var input = JObject.Parse(handler.RequestBody)["input"][0]["content"];
+            StringAssert.Contains((string)input[0]["text"], "Use a width of 40 mm");
+            Assert.AreEqual("input_image", (string)input[1]["type"]);
+            Assert.AreEqual("data:image/jpeg;base64,AQID", (string)input[1]["image_url"]);
+        }
+
+        [TestMethod]
         public async Task PlanAsync_ParsesAmbiguityWithoutInventingCommands()
         {
             var handler = new RecordingHandler(PlanResponse(

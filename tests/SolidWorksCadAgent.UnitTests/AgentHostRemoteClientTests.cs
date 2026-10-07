@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.RemoteAgent.Host;
 
 namespace SolidWorksCadAgent.UnitTests
@@ -21,6 +22,61 @@ namespace SolidWorksCadAgent.UnitTests
                 var response = client.Forward("GET", "status", null);
                 Assert.AreEqual(200, response.Status);
                 Assert.IsTrue(timer.ElapsedMilliseconds < 1500, "Status must leave room within Android's two-second deadline.");
+            }
+        }
+
+        [TestMethod]
+        public void Status_ActiveClarificationIncludesTheCurrentRevisionAndQuestion()
+        {
+            var id = Guid.NewGuid();
+            var revision = Guid.NewGuid();
+            using (var client = new AgentHostRemoteClient(new ClarificationHandler(id, revision)))
+            {
+                var response = client.Forward("GET", "status", null);
+                Assert.AreEqual(200, response.Status);
+                Assert.IsTrue((bool)JObject.Parse(response.Body)["jobInputImages"]);
+                var active = (JObject)JObject.Parse(response.Body)["activeJob"];
+                Assert.AreEqual("AwaitingClarification", (string)active["state"]);
+                Assert.AreEqual(revision.ToString("D"), (string)active["currentRevisionId"]);
+                Assert.AreEqual("Which diameter?", (string)active["plan"]["Ambiguities"][0]);
+                Assert.IsNull(active["revisions"], "Workstation status should include only the current revision's display fields.");
+            }
+        }
+
+        [TestMethod]
+        public void Status_DetailUnavailableRetainsTheBriefJobAndWorkstationState()
+        {
+            var id = Guid.NewGuid();
+            using (var client = new AgentHostRemoteClient(new ClarificationHandler(id, Guid.NewGuid(), detailAvailable: false)))
+            {
+                var response = client.Forward("GET", "status", null);
+                Assert.AreEqual(200, response.Status);
+                var active = (JObject)JObject.Parse(response.Body)["activeJob"];
+                Assert.AreEqual(id.ToString("D"), (string)active["id"]);
+                Assert.IsNull(active["currentRevisionId"]);
+            }
+        }
+
+        private sealed class ClarificationHandler : HttpMessageHandler
+        {
+            private readonly Guid id;
+            private readonly Guid revision;
+            private readonly bool detailAvailable;
+
+            public ClarificationHandler(Guid id, Guid revision, bool detailAvailable = true)
+            { this.id = id; this.revision = revision; this.detailAvailable = detailAvailable; }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                var path = request.RequestUri.AbsolutePath;
+                if (path == "/jobs/" + id && !detailAvailable)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("{}") });
+                var body = path == "/jobs" ? "{\"items\":[{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\"}]}" :
+                    path == "/jobs/" + id ? "{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\",\"currentRevisionId\":\"" + revision + "\",\"currentRevisionNumber\":1,\"plan\":{\"Ambiguities\":[\"Which diameter?\"]},\"revisions\":[{\"prompt\":\"old work\"}]}" :
+                    path == "/health" ? "{\"jobInputImages\":true}" :
+                    path == "/settings" ? "{\"settings\":{}}" :
+                    path == "/solidworks/status" ? "{\"runtime\":null}" : "{}";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
             }
         }
 

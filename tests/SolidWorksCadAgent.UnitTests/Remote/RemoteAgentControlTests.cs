@@ -100,6 +100,31 @@ namespace SolidWorksCadAgent.UnitTests.Remote
         }
 
         [TestMethod]
+        public void AgentJobCreationForwardsOneBoundedImageOnlyOnJobRoute()
+        {
+            var fixture = new SessionFixture();
+            string forwarded = null;
+            var routes = CreateRoutes(fixture, (method, path, body) =>
+            {
+                Assert.AreEqual("jobs", path);
+                forwarded = body;
+                return new RemoteResponse { Status = 202, Body = "{}" };
+            });
+            var body = new JObject { ["prompt"] = "Create from image", ["image"] = new JObject
+            {
+                ["mediaType"] = "image/jpeg", ["dataBase64"] = new string('A', 100000), ["secret"] = "discard"
+            } }.ToString(Newtonsoft.Json.Formatting.None);
+            Assert.AreEqual(6 * 1024 * 1024, RemoteRequestPolicy.BodyLimitFor("/remote/v1/agent/jobs"));
+            Assert.AreEqual(RemoteRequestPolicy.BodyLimit, RemoteRequestPolicy.BodyLimitFor("/remote/v1/input"));
+            Assert.AreEqual(202, routes.Handle(Request("agent/jobs", fixture.Grant.SessionToken, body: body)).Status);
+            var payload = JObject.Parse(forwarded);
+            Assert.AreEqual(100000, ((string)payload["image"]["dataBase64"]).Length);
+            Assert.IsNull(payload["image"]["secret"]);
+            Assert.AreEqual(400, routes.Handle(Request("agent/jobs", fixture.Grant.SessionToken, body:
+                "{\"prompt\":\"Create\",\"image\":{\"mediaType\":\"image/gif\",\"dataBase64\":\"AAAA\"}}")).Status);
+        }
+
+        [TestMethod]
         public void AgentJobCancelForwardsOnlyAValidatedJobIdentifier()
         {
             var fixture = new SessionFixture();

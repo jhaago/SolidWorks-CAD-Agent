@@ -64,25 +64,30 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             var settingsTask = SendAsync("GET", "settings", null);
             var solidWorksTask = ReadSolidWorksStatusAsync();
             var jobsTask = SendAsync("GET", "jobs?limit=25", null);
-            Task.WhenAll(healthTask, settingsTask, solidWorksTask, jobsTask).GetAwaiter().GetResult();
+            var jobsResponse = jobsTask.GetAwaiter().GetResult();
+            var jobs = JObject.Parse(jobsResponse.Body);
+            var activeJob = (jobs["items"] as JArray)?.Children<JObject>().FirstOrDefault(item => !Terminal((string)item["state"]));
+            // Fetch the current revision while the independent SOLIDWORKS status read is still running.
+            // The list entry alone has no revision ID or clarification question, so it cannot drive
+            // the phone's revision-bound response control.
+            var activeJobTask = ReadActiveJobAsync(activeJob);
+            Task.WhenAll(healthTask, settingsTask, solidWorksTask, activeJobTask).GetAwaiter().GetResult();
             var healthResponse = healthTask.Result;
             if (healthResponse.Status < 200 || healthResponse.Status >= 300) return healthResponse;
             var settingsResponse = settingsTask.Result;
             if (settingsResponse.Status < 200 || settingsResponse.Status >= 300) return settingsResponse;
             var solidWorksResponse = solidWorksTask.Result;
-            var jobsResponse = jobsTask.Result;
             if (jobsResponse.Status < 200 || jobsResponse.Status >= 300) return jobsResponse;
 
             var health = JObject.Parse(healthResponse.Body);
             var settingsRoot = JObject.Parse(settingsResponse.Body);
             var settings = settingsRoot["settings"] as JObject ?? new JObject();
             var solidWorks = JObject.Parse(solidWorksResponse.Body);
-            var jobs = JObject.Parse(jobsResponse.Body);
-            var activeJob = (jobs["items"] as JArray)?.Children<JObject>().FirstOrDefault(item => !Terminal((string)item["state"]));
 
             return Json(200, new
             {
                 agentHostAvailable = true,
+                jobInputImages = (bool?)health["jobInputImages"] == true,
                 executionMode = (string)settings["executionMode"] ?? (string)health["executionMode"],
                 model = (string)settings["openAiModel"],
                 solidWorks = new
@@ -93,13 +98,41 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
                     version = (string)(solidWorks["runtime"] as JObject)?["displayVersion"],
                     activeDocument = (string)solidWorks["activeDocument"]
                 },
-                activeJob = activeJob == null ? null : new
+                activeJob = activeJob == null ? null : (object)(CompactActiveJob(activeJobTask.Result) ?? new JObject
                 {
-                    id = (string)activeJob["id"],
-                    prompt = (string)activeJob["prompt"],
-                    state = (string)activeJob["state"]
-                }
+                    ["id"] = (string)activeJob["id"],
+                    ["prompt"] = (string)activeJob["prompt"],
+                    ["state"] = (string)activeJob["state"]
+                })
             });
+        }
+
+        private static JObject CompactActiveJob(JObject detail)
+        {
+            if (detail == null) return null;
+            var compact = new JObject();
+            foreach (var name in new[] { "id", "prompt", "state", "currentRevisionId", "currentRevisionNumber",
+                "planValidated", "hasUnresolvedAmbiguity", "ambiguityMessage", "plan", "verifications", "outputPath" })
+            {
+                if (detail[name] != null) compact[name] = detail[name].DeepClone();
+            }
+            return compact;
+        }
+
+        private async Task<JObject> ReadActiveJobAsync(JObject summary)
+        {
+            if (summary == null || !Guid.TryParse((string)summary["id"], out var id)) return null;
+            try
+            {
+                var response = await SendAsync("GET", "jobs/" + id.ToString("D"), null).ConfigureAwait(false);
+                if (response.Status < 200 || response.Status >= 300) return null;
+                var detail = JObject.Parse(response.Body);
+                return Guid.TryParse((string)detail["id"], out var returned) && returned == id ? detail : null;
+            }
+            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is JsonException)
+            {
+                return null; // Keep workstation status available; the phone retries the full job read.
+            }
         }
 
         private async Task<RemoteResponse> ReadSolidWorksStatusAsync()
@@ -123,7 +156,8 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 
         private async Task<RemoteResponse> SendAsync(string method, string path, string body)
         {
-            using (var deadline = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(path.EndsWith("/artifact", StringComparison.Ordinal) ? 15000 : 750)))
+            using (var deadline = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(
+                path.EndsWith("/artifact", StringComparison.Ordinal) || path == "jobs/submit" ? 15000 : 750)))
             using (var request = new HttpRequestMessage(method == "GET" ? HttpMethod.Get : HttpMethod.Post, path))
             {
                 if (method == "POST") request.Content = new StringContent(body ?? "{}", Encoding.UTF8, "application/json");

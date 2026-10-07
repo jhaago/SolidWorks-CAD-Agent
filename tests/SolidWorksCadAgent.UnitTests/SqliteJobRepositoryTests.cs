@@ -8,12 +8,37 @@ using System.Collections;
 using System.Reflection;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core.Ai;
 
 namespace SolidWorksCadAgent.UnitTests
 {
     [TestClass]
     public class SqliteJobRepositoryTests
     {
+        [TestMethod]
+        public async Task InputImage_RoundTripsWithJobAcrossRepositoryReopen()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SolidWorks-ImageJob-" + Guid.NewGuid().ToString("N") + ".db");
+            var id = Guid.NewGuid();
+            try
+            {
+                using (var repository = new SqliteJobRepository(path))
+                {
+                    await repository.InitializeAsync();
+                    await repository.CreateAsync(new CadJob { Id = id, Prompt = "Make bracket", State = JobState.New,
+                        CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow },
+                        new CadPlanningImage { MediaType = "image/jpeg", Bytes = new byte[] { 1, 2, 3, 4 } });
+                }
+                using (var repository = new SqliteJobRepository(path))
+                {
+                    await repository.InitializeAsync();
+                    var image = await repository.GetInputImageAsync(id);
+                    Assert.AreEqual("image/jpeg", image.MediaType);
+                    CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, image.Bytes);
+                }
+            }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
         [TestMethod]
         public async Task RecoverInterruptedJobs_FailsWorkInFlightAndPreservesReviewAndTerminalStates()
         {
@@ -290,7 +315,7 @@ PRAGMA user_version = 1;";
                     using (var command = connection.CreateCommand())
                     {
                         command.CommandText = "PRAGMA user_version;";
-                        Assert.AreEqual(3L, Convert.ToInt64(command.ExecuteScalar()));
+                        Assert.AreEqual(4L, Convert.ToInt64(command.ExecuteScalar()));
                     }
                 }
             }
