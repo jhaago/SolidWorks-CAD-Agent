@@ -194,6 +194,8 @@ namespace SolidWorksCadAgent.IntegrationTests
                     Assert.IsFalse(string.IsNullOrWhiteSpace(title));
                     ownedTitles.Add(title);
                     Assert.AreEqual("Default", created.Data.Value<string>("configurationKey"));
+                    Assert.AreEqual(modelId.ToString("D"), created.Data.Value<string>("modelId"),
+                        "NewPart must return the Host identity only after verifying the native custom property.");
 
                     await session.InvokeWithApplicationAsync(application =>
                     {

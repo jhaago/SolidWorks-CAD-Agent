@@ -15,7 +15,7 @@ namespace SolidWorksCadAgent.UnitTests
         private const string HistoricalPlanJson = "{\"commands\":[{\"command\":\"CreateSketch\",\"parameters\":{\"plane\":\"Top Plane\"}}]}";
 
         [TestMethod]
-        public async Task InitializeAsync_MigratesVersionFourWithoutChangingHistoricalPlanJson()
+        public async Task InitializeAsync_MigratesVersionFourToSixWithoutChangingHistoricalPlanJson()
         {
             var path = TempDatabasePath();
             var jobId = Guid.NewGuid();
@@ -27,9 +27,11 @@ namespace SolidWorksCadAgent.UnitTests
                     await repository.InitializeAsync();
                 }
 
-                Assert.AreEqual(5L, ReadUserVersion(path));
+                Assert.AreEqual(6L, ReadUserVersion(path));
                 Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
                 Assert.AreEqual(1L, ReadScalar(path, "SELECT COUNT(*) FROM CommandExecutions WHERE JobId = @JobId;", jobId));
+                Assert.IsTrue(TableExists(path, "V2ModelOwnerships"));
+                Assert.IsTrue(TableExists(path, "V2MutationAttempts"));
             }
             finally { TryDeleteDatabase(path); }
         }
@@ -51,6 +53,41 @@ namespace SolidWorksCadAgent.UnitTests
                 Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
                 Assert.AreEqual(1L, ReadScalar(path, "SELECT COUNT(*) FROM CommandExecutions WHERE JobId = @JobId;", jobId));
                 Assert.IsFalse(TableExists(path, "EntityReferenceBindings"), "DDL created by the failed migration must roll back.");
+            }
+            finally { TryDeleteDatabase(path); }
+        }
+
+        [TestMethod]
+        public async Task InitializeAsync_MigratesVersionFiveWithoutRewritingHistoricalRows()
+        {
+            var path = TempDatabasePath();
+            var jobId = Guid.NewGuid();
+            try
+            {
+                CreateVersionFiveFixture(path, jobId, false);
+                using (var repository = new SqliteJobRepository(path))
+                    await repository.InitializeAsync();
+                Assert.AreEqual(6L, ReadUserVersion(path));
+                Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
+                Assert.AreEqual(1L, ReadScalar(path, "SELECT COUNT(*) FROM CommandExecutions WHERE JobId = @JobId;", jobId));
+                Assert.IsTrue(TableExists(path, "V2MutationAttempts"));
+            }
+            finally { TryDeleteDatabase(path); }
+        }
+
+        [TestMethod]
+        public async Task InitializeAsync_RollsBackVersionSixTablesWhenLaterSchemaObjectConflicts()
+        {
+            var path = TempDatabasePath();
+            var jobId = Guid.NewGuid();
+            try
+            {
+                CreateVersionFiveFixture(path, jobId, true);
+                using (var repository = new SqliteJobRepository(path))
+                    await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => repository.InitializeAsync());
+                Assert.AreEqual(5L, ReadUserVersion(path));
+                Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
+                Assert.IsFalse(TableExists(path, "V2ModelOwnerships"));
             }
             finally { TryDeleteDatabase(path); }
         }
@@ -290,6 +327,31 @@ VALUES (@CommandId, @JobId, 1, 1, 'CreateSketch', '{""plane"":""Top Plane""}', 1
                         command.ExecuteNonQuery();
                     }
                 }
+            }
+        }
+
+        private static void CreateVersionFiveFixture(string path, Guid jobId, bool conflictingView)
+        {
+            CreateVersionFourFixture(path, jobId, false);
+            using (var connection = new SQLiteConnection("Data Source=" + path + ";Version=3;"))
+            using (var command = connection.CreateCommand())
+            {
+                connection.Open();
+                command.CommandText = @"
+CREATE TABLE ManagedModels (
+ ModelId TEXT PRIMARY KEY NOT NULL, ParentModelId TEXT NULL, DocumentKind TEXT NOT NULL,
+ Status TEXT NOT NULL, CustomPropertyKey TEXT NOT NULL, CanonicalPath TEXT NULL,
+ LastSavedSha256 TEXT NULL, CurrentModelRevisionId TEXT NOT NULL, ConfigurationKey TEXT NOT NULL,
+ SolidWorksRevision TEXT NULL, RegistryVersion INTEGER NOT NULL, CreatedUtc TEXT NOT NULL, UpdatedUtc TEXT NOT NULL);
+CREATE TABLE EntityReferenceBindings (
+ ModelId TEXT NOT NULL, EntityId TEXT NOT NULL, EntityKind TEXT NOT NULL, ConfigurationKey TEXT NOT NULL,
+ NativeObjectKind TEXT NOT NULL, ReferenceFormatVersion INTEGER NOT NULL, NativeReferenceBytes BLOB NULL,
+ CreatedAtModelRevisionId TEXT NOT NULL, LastResolvedModelRevisionId TEXT NULL, SemanticFingerprintJson TEXT NULL,
+ Status TEXT NOT NULL, CreatedUtc TEXT NOT NULL, UpdatedUtc TEXT NOT NULL,
+ PRIMARY KEY (ModelId, EntityId, ConfigurationKey),
+ FOREIGN KEY (ModelId) REFERENCES ManagedModels(ModelId) ON DELETE CASCADE);
+PRAGMA user_version = 5;" + (conflictingView ? "CREATE VIEW V2MutationAttempts AS SELECT Id FROM Jobs;" : string.Empty);
+                command.ExecuteNonQuery();
             }
         }
 

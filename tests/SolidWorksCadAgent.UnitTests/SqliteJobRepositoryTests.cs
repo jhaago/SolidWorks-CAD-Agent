@@ -315,7 +315,7 @@ PRAGMA user_version = 1;";
                     using (var command = connection.CreateCommand())
                     {
                         command.CommandText = "PRAGMA user_version;";
-                        Assert.AreEqual(5L, Convert.ToInt64(command.ExecuteScalar()));
+                        Assert.AreEqual(6L, Convert.ToInt64(command.ExecuteScalar()));
                     }
                 }
             }

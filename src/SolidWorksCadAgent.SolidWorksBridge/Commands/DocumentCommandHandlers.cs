@@ -85,7 +85,12 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 }
 
                 BindDocument(model);
-                return Ok(new { documentTitle = model.GetTitle(), template, configurationKey = model.ConfigurationManager.ActiveConfiguration.Name });
+                return Ok(new
+                {
+                    documentTitle = model.GetTitle(), template,
+                    configurationKey = model.ConfigurationManager.ActiveConfiguration.Name,
+                    modelId = modelId.HasValue ? modelId.Value.ToString("D") : null
+                });
 #else
                 return InteropUnavailable();
 #endif

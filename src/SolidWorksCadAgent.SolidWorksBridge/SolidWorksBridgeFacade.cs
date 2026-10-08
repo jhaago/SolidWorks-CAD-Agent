@@ -16,7 +16,7 @@ using SolidWorks.Interop.sldworks;
 
 namespace SolidWorksCadAgent.SolidWorksBridge
 {
-    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IVersionedCadCommandExecutor, IDisposable
+    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IVersionedCadCommandExecutor, ICadOperationAvailability, IDisposable
     {
         private readonly ISolidWorksSession _session;
         private readonly ISolidWorksSession _commandSession;
@@ -27,6 +27,27 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         private bool _disposed;
 
         public IReadOnlyCollection<string> RegisteredCommandNames => _registry.CommandNames;
+
+        public bool SupportsManagedReferences
+        {
+            get
+            {
+#if SOLIDWORKS_INTEROP
+                return !_disposed && _modelReferenceStore != null;
+#else
+                return false;
+#endif
+            }
+        }
+
+        public bool IsOperationRegistered(string commandName, int operationVersion)
+        {
+#if SOLIDWORKS_INTEROP
+            return !_disposed && _registry.IsOperationRegistered(commandName, operationVersion);
+#else
+            return false;
+#endif
+        }
 
         public SolidWorksBridgeFacade()
             : this(new SolidWorksSession(), new WorkspacePolicy(new AgentSettings().WorkspaceRoot), null, true)

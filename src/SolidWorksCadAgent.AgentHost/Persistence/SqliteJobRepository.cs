@@ -16,7 +16,7 @@ using SolidWorksCadAgent.Core.References;
 
 namespace SolidWorksCadAgent.AgentHost.Persistence
 {
-    public sealed class SqliteJobRepository : IDisposable, IModelReferenceStore
+    public sealed partial class SqliteJobRepository : IDisposable, IModelReferenceStore
     {
         private readonly string _databasePath;
         private readonly string _connectionString;
@@ -82,17 +82,41 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
             using (var connection = OpenConnection())
-            using (var command = connection.CreateCommand())
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
             {
-                command.CommandText = "UPDATE Jobs SET State = @Failed, UpdatedUtc = @Now WHERE State IN (@New, @Interpreting, @Approved, @Executing, @Verifying);";
-                Add(command, "@Failed", (int)JobState.Failed);
-                Add(command, "@Now", DateText(DateTime.UtcNow));
-                Add(command, "@New", (int)JobState.New);
-                Add(command, "@Interpreting", (int)JobState.Interpreting);
-                Add(command, "@Approved", (int)JobState.Approved);
-                Add(command, "@Executing", (int)JobState.Executing);
-                Add(command, "@Verifying", (int)JobState.Verifying);
-                return Task.FromResult(command.ExecuteNonQuery());
+                var now = DateText(DateTime.UtcNow);
+                using (var models = connection.CreateCommand())
+                {
+                    models.Transaction = transaction;
+                    models.CommandText = @"
+UPDATE ManagedModels SET Status = @Uncertain, UpdatedUtc = @Now
+WHERE ModelId IN (SELECT ModelId FROM V2MutationAttempts WHERE Status = 'Prepared');";
+                    Add(models, "@Uncertain", CadModelIdentityStatus.Uncertain.ToString());
+                    Add(models, "@Now", now);
+                    models.ExecuteNonQuery();
+                }
+                using (var attempts = connection.CreateCommand())
+                {
+                    attempts.Transaction = transaction;
+                    attempts.CommandText = "UPDATE V2MutationAttempts SET Status = 'Uncertain', UpdatedUtc = @Now WHERE Status = 'Prepared';";
+                    Add(attempts, "@Now", now);
+                    attempts.ExecuteNonQuery();
+                }
+                using (var jobs = connection.CreateCommand())
+                {
+                    jobs.Transaction = transaction;
+                    jobs.CommandText = "UPDATE Jobs SET State = @Failed, UpdatedUtc = @Now WHERE State IN (@New, @Interpreting, @Approved, @Executing, @Verifying);";
+                    Add(jobs, "@Failed", (int)JobState.Failed);
+                    Add(jobs, "@Now", now);
+                    Add(jobs, "@New", (int)JobState.New);
+                    Add(jobs, "@Interpreting", (int)JobState.Interpreting);
+                    Add(jobs, "@Approved", (int)JobState.Approved);
+                    Add(jobs, "@Executing", (int)JobState.Executing);
+                    Add(jobs, "@Verifying", (int)JobState.Verifying);
+                    var recovered = jobs.ExecuteNonQuery();
+                    transaction.Commit();
+                    return Task.FromResult(recovered);
+                }
             }
         }
 
@@ -1053,8 +1077,8 @@ VALUES
         private static void EnsureSchemaVersion(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             var currentVersion = GetSchemaVersion(connection, transaction);
-            if (currentVersion > 5)
-                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (5).");
+            if (currentVersion > 6)
+                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (6).");
 
             if (!HasColumn(connection, transaction, "Jobs", "RequiresExplicitApproval"))
             {
@@ -1075,10 +1099,15 @@ VALUES
                 }
             }
 
+            if (!HasColumn(connection, transaction, "V2ModelOwnerships", "FirstRevisionId") ||
+                !HasColumn(connection, transaction, "V2MutationAttempts", "PlanSha256") ||
+                !HasColumn(connection, transaction, "V2MutationAttempts", "ProspectiveModelRevisionId"))
+                throw new InvalidOperationException("The v2 mutation provenance schema is incomplete or incompatible.");
+
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
-                command.CommandText = "PRAGMA user_version = 5;";
+                command.CommandText = "PRAGMA user_version = 6;";
                 command.ExecuteNonQuery();
             }
         }

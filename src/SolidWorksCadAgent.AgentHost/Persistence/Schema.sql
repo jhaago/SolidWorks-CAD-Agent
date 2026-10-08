@@ -106,8 +106,41 @@ CREATE TABLE IF NOT EXISTS EntityReferenceBindings (
     FOREIGN KEY (ModelId) REFERENCES ManagedModels(ModelId) ON DELETE CASCADE
 );
 
+-- V2-only provenance. Historical v1 models and executions are not backfilled.
+CREATE TABLE IF NOT EXISTS V2ModelOwnerships (
+    ModelId TEXT PRIMARY KEY NOT NULL,
+    JobId TEXT NOT NULL,
+    FirstRevisionId TEXT NOT NULL,
+    CreatedUtc TEXT NOT NULL,
+    FOREIGN KEY (ModelId) REFERENCES ManagedModels(ModelId) ON DELETE CASCADE,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE,
+    FOREIGN KEY (FirstRevisionId, JobId) REFERENCES Revisions(Id, JobId) ON DELETE CASCADE,
+    UNIQUE (ModelId, JobId)
+);
+
+CREATE TABLE IF NOT EXISTS V2MutationAttempts (
+    Id TEXT PRIMARY KEY NOT NULL,
+    JobId TEXT NOT NULL,
+    RevisionId TEXT NOT NULL,
+    PlanSha256 TEXT NOT NULL,
+    StepKey TEXT NOT NULL,
+    ModelId TEXT NOT NULL,
+    OutputEntityId TEXT NULL,
+    ProspectiveModelRevisionId TEXT NOT NULL,
+    Status TEXT NOT NULL CHECK (Status IN ('Prepared', 'Applied', 'Uncertain')),
+    CreatedUtc TEXT NOT NULL,
+    UpdatedUtc TEXT NOT NULL,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE,
+    FOREIGN KEY (RevisionId, JobId) REFERENCES Revisions(Id, JobId) ON DELETE CASCADE,
+    FOREIGN KEY (ModelId, JobId) REFERENCES V2ModelOwnerships(ModelId, JobId) ON DELETE CASCADE,
+    UNIQUE (JobId, RevisionId, StepKey),
+    UNIQUE (ModelId, ProspectiveModelRevisionId)
+);
+
 CREATE INDEX IF NOT EXISTS IX_Revisions_JobId_RevisionNumber
     ON Revisions(JobId, RevisionNumber);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_Revisions_Id_JobId
+    ON Revisions(Id, JobId);
 CREATE INDEX IF NOT EXISTS IX_CommandExecutions_JobId_Revision_Sequence
     ON CommandExecutions(JobId, RevisionNumber, SequenceNumber);
 CREATE INDEX IF NOT EXISTS IX_VerificationResults_JobId_Revision

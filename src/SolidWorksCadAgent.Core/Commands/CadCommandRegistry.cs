@@ -65,6 +65,14 @@ namespace SolidWorksCadAgent.Core.Commands
 
         public IReadOnlyCollection<string> CommandNames => _commandNames;
 
+        public bool IsOperationRegistered(string commandName, int operationVersion)
+        {
+            if (string.IsNullOrWhiteSpace(commandName)) return false;
+            return operationVersion == 1
+                ? _handlers.ContainsKey(commandName)
+                : operationVersion > 1 && _versionedHandlers.ContainsKey(VersionedKey(commandName, operationVersion));
+        }
+
         public async Task<CadCommandResult> ExecuteAsync(
             CadCommandEnvelope command,
             CancellationToken cancellationToken)
