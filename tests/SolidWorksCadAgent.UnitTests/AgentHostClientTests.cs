@@ -1,0 +1,208 @@
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SolidWorksCadAgent.Desktop.Api;
+
+namespace SolidWorksCadAgent.UnitTests
+{
+    [TestClass]
+    public class AgentHostClientTests
+    {
+        [TestMethod]
+        public async Task Settings_LoadAndSavePreserveUneditedFieldsAndRestartNotice()
+        {
+            var handler = new QueueHandler(
+                "{\"settings\":{\"executionMode\":\"Real\",\"openAiModel\":\"original\",\"workspaceRoot\":\"C:\\\\CAD\",\"autoMode\":false}}",
+                "{\"settings\":{\"executionMode\":\"Simulation\",\"openAiModel\":\"replacement\"},\"restartRequired\":true}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var loaded = await client.GetSettingsAsync(CancellationToken.None);
+                loaded.Settings["executionMode"] = "Simulation";
+                loaded.Settings["openAiModel"] = "replacement";
+                var saved = await client.UpdateSettingsAsync(loaded.Settings, CancellationToken.None);
+                Assert.IsTrue(saved.RestartRequired);
+                Assert.AreEqual("replacement", (string)saved.Settings["openAiModel"]);
+                Assert.AreEqual(HttpMethod.Put, handler.LastMethod);
+                Assert.AreEqual("application/json", handler.LastContentType);
+                StringAssert.EndsWith(handler.LastUri.AbsolutePath, "/settings");
+                var sent = Newtonsoft.Json.Linq.JObject.Parse(handler.LastBody);
+                Assert.AreEqual("C:\\CAD", (string)sent["workspaceRoot"]);
+                Assert.AreEqual(false, (bool)sent["autoMode"]);
+            }
+        }
+
+        [TestMethod]
+        public async Task Settings_HostFailureIsReportedWithoutRetryingSave()
+        {
+            using (var client = new AgentHostClient(new HttpClient(new InvalidErrorHandler(
+                "{\"error\":{\"message\":\"Execution mode cannot change while a nonterminal CAD job exists.\"}}"))))
+            {
+                var error = await Assert.ThrowsExceptionAsync<AgentHostApiException>(() =>
+                    client.UpdateSettingsAsync(new Newtonsoft.Json.Linq.JObject(), CancellationToken.None));
+                StringAssert.Contains(error.Message, "nonterminal CAD job");
+            }
+        }
+
+        [TestMethod]
+        public async Task HealthAndStatus_UseLocalhostApiAndParseStronglyTypedResults()
+        {
+            var handler = new QueueHandler(
+                "{\"status\":\"ok\",\"schemaVersion\":1}",
+                "{\"isConnected\":true,\"runtime\":{\"displayVersion\":\"2020 SP0.0\"}}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var health = await client.GetHealthAsync(CancellationToken.None);
+                var status = await client.GetSolidWorksStatusAsync(CancellationToken.None);
+
+                Assert.AreEqual("ok", health.Status);
+                Assert.AreEqual(1, health.SchemaVersion);
+                Assert.IsTrue(status.IsConnected);
+                Assert.AreEqual("2020 SP0.0", status.Runtime.DisplayVersion);
+                Assert.AreEqual("http://127.0.0.1:53741/health", handler.FirstUri.AbsoluteUri);
+            }
+        }
+
+        [TestMethod]
+        public async Task ApproveJob_SendsTheDisplayedRevisionIdentifier()
+        {
+            var handler = new QueueHandler("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"state\":\"ReadyForReview\"}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var revision = Guid.Parse("00000000-0000-0000-0000-000000000002");
+                await client.ApproveJobAsync(
+                    Guid.Parse("00000000-0000-0000-0000-000000000001"),
+                    revision,
+                    CancellationToken.None);
+
+                StringAssert.Contains(handler.LastBody, revision.ToString("D"));
+                StringAssert.EndsWith(handler.LastUri.AbsolutePath, "/approve");
+            }
+        }
+
+        [TestMethod]
+        public async Task NetworkFailure_BecomesUserReadableAgentHostUnavailableError()
+        {
+            using (var client = new AgentHostClient(new HttpClient(new FailingHandler())))
+            {
+                var error = await Assert.ThrowsExceptionAsync<AgentHostUnavailableException>(() =>
+                    client.GetHealthAsync(CancellationToken.None));
+
+                Assert.AreEqual("Agent Host unavailable. Start SolidWorksCadAgent.AgentHost and try again.", error.Message);
+            }
+        }
+
+        [TestMethod]
+        public void Constructor_DisablesDefaultTimeoutForLongRunningLocalCadOperations()
+        {
+            var httpClient = new HttpClient(new QueueHandler("{}"));
+            using (var client = new AgentHostClient(httpClient))
+            {
+                Assert.AreEqual(Timeout.InfiniteTimeSpan, httpClient.Timeout);
+            }
+            httpClient.Dispose();
+        }
+
+        [DataTestMethod]
+        [DataRow("{\"error\":\"wrong shape\"}")]
+        [DataRow("{\"error\":{\"message\":[]}}")]
+        [DataRow("not JSON")]
+        public async Task MalformedApiError_UsesSafeHttpFallback(string body)
+        {
+            using (var http = new HttpClient(new InvalidErrorHandler(body)))
+            using (var client = new AgentHostClient(http))
+            {
+                var error = await Assert.ThrowsExceptionAsync<AgentHostApiException>(() => client.GetHealthAsync(CancellationToken.None));
+                Assert.AreEqual(503, error.StatusCode);
+                Assert.AreEqual("Agent Host returned HTTP 503.", error.Message);
+            }
+        }
+
+        [TestMethod]
+        public async Task JobHistory_ParsesPersistedPageAndEscapesCursor()
+        {
+            var id = Guid.NewGuid();
+            var handler = new QueueHandler("{\"items\":[{\"id\":\"" + id + "\",\"prompt\":\"saved plate\",\"state\":\"Completed\"}],\"nextCursor\":\"next\"}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var page = await client.ListJobsAsync(25, "a+b/=", CancellationToken.None);
+                Assert.AreEqual(id, page.Items[0].Id);
+                Assert.AreEqual("next", page.NextCursor);
+                StringAssert.Contains(handler.LastUri.Query, "cursor=a%2Bb%2F%3D");
+                Assert.AreEqual(HttpMethod.Get, handler.LastMethod);
+            }
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_SendsDisplayedRevisionAndInstructions()
+        {
+            var job = Guid.NewGuid();
+            var revision = Guid.NewGuid();
+            var handler = new QueueHandler("{\"state\":\"AwaitingApproval\",\"currentRevisionNumber\":2}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                var result = await client.RequestChangesAsync(job, revision, "Use a 12 mm hole", CancellationToken.None);
+                Assert.AreEqual(2, result.CurrentRevisionNumber);
+                StringAssert.EndsWith(handler.LastUri.AbsolutePath, "/jobs/" + job + "/request-changes");
+                var body = Newtonsoft.Json.Linq.JObject.Parse(handler.LastBody);
+                Assert.AreEqual(revision.ToString("D"), (string)body["revisionId"]);
+                Assert.AreEqual("Use a 12 mm hole", (string)body["instructions"]);
+            }
+        }
+
+        [TestMethod]
+        public async Task RequestChanges_RejectsBlankBeforeSending()
+        {
+            var handler = new QueueHandler("{}");
+            using (var client = new AgentHostClient(new HttpClient(handler)))
+            {
+                await Assert.ThrowsExceptionAsync<ArgumentException>(() => client.RequestChangesAsync(Guid.NewGuid(), Guid.NewGuid(), "  ", CancellationToken.None));
+                Assert.IsNull(handler.LastUri);
+            }
+        }
+        private sealed class InvalidErrorHandler : HttpMessageHandler
+        {
+            private readonly string _body;
+            public InvalidErrorHandler(string body) { _body = body; }
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(_body) });
+        }
+
+        private sealed class QueueHandler : HttpMessageHandler
+        {
+            private readonly string[] _responses;
+            private int _index;
+
+            public QueueHandler(params string[] responses) { _responses = responses; }
+            public Uri FirstUri { get; private set; }
+            public Uri LastUri { get; private set; }
+            public string LastBody { get; private set; }
+            public HttpMethod LastMethod { get; private set; }
+            public string LastContentType { get; private set; }
+
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                if (FirstUri == null) FirstUri = request.RequestUri;
+                LastUri = request.RequestUri;
+                LastMethod = request.Method;
+                LastContentType = request.Content?.Headers.ContentType?.MediaType;
+                LastBody = request.Content == null ? null : await request.Content.ReadAsStringAsync();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(_responses[_index++], Encoding.UTF8, "application/json")
+                };
+            }
+        }
+
+        private sealed class FailingHandler : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                throw new HttpRequestException("offline");
+            }
+        }
+    }
+}
