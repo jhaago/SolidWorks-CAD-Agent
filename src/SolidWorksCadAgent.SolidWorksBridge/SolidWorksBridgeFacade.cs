@@ -16,7 +16,7 @@ using SolidWorks.Interop.sldworks;
 
 namespace SolidWorksCadAgent.SolidWorksBridge
 {
-    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IDisposable
+    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IVersionedCadCommandExecutor, IDisposable
     {
         private readonly ISolidWorksSession _session;
         private readonly ISolidWorksSession _commandSession;
@@ -80,6 +80,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new GetBoundingBoxCommandHandler(_commandSession),
                 new GetFeatureTreeCommandHandler(_commandSession),
                 new GetRebuildErrorsCommandHandler(_commandSession)
+            }, new IVersionedCadCommandHandler[]
+            {
+                new VersionTwoExtrudeCommandHandler(this)
             });
         }
 
@@ -112,6 +115,29 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 return await _registry.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally { _commandGate.Release(); }
+        }
+
+        public async Task<CadCommandResult> ExecuteVersionedAsync(
+            CadVersionedCommandRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(SolidWorksBridgeFacade));
+
+            // Operation-version-1 steps in a v2 plan retain the established
+            // envelope path. Version-2 consumers go through explicit registry
+            // dispatch and cannot fall through to the name-only v1 handlers.
+            var legacyCommand = request?.Command?.Command;
+            var versionOneFeature = legacyCommand == CadCommandNames.Extrude || legacyCommand == CadCommandNames.CutExtrude;
+            if (request != null && (request.PlanVersion == 1 || request.PlanVersion == 2) &&
+                request.OperationVersion == 1 && !request.ProfileSketchEntityId.HasValue &&
+                !(request.PlanVersion == 2 && versionOneFeature))
+                return await ExecuteAsync(request.Command, cancellationToken).ConfigureAwait(false);
+
+            // A registered versioned handler owns its own Bridge command gate while
+            // resolving and consuming the sketch in one STA operation. Unsupported
+            // versions are rejected by the registry without entering the STA.
+            return await _registry.ExecuteVersionedAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
         // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.
@@ -178,7 +204,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
 
         // Internal native-operation boundary: the selected feature and COM model exist only during one STA callback.
         internal async Task<CadCommandResult> WithSelectedSketchAsync(Guid modelId, Guid entityId, int mark,
-            Func<object, CadCommandResult> action, CancellationToken cancellationToken)
+            Func<object, CadCommandResult> action, CancellationToken cancellationToken,
+            Guid? requiredExecutionId = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(SolidWorksBridgeFacade));
             if (action == null) throw new ArgumentNullException(nameof(action));
@@ -199,6 +226,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 {
 #if SOLIDWORKS_INTEROP
                     var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
+                    if (requiredExecutionId.HasValue)
+                        context.BeginExecution(requiredExecutionId.Value);
                     if (context.ManagedModelId != modelId)
                         return IdentityFailure("SKETCH_REFERENCE_CONTEXT_MISMATCH", "The bound document belongs to another managed model.", "Resolve");
                     ModelDoc2 model;

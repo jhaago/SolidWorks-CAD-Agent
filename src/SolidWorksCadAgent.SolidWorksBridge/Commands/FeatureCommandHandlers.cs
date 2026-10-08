@@ -36,7 +36,6 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             return InvokeAsync(application =>
             {
 #if SOLIDWORKS_INTEROP
-                var swApp = application as SldWorks;
                 var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
@@ -44,6 +43,17 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 if (model.SketchManager.ActiveSketch != null)
                     return Failure("SKETCH_STILL_ACTIVE", "Execute", "Exit the sketch before creating an extrusion feature.");
 
+                return CreateSelectedBoss(model, depthMm);
+#else
+                return InteropUnavailable();
+#endif
+            }, cancellationToken);
+        }
+
+#if SOLIDWORKS_INTEROP
+        // Called on the session STA after the caller has established its selection contract.
+        internal static CadCommandResult CreateSelectedBoss(ModelDoc2 model, double depthMm)
+        {
                 var depth = UnitConverter.MillimetresToMetres(depthMm);
                 var feature = model.FeatureManager.FeatureExtrusion2(
                     true,
@@ -74,11 +84,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the boss extrusion.");
 
                 return Ok(new { depthMm, featureName = feature.Name });
-#else
-                return InteropUnavailable();
-#endif
-            }, cancellationToken);
         }
+#endif
     }
 
     public sealed class CutExtrudeCommandHandler : SolidWorksCommandHandlerBase

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost.Persistence;
+using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
@@ -136,12 +137,19 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (!await TransitionAsync(job, JobState.Interpreting, cancellationToken).ConfigureAwait(false))
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
 
-            CadPlanningResult plan;
+            CadPlanningResult plan = null;
+            CadPlanV2Document version2Plan = null;
             try
             {
-                plan = await _planningProvider.PlanAsync(
-                    new CadPlanningRequest { Prompt = job.Prompt, Image = await _repository.GetInputImageAsync(job.Id, cancellationToken).ConfigureAwait(false) },
-                    cancellationToken).ConfigureAwait(false);
+                var request = new CadPlanningRequest
+                {
+                    Prompt = job.Prompt,
+                    Image = await _repository.GetInputImageAsync(job.Id, cancellationToken).ConfigureAwait(false)
+                };
+                if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
+                    version2Plan = NormalizeVersion2Candidate(await versionedProvider.PlanDocumentAsync(request, cancellationToken).ConfigureAwait(false));
+                else
+                    plan = await _planningProvider.PlanAsync(request, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -149,13 +157,15 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 throw;
             }
 
-            plan = NormalizePlan(plan);
-
             var current = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
             if (current == null || current.State == JobState.Cancelled)
                 return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
             job = current;
 
+            if (version2Plan != null)
+                return await PersistVersion2ReviewCandidateAsync(job, version2Plan, 1, job.Prompt, null, false, cancellationToken).ConfigureAwait(false);
+
+            plan = NormalizePlan(plan);
             var validationAmbiguities = ValidatePlan(plan);
             foreach (var ambiguity in validationAmbiguities)
                 plan.Ambiguities.Add(ambiguity);
@@ -228,9 +238,20 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (snapshot.Job.OverwriteRequested && !snapshot.Job.OverwriteAuthorized)
                 throw new JobCoordinatorException("OVERWRITE_AUTHORIZATION_REQUIRED", "The current plan requests overwrite permission that has not been explicitly authorized.");
 
-            var plan = JsonConvert.DeserializeObject<CadPlanningResult>(revision.PlanJson);
-            if (plan == null)
+            var parsedPlan = CadPlanDocumentReader.ReadPersisted(revision.PlanJson);
+            if (!parsedPlan.IsValid)
+            {
+                var errorCode = parsedPlan.Errors.Any(error => error.StartsWith("UNSUPPORTED_PLAN_VERSION", StringComparison.Ordinal))
+                    ? "UNSUPPORTED_PLAN_VERSION"
+                    : "INVALID_PLAN";
+                throw new JobCoordinatorException(errorCode, "The persisted CAD plan could not be accepted: " + string.Join(" ", parsedPlan.Errors));
+            }
+            if (parsedPlan.Version != 1)
+                throw new JobCoordinatorException("UNSUPPORTED_PLAN_VERSION",
+                    "This CAD Agent can approve only historical unversioned version-1 plans; version-2 candidates are not executable yet.");
+            if (parsedPlan.LegacyPlan == null)
                 throw new JobCoordinatorException("INVALID_PLAN", "The persisted CAD plan could not be loaded.");
+            var plan = parsedPlan.LegacyPlan;
             plan = NormalizePlan(plan);
             RequireCurrentPlanValid(plan);
 
@@ -301,21 +322,30 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 .Concat(new[] { trimmedInstructions })
                 .ToList();
 
-            CadPlanningResult plan;
+            CadPlanningResult plan = null;
+            CadPlanV2Document version2Plan = null;
             try
             {
-                plan = await _planningProvider.PlanAsync(new CadPlanningRequest
+                var request = new CadPlanningRequest
                 {
                     Prompt = snapshot.Job.Prompt,
                     Clarifications = clarifications,
                     Image = await _repository.GetInputImageAsync(jobId, cancellationToken).ConfigureAwait(false)
-                }, cancellationToken).ConfigureAwait(false);
+                };
+                if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
+                    version2Plan = NormalizeVersion2Candidate(await versionedProvider.PlanDocumentAsync(request, cancellationToken).ConfigureAwait(false));
+                else
+                    plan = await _planningProvider.PlanAsync(request, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
                 await FailIfCurrentAsync(jobId, expectedState, cancellationToken).ConfigureAwait(false);
                 throw;
             }
+
+            if (version2Plan != null)
+                return await PersistVersion2ReviewCandidateAsync(snapshot.Job, version2Plan,
+                    currentRevision.RevisionNumber + 1, trimmedInstructions, expectedRevisionId, rebuildResult, cancellationToken).ConfigureAwait(false);
 
             plan = NormalizePlan(plan);
             if (rebuildResult)
@@ -620,6 +650,81 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
             errors.AddRange(CadPlanLifecycleValidator.Validate(plan.ProposedCommands, _executionMode));
             return errors;
+        }
+
+        private static CadPlanV2Document NormalizeVersion2Candidate(string json)
+        {
+            var parsed = CadPlanDocumentReader.ReadCandidate(json);
+            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null)
+                throw new JobCoordinatorException("INVALID_PLAN", "The versioned planning provider must return a valid unnormalized version-2 candidate: " + string.Join(" ", parsed.Errors));
+            return CadPlanV2HostNormalizer.Normalize(parsed.CandidateV2);
+        }
+
+        private async Task<JobSnapshot> PersistVersion2ReviewCandidateAsync(
+            CadJob job,
+            CadPlanV2Document plan,
+            int revisionNumber,
+            string prompt,
+            Guid? expectedRevisionId,
+            bool replacementResult,
+            CancellationToken cancellationToken)
+        {
+            const string reviewOnly = "Version-2 plans are stored for review only. Approval and execution remain disabled until whole-plan execution and verification are available.";
+            const string simulationUnsupported = "Version-2 feature plans are unsupported in simulation because the simulator cannot resolve profileSketch references or verify resulting feature geometry.";
+            plan.Ambiguities = plan.Ambiguities ?? new List<string>();
+            plan.Ambiguities.RemoveAll(item => string.Equals(item, reviewOnly, StringComparison.Ordinal));
+            plan.Ambiguities.Add(reviewOnly);
+            plan.Ambiguities.RemoveAll(item => string.Equals(item, simulationUnsupported, StringComparison.Ordinal));
+            if (_executionMode == ExecutionMode.Simulation)
+                plan.Ambiguities.Add(simulationUnsupported);
+            if (replacementResult)
+            {
+                plan.Assumptions = plan.Assumptions ?? new List<string>();
+                plan.Assumptions.Add("The previous result remains unchanged; this version-2 candidate is a proposed replacement only.");
+            }
+
+            job.PlanValidated = false;
+            job.HasUnresolvedAmbiguity = true;
+            job.AmbiguityMessage = string.Join(Environment.NewLine, plan.Ambiguities);
+            job.OverwriteRequested = CadPlanningCommandContract.RequestsOverwrite(plan.Steps.Select(step => new CadCommandEnvelope
+            {
+                Command = step.Command,
+                Parameters = step.Parameters
+            }).ToList());
+            job.OverwriteAuthorized = false;
+
+            var revision = new JobRevision
+            {
+                Id = Guid.NewGuid(),
+                JobId = job.Id,
+                RevisionNumber = revisionNumber,
+                Prompt = prompt,
+                InterpretationJson = JsonConvert.SerializeObject(new
+                {
+                    plan.Summary,
+                    plan.Assumptions,
+                    plan.Ambiguities,
+                    PlanVersion = plan.PlanVersion,
+                    ExecutionAvailable = false
+                }),
+                PlanJson = JsonConvert.SerializeObject(plan),
+                CreatedUtc = _utcNow()
+            };
+
+            if (expectedRevisionId.HasValue)
+            {
+                _stateMachine.Transition(job, JobState.AwaitingClarification);
+                if (!await _repository.TryAppendRevisionAsync(job, JobState.Interpreting, expectedRevisionId.Value, revision, cancellationToken).ConfigureAwait(false))
+                    throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while the version-2 candidate was being persisted.");
+            }
+            else
+            {
+                await _repository.AppendRevisionAsync(revision, cancellationToken).ConfigureAwait(false);
+                if (!await TransitionAsync(job, JobState.AwaitingClarification, cancellationToken).ConfigureAwait(false))
+                    return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
         }
 
         private void RequireCurrentPlanValid(CadPlanningResult plan)

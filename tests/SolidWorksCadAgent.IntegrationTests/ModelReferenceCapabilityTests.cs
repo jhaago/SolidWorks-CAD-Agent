@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Core.References;
 using SolidWorksCadAgent.Core.Workspace;
 using SolidWorksCadAgent.SolidWorksBridge;
@@ -456,6 +457,12 @@ namespace SolidWorksCadAgent.IntegrationTests
                     }, CancellationToken.None);
                     Assert.AreEqual("DOCUMENT_TARGET_CHANGED", wrongSelection.Error.Code);
                     Assert.IsFalse(selectionActionCalled);
+                    var wrongFeature = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                        new CadCommandEnvelope { Command = CadCommandNames.Extrude,
+                            Parameters = JObject.FromObject(new { depthMm = 5.0 }), ManagedModelId = modelId,
+                            ExecutionId = executionId }, entityId), CancellationToken.None);
+                    Assert.AreEqual("DOCUMENT_TARGET_CHANGED", wrongFeature.Error.Code,
+                        "The v2 consumer must reject the other owned document before feature creation.");
                     var afterWrongDocument = await store.GetEntityBindingAsync(modelId, entityId, record.ConfigurationKey, CancellationToken.None);
                     CollectionAssert.AreEqual(lastGoodToken, afterWrongDocument.NativeReferenceBytes);
                     Assert.AreEqual(CadEntityReferenceStatus.Active, afterWrongDocument.Status);
@@ -517,6 +524,12 @@ namespace SolidWorksCadAgent.IntegrationTests
                     }, CancellationToken.None);
                     Assert.IsFalse(deletedSelection.Success);
                     Assert.IsFalse(selectionActionCalled);
+                    var deletedFeature = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                        new CadCommandEnvelope { Command = CadCommandNames.Extrude,
+                            Parameters = JObject.FromObject(new { depthMm = 5.0 }), ManagedModelId = modelId,
+                            ExecutionId = executionId }, entityId), CancellationToken.None);
+                    Assert.IsFalse(deletedFeature.Success, "The v2 consumer must not replace a deleted sketch by name or selection.");
+                    Assert.AreEqual(deletedSelection.Error.Code, deletedFeature.Error.Code);
                     Assert.AreEqual(0, await session.InvokeWithApplicationAsync(application =>
                         ((SelectionMgr)((ModelDoc2)((SldWorks)application).ActiveDoc).SelectionManager).GetSelectedObjectCount2(-1), CancellationToken.None),
                         "A failed selection scope must clear stale selections.");
@@ -572,6 +585,190 @@ namespace SolidWorksCadAgent.IntegrationTests
 #endif
         }
 
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task VersionTwoExtrude_ConsumesManagedSketchAndCreatesVerifiedBoss()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            var workspace = Path.Combine(@"C:\SolidWorks-CAD-Agent\Workspace\capability-tests", Guid.NewGuid().ToString("N"));
+            var store = new InMemoryModelReferenceStore();
+            var modelId = Guid.NewGuid();
+            var sketchId = Guid.NewGuid();
+            var executionId = Guid.NewGuid();
+            var now = DateTime.UtcNow;
+            var record = new CadModelIdentityRecord
+            {
+                ModelId = modelId, DocumentKind = "Part", Status = CadModelIdentityStatus.Pending,
+                CustomPropertyKey = "SolidWorksCadAgent.ModelId", ConfigurationKey = "Pending",
+                CurrentModelRevisionId = Guid.NewGuid(), RegistryVersion = 1, CreatedUtc = now, UpdatedUtc = now
+            };
+            await store.RegisterModelAsync(record, CancellationToken.None);
+            using (var session = new SolidWorksSession())
+            using (var bridge = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace), store))
+            {
+                var status = await session.AttachAsync(CancellationToken.None);
+                Assert.IsTrue(status.IsConnected, "Start SOLIDWORKS before opting into native v2 extrusion acceptance. " + status.ErrorMessage);
+                Assert.AreEqual(2020, status.RuntimeInfo.ReleaseYear);
+                var original = await session.InvokeWithApplicationAsync(app => CaptureOriginal((SldWorks)app), CancellationToken.None);
+                var ownedTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    Directory.CreateDirectory(workspace);
+                    var created = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.NewPart, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(created.Success, created.Error?.Code + " " + created.Error?.Message);
+                    var ownedTitle = created.Data.Value<string>("documentTitle");
+                    Assert.AreNotEqual(original?.Title, ownedTitle);
+                    ownedTitles.Add(ownedTitle);
+                    record.ConfigurationKey = created.Data.Value<string>("configurationKey");
+                    record.Status = CadModelIdentityStatus.ActiveUnsaved;
+                    await store.UpdateModelAsync(record, CancellationToken.None);
+                    await store.AddEntityBindingAsync(new CadEntityReferenceBinding
+                    {
+                        ModelId = modelId, EntityId = sketchId, EntityKind = "Sketch", ConfigurationKey = record.ConfigurationKey,
+                        NativeObjectKind = "SketchFeature", ReferenceFormatVersion = 3, Status = CadEntityReferenceStatus.Pending,
+                        CreatedAtModelRevisionId = record.CurrentModelRevisionId, CreatedUtc = now, UpdatedUtc = now
+                    }, CancellationToken.None);
+                    var sketch = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.CreateSketch, Parameters = JObject.FromObject(new { plane = "Top Plane" }),
+                        ExecutionId = executionId, ManagedModelId = modelId, OutputEntityId = sketchId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(sketch.Success, sketch.Error?.Code + " " + sketch.Error?.Message);
+                    var rectangle = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.AddRectangle,
+                        Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(rectangle.Success, rectangle.Error?.Code + " " + rectangle.Error?.Message);
+                    var exit = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.ExitSketch, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(exit.Success, exit.Error?.Code + " " + exit.Error?.Message);
+
+                    var result = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                        new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.Extrude,
+                            Parameters = JObject.FromObject(new { depthMm = 5.0 }),
+                            ExecutionId = executionId, ManagedModelId = modelId
+                        }, sketchId), CancellationToken.None);
+                    Assert.IsTrue(result.Success, result.Error?.Code + " " + result.Error?.Message + " " + result.Error?.Detail);
+                    Assert.AreEqual(5.0, result.Data.Value<double>("depthMm"));
+                    Assert.IsTrue((await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Rebuild, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None)).Success);
+                    var body = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.GetBodyCount, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(body.Success);
+                    Assert.AreEqual(1, body.Data.Value<int>("bodyCount"));
+                    var bounds = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.GetBoundingBox, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(bounds.Success);
+                    var extents = new[] { bounds.Data.Value<double>("sizeXmm"), bounds.Data.Value<double>("sizeYmm"),
+                        bounds.Data.Value<double>("sizeZmm") }.OrderBy(value => value).ToArray();
+                    var expectedExtents = new[] { 5.0, 10.0, 20.0 };
+                    for (var axis = 0; axis < 3; axis++)
+                        Assert.AreEqual(expectedExtents[axis], extents[axis], 0.02,
+                            "The v2 boss must have the requested three physical dimensions.");
+                    var native = await session.InvokeWithApplicationAsync(app =>
+                    {
+                        var model = (ModelDoc2)((SldWorks)app).ActiveDoc;
+                        var bodies = ((PartDoc)model).GetBodies2((int)swBodyType_e.swSolidBody, false) as object[];
+                        Assert.AreEqual(1, bodies?.Length);
+                        var mass = ((Body2)bodies[0]).GetMassProperties(1.0) as double[];
+                        Assert.IsNotNull(mass);
+                        var selectionCount = ((SelectionMgr)model.SelectionManager).GetSelectedObjectCount2(-1);
+                        return (volumeMm3: mass[3] * 1e9, selectionCount,
+                            featureTypes: string.Join(",", EnumerateFeatureTypes(model)));
+                    }, CancellationToken.None);
+                    Assert.AreEqual(1000.0, native.volumeMm3, 0.05);
+                    Assert.AreEqual(0, native.selectionCount, "The v2 consumer must clear temporary selection after feature creation.");
+                    Assert.IsTrue(native.featureTypes.Contains("Extrusion") || native.featureTypes.Contains("Boss"),
+                        "The native feature tree must contain a boss: " + native.featureTypes);
+                    var errors = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.GetRebuildErrors, Parameters = new JObject(),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(errors.Success);
+                    Assert.IsFalse(errors.Data.Value<bool>("hasErrors"));
+                    var save = await bridge.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.SavePart,
+                        Parameters = JObject.FromObject(new { path = "v2-managed-sketch-extrude.sldprt", allowOverwrite = false }),
+                        ExecutionId = executionId, ManagedModelId = modelId
+                    }, CancellationToken.None);
+                    Assert.IsTrue(save.Success, save.Error?.Code + " " + save.Error?.Message);
+                    var path = save.Data.Value<string>("path");
+                    Assert.IsTrue(File.Exists(path));
+                    string hash;
+                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var sha = SHA256.Create())
+                        hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty);
+                    var otherExecution = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                        new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.Extrude,
+                            Parameters = JObject.FromObject(new { depthMm = 2.0 }),
+                            ExecutionId = Guid.NewGuid(), ManagedModelId = modelId
+                        }, sketchId), CancellationToken.None);
+                    Assert.IsFalse(otherExecution.Success, "A different job must not consume a bound sketch.");
+                    Assert.AreEqual("SKETCH_REFERENCE_CONTEXT_MISMATCH", otherExecution.Error.Code);
+                    var afterWrongExecution = await session.InvokeWithApplicationAsync(app =>
+                    {
+                        var model = (ModelDoc2)((SldWorks)app).ActiveDoc;
+                        return (bossCount: EnumerateFeatureTypes(model).Count(type => type == "Extrusion" || type == "Boss"),
+                            selectionCount: ((SelectionMgr)model.SelectionManager).GetSelectedObjectCount2(-1));
+                    }, CancellationToken.None);
+                    Assert.AreEqual(1, afterWrongExecution.bossCount, "The rejected job must not add a feature.");
+                    Assert.AreEqual(0, afterWrongExecution.selectionCount);
+                    TestContext?.WriteLine("SOLIDWORKS " + status.RuntimeInfo.ReleaseYear + " native v2 Extrude; modelId=" + modelId +
+                        "; sketchId=" + sketchId + "; artifact=" + path + "; SHA-256=" + hash +
+                        "; featureTypes=" + native.featureTypes);
+                }
+                finally
+                {
+                    await session.InvokeWithApplicationAsync(app =>
+                    {
+                        var sw = (SldWorks)app;
+                        try
+                        {
+                            foreach (var document in (sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                            {
+                                var path = document.GetPathName();
+                                var title = document.GetTitle();
+                                if (string.IsNullOrEmpty(path) ? !ownedTitles.Contains(title) : !IsInside(path, workspace)) continue;
+                                Assert.IsFalse(IsOriginal(document, original));
+                                sw.CloseDoc(title);
+                            }
+                        }
+                        finally { RestoreAndAssertOriginal(sw, original); }
+                        return true;
+                    }, CancellationToken.None);
+                }
+            }
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies for native v2 Extrude acceptance.");
+#endif
+        }
+
         private static void RequireOptIn()
         {
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS") != "1")
@@ -606,6 +803,12 @@ namespace SolidWorksCadAgent.IntegrationTests
             return null;
         }
 
+        private static IEnumerable<string> EnumerateFeatureTypes(ModelDoc2 model)
+        {
+            for (var feature = model.FirstFeature() as Feature; feature != null; feature = feature.GetNextFeature() as Feature)
+                yield return feature.GetTypeName2();
+        }
+
         private static OriginalDocument CaptureOriginal(SldWorks sw)
         {
             var model = sw.ActiveDoc as ModelDoc2;
@@ -622,7 +825,9 @@ namespace SolidWorksCadAgent.IntegrationTests
             if (original == null) return;
             var documents = sw.GetDocuments() as object[] ?? Array.Empty<object>();
             var open = documents.OfType<ModelDoc2>().SingleOrDefault(model => IsOriginal(model, original));
-            Assert.IsNotNull(open, "The user's original document must remain open with its original title and path.");
+            Assert.IsNotNull(open, "The user's original document must remain open with its original title and path. Expected=" +
+                original.Title + " | " + original.Path + "; open=" +
+                string.Join("; ", documents.OfType<ModelDoc2>().Select(model => model.GetTitle() + " | " + model.GetPathName())));
             Assert.AreEqual(original.Path, open.GetPathName());
             Assert.AreEqual(original.SaveFlag, open.GetSaveFlag(), "The original document save flag must not change.");
             var errors = 0;

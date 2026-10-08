@@ -10,7 +10,7 @@ using SolidWorksCadAgent.Core.Commands;
 
 namespace SolidWorksCadAgent.AgentHost.Simulation
 {
-    public sealed class SimulatedCadCommandExecutor : ICadCommandExecutor
+    public sealed class SimulatedCadCommandExecutor : ICadCommandExecutor, IVersionedCadCommandExecutor
     {
         private readonly List<CadCommandEnvelope> _executedCommands = new List<CadCommandEnvelope>();
         private readonly List<string> _features = new List<string>();
@@ -103,6 +103,20 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
             }
 
             return Task.FromResult(result);
+        }
+
+        public Task<CadCommandResult> ExecuteVersionedAsync(
+            CadVersionedCommandRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (request == null)
+                return Task.FromResult(Failure("INVALID_EXECUTION_REQUEST", "A versioned CAD execution request is required."));
+            if (request.PlanVersion != 1)
+                return Task.FromResult(Failure("VERSIONED_PLAN_UNSUPPORTED_IN_SIMULATION", "Simulation cannot execute a versioned CAD plan or verify its referenced feature geometry."));
+            if (request.OperationVersion != 1 || request.ProfileSketchEntityId.HasValue)
+                return Task.FromResult(Failure("UNSUPPORTED_OPERATION_VERSION", "Simulation supports only the legacy version-1 command contract."));
+            return ExecuteAsync(request.Command, cancellationToken);
         }
 
         private CadCommandResult NewPart()

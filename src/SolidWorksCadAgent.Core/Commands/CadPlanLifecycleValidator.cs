@@ -30,6 +30,17 @@ namespace SolidWorksCadAgent.Core.Commands
         public static IReadOnlyList<string> Validate(
             IEnumerable<CadCommandEnvelope> commands,
             ExecutionMode executionMode = ExecutionMode.Real)
+            => ValidateCore(commands, executionMode, false);
+
+        // V2 preflight validates each named, closed, single-consumer sketch itself.
+        // Reuse document/sketch/save lifecycle checks without V1's one-profile slot.
+        internal static IReadOnlyList<string> ValidateReferenceAware(IEnumerable<CadCommandEnvelope> commands)
+            => ValidateCore(commands, ExecutionMode.Real, true);
+
+        private static IReadOnlyList<string> ValidateCore(
+            IEnumerable<CadCommandEnvelope> commands,
+            ExecutionMode executionMode,
+            bool referenceAwareProfiles)
         {
             var errors = new List<string>();
             if (commands == null) return errors;
@@ -169,7 +180,7 @@ namespace SolidWorksCadAgent.Core.Commands
                         if (RequireDocument(errors, index, command, document)) break;
                         if (sketchOpen)
                             Add(errors, index, command, "ExitSketch before creating a feature.");
-                        else if (!completedProfileAvailable)
+                        else if (!referenceAwareProfiles && !completedProfileAvailable)
                             Add(errors, index, command, "Feature creation requires a completed sketch containing a supported closed profile primitive.");
                         else
                         {

@@ -197,6 +197,126 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task ApprovalRejectsMalformedVersionTwoDocumentBeforeExecution()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(Plan(Command(CadCommandNames.NewPart))), executor,
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+            var planned = await coordinator.CreateAndPlanAsync("Create a part", CancellationToken.None);
+            var versionTwo = Newtonsoft.Json.Linq.JObject.Parse(planned.Revisions.Single().PlanJson);
+            versionTwo["planVersion"] = 2;
+            versionTwo["steps"] = new Newtonsoft.Json.Linq.JArray();
+            using (var connection = new SQLiteConnection(new SQLiteConnectionStringBuilder { DataSource = _databasePath, Version = 3 }.ConnectionString))
+            {
+                connection.Open();
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "UPDATE Revisions SET PlanJson = @plan WHERE Id = @id";
+                    command.Parameters.AddWithValue("@plan", versionTwo.ToString());
+                    command.Parameters.AddWithValue("@id", planned.Revisions.Single().Id.ToString("D"));
+                    Assert.AreEqual(1, command.ExecuteNonQuery());
+                }
+            }
+
+            var error = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None));
+            Assert.AreEqual("INVALID_PLAN", error.Code);
+            Assert.AreEqual(0, executor.CallCount);
+            Assert.AreEqual(JobState.AwaitingApproval, (await _repository.GetAsync(planned.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task ApprovalRejectsValidCandidateVersionTwoDocumentUntilExecutionIsSupported()
+        {
+            const string candidate = "{\"planVersion\":2,\"steps\":[{\"stepKey\":\"create\",\"command\":\"NewPart\",\"operationVersion\":1,\"parameters\":{}}]}";
+            var executor = new RecordingSuccessfulExecutor();
+            var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(Plan(Command(CadCommandNames.NewPart))), executor,
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+            var planned = await coordinator.CreateAndPlanAsync("Create a part", CancellationToken.None);
+            using (var connection = new SQLiteConnection(new SQLiteConnectionStringBuilder { DataSource = _databasePath, Version = 3 }.ConnectionString))
+            {
+                connection.Open();
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "UPDATE Revisions SET PlanJson = @plan WHERE Id = @id";
+                    command.Parameters.AddWithValue("@plan", candidate);
+                    command.Parameters.AddWithValue("@id", planned.Revisions.Single().Id.ToString("D"));
+                    command.ExecuteNonQuery();
+                }
+            }
+
+            var error = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None));
+            Assert.AreEqual("UNSUPPORTED_PLAN_VERSION", error.Code);
+            Assert.AreEqual(0, executor.CallCount);
+            Assert.AreEqual(JobState.AwaitingApproval, (await _repository.GetAsync(planned.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task VersionTwoPlannerCandidatesAreNormalizedAndPersistedReviewOnlyPerRevision()
+        {
+            const string candidate = "{\"planVersion\":2,\"summary\":\"Plate candidate\",\"steps\":[" +
+                "{\"stepKey\":\"part\",\"command\":\"NewPart\",\"operationVersion\":1,\"parameters\":{}}," +
+                "{\"stepKey\":\"sketch\",\"command\":\"CreateSketch\",\"operationVersion\":1,\"parameters\":{\"plane\":\"Top Plane\"},\"outputKey\":\"profile\"}," +
+                "{\"stepKey\":\"rectangle\",\"command\":\"AddRectangle\",\"operationVersion\":1,\"parameters\":{\"centerXmm\":0,\"centerYmm\":0,\"widthMm\":20,\"heightMm\":10}}," +
+                "{\"stepKey\":\"exit\",\"command\":\"ExitSketch\",\"operationVersion\":1,\"parameters\":{}}," +
+                "{\"stepKey\":\"boss\",\"command\":\"Extrude\",\"operationVersion\":2,\"parameters\":{\"depthMm\":5},\"inputs\":{\"profileSketch\":{\"kind\":\"Sketch\",\"outputKey\":\"profile\"}}}]}";
+            var provider = new FixedVersionedPlanningProvider(candidate);
+            var executor = new RecordingSuccessfulExecutor();
+            var coordinator = new JobCoordinator(_repository, provider, executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+
+            var first = await coordinator.CreateAndPlanAsync("Create a plate", CancellationToken.None);
+            var firstJson = JObject.Parse(first.Revisions.Single().PlanJson);
+            var firstEntityId = Guid.Parse((string)firstJson["steps"][1]["outputEntityId"]);
+            Assert.AreEqual(JobState.AwaitingClarification, first.Job.State);
+            Assert.IsFalse(first.Job.PlanValidated);
+            Assert.IsTrue(first.Job.HasUnresolvedAmbiguity);
+            Assert.IsFalse(first.Job.AmbiguityMessage.Contains("unsupported in simulation"));
+            Assert.AreEqual("profile", (string)firstJson["steps"][4]["inputs"]["profileSketch"]["outputKey"]);
+            Assert.AreEqual(firstEntityId, Guid.Parse((string)firstJson["steps"][4]["inputs"]["profileSketch"]["entityId"]));
+            Assert.IsTrue(CadPlanDocumentReader.ReadPersisted(first.Revisions.Single().PlanJson).IsValid);
+            Assert.AreEqual(0, executor.CallCount);
+
+            var revised = await coordinator.RequestChangesAsync(first.Job.Id, first.Revisions.Single().Id,
+                "Keep the same geometry", CancellationToken.None);
+            var secondJson = JObject.Parse(revised.Revisions.Last().PlanJson);
+            var secondEntityId = Guid.Parse((string)secondJson["steps"][1]["outputEntityId"]);
+            Assert.AreEqual(JobState.AwaitingClarification, revised.Job.State);
+            Assert.AreNotEqual(firstEntityId, secondEntityId);
+            Assert.AreEqual(secondEntityId, Guid.Parse((string)secondJson["steps"][4]["inputs"]["profileSketch"]["entityId"]));
+            Assert.AreEqual(2, provider.VersionedCalls);
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
+        public async Task VersionTwoPlannerCandidateInSimulation_ExplainsUnsupportedReferenceExecution()
+        {
+            const string candidate = "{\"planVersion\":2,\"summary\":\"Plate candidate\",\"steps\":[" +
+                "{\"stepKey\":\"part\",\"command\":\"NewPart\",\"operationVersion\":1,\"parameters\":{}}," +
+                "{\"stepKey\":\"sketch\",\"command\":\"CreateSketch\",\"operationVersion\":1,\"parameters\":{\"plane\":\"Top Plane\"},\"outputKey\":\"profile\"}," +
+                "{\"stepKey\":\"rectangle\",\"command\":\"AddRectangle\",\"operationVersion\":1,\"parameters\":{\"centerXmm\":0,\"centerYmm\":0,\"widthMm\":20,\"heightMm\":10}}," +
+                "{\"stepKey\":\"exit\",\"command\":\"ExitSketch\",\"operationVersion\":1,\"parameters\":{}}," +
+                "{\"stepKey\":\"boss\",\"command\":\"Extrude\",\"operationVersion\":2,\"parameters\":{\"depthMm\":5},\"inputs\":{\"profileSketch\":{\"kind\":\"Sketch\",\"outputKey\":\"profile\"}}}]}";
+            var executor = new RecordingSuccessfulExecutor();
+            var coordinator = new JobCoordinator(_repository, new FixedVersionedPlanningProvider(candidate), executor,
+                new AgentSettings { AutoMode = true, ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = _workspace });
+
+            var snapshot = await coordinator.CreateAndPlanAsync("Create a plate", CancellationToken.None);
+
+            Assert.AreEqual(JobState.AwaitingClarification, snapshot.Job.State);
+            Assert.IsTrue(snapshot.Job.HasUnresolvedAmbiguity);
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "unsupported in simulation");
+            StringAssert.Contains(snapshot.Job.AmbiguityMessage, "profileSketch references");
+            Assert.IsFalse(snapshot.Job.PlanValidated);
+            Assert.AreEqual(0, executor.CallCount);
+            var approvalError = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.EnqueueApprovalAsync(snapshot.Job.Id, snapshot.Revisions.Single().Id, CancellationToken.None));
+            Assert.AreEqual("INVALID_JOB_STATE", approvalError.Code);
+            Assert.AreEqual(0, executor.CallCount);
+        }
+
+        [TestMethod]
         public async Task SimulationCustomProfileBoss_RequiresClarificationBeforeExecutorCalls()
         {
             var executor = new RecordingSuccessfulExecutor();
@@ -844,6 +964,20 @@ namespace SolidWorksCadAgent.UnitTests
             public FixedPlanningProvider(CadPlanningResult plan) { _plan = plan; }
             public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken cancellationToken) =>
                 Task.FromResult(_plan);
+        }
+
+        private sealed class FixedVersionedPlanningProvider : IVersionedCadPlanningProvider
+        {
+            private readonly string _candidate;
+            public int VersionedCalls { get; private set; }
+            public FixedVersionedPlanningProvider(string candidate) { _candidate = candidate; }
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken cancellationToken) =>
+                throw new AssertFailedException("The versioned planning path should be selected.");
+            public Task<string> PlanDocumentAsync(CadPlanningRequest request, CancellationToken cancellationToken)
+            {
+                VersionedCalls++;
+                return Task.FromResult(_candidate);
+            }
         }
 
         private class RecordingSuccessfulExecutor : ICadCommandExecutor

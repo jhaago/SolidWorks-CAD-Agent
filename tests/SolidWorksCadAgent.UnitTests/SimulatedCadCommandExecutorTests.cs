@@ -54,6 +54,35 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task ExecuteVersionedAsync_RejectsV2FeatureBeforeSimulationMutation()
+        {
+            var executor = new SimulatedCadCommandExecutor();
+            foreach (var command in new[]
+            {
+                Command(CadCommandNames.NewPart),
+                Command(CadCommandNames.CreateSketch, new { plane = "Top Plane" }),
+                Command(CadCommandNames.AddRectangle, new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                Command(CadCommandNames.ExitSketch)
+            })
+                Assert.IsTrue((await executor.ExecuteAsync(command, CancellationToken.None)).Success);
+            var callsBefore = executor.ExecutedCommands.Count;
+
+            var result = await executor.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                Command(CadCommandNames.Extrude, new { depthMm = 5.0 }),
+                Guid.Parse("22222222-2222-4222-8222-222222222222")), CancellationToken.None);
+
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("VERSIONED_PLAN_UNSUPPORTED_IN_SIMULATION", result.Error.Code);
+            Assert.AreEqual(callsBefore, executor.ExecutedCommands.Count);
+            var bodyCount = await executor.ExecuteAsync(Command(CadCommandNames.GetBodyCount), CancellationToken.None);
+            Assert.AreEqual(0, (int)bodyCount.Data["bodyCount"]);
+
+            var legacyExtrude = await executor.ExecuteAsync(
+                Command(CadCommandNames.Extrude, new { depthMm = 5.0 }), CancellationToken.None);
+            Assert.IsTrue(legacyExtrude.Success, legacyExtrude.Error?.Message);
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_RejectsUnknownCommand()
         {
             var executor = new SimulatedCadCommandExecutor();

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 
@@ -150,6 +151,98 @@ namespace SolidWorksCadAgent.UnitTests
 
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
+        public async Task VersionTwoExtrude_RequiresManagedReferenceStoreBeforeSta()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Extrude,
+                        Parameters = JObject.FromObject(new { depthMm = 5.0 }),
+                        ManagedModelId = Guid.NewGuid(), ExecutionId = Guid.NewGuid()
+                    },
+                    Guid.NewGuid()), CancellationToken.None);
+
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+
+                var noExecution = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Extrude,
+                        Parameters = JObject.FromObject(new { depthMm = 5.0 }),
+                        ManagedModelId = Guid.NewGuid()
+                    }, Guid.NewGuid()), CancellationToken.None);
+                Assert.IsFalse(noExecution.Success);
+                Assert.AreEqual("MISSING_EXECUTION_ID", noExecution.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+
+                var malformed = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Extrude,
+                        Parameters = JObject.FromObject(new { depthMm = -5.0 }),
+                        ManagedModelId = Guid.NewGuid()
+                    }, Guid.NewGuid()), CancellationToken.None);
+                Assert.IsFalse(malformed.Success);
+                Assert.AreEqual("INVALID_PARAMETERS", malformed.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+
+                var legacyVersion = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Extrude,
+                        Parameters = JObject.FromObject(new { depthMm = 5.0 })
+                    }), CancellationToken.None);
+                Assert.IsFalse(legacyVersion.Success);
+                Assert.AreEqual("INVALID_EXECUTION_REQUEST", legacyVersion.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
+        public async Task UnsupportedPlanVersion_IsNotLoweredToLegacyEnvelope()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(99, 1,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.Extrude,
+                        Parameters = JObject.FromObject(new { depthMm = 5.0 })
+                    }), CancellationToken.None);
+
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("UNSUPPORTED_PLAN_VERSION", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
+        public async Task VersionTwoCut_RemainsUnregisteredAndCannotUseLegacyHandler()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                CadVersionedCommandRequest Request(object parameters) => new CadVersionedCommandRequest(2, 2,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.CutExtrude,
+                        Parameters = JObject.FromObject(parameters), ManagedModelId = Guid.NewGuid()
+                    }, Guid.NewGuid());
+
+                var valid = await bridge.ExecuteVersionedAsync(Request(new { endCondition = "ThroughAll" }), CancellationToken.None);
+                Assert.IsFalse(valid.Success);
+                Assert.AreEqual("UNSUPPORTED_OPERATION_VERSION", valid.Error.Code);
                 Assert.AreEqual(0, session.ApplicationInvocationCount);
             }
         }
