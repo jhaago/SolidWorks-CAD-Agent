@@ -85,6 +85,22 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
             {
                 var now = DateText(DateTime.UtcNow);
+                using (var bindings = connection.CreateCommand())
+                {
+                    bindings.Transaction = transaction;
+                    bindings.CommandText = @"
+UPDATE EntityReferenceBindings SET Status = @Uncertain, UpdatedUtc = @Now
+WHERE Status IN (@Pending, @Active) AND EXISTS (
+    SELECT 1 FROM V2MutationAttempts a JOIN ManagedModels m ON m.ModelId = a.ModelId
+    WHERE a.Status = 'Prepared' AND a.OutputEntityId = EntityReferenceBindings.EntityId
+      AND a.ModelId = EntityReferenceBindings.ModelId
+      AND m.ConfigurationKey = EntityReferenceBindings.ConfigurationKey);";
+                    Add(bindings, "@Uncertain", CadEntityReferenceStatus.Uncertain.ToString());
+                    Add(bindings, "@Pending", CadEntityReferenceStatus.Pending.ToString());
+                    Add(bindings, "@Active", CadEntityReferenceStatus.Active.ToString());
+                    Add(bindings, "@Now", now);
+                    bindings.ExecuteNonQuery();
+                }
                 using (var models = connection.CreateCommand())
                 {
                     models.Transaction = transaction;

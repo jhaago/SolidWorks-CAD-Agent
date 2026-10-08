@@ -200,6 +200,163 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task SketchAttemptAndPendingBindingArePreparedAtomicallyForAppliedOwnedModel()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                var newPart = await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var snapshot = await repository.GetSnapshotAsync(job.Item1, CancellationToken.None);
+                var sketchId = CadPlanDocumentReader.ReadPersisted(snapshot.Revisions[0].PlanJson).CandidateV2.Steps[1].OutputEntityId.Value;
+
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                var binding = await repository.GetEntityBindingAsync(model.ModelId, sketchId, "Default", CancellationToken.None);
+                var currentModel = await repository.GetModelAsync(model.ModelId, CancellationToken.None);
+                var appliedNewPart = await repository.GetV2MutationAttemptAsync(newPart.Id, CancellationToken.None);
+
+                Assert.AreEqual(CadV2MutationAttemptStatus.Applied, appliedNewPart.Status);
+                Assert.AreEqual(CadV2MutationAttemptStatus.Prepared, attempt.Status);
+                Assert.AreEqual(sketchId, attempt.OutputEntityId.Value);
+                Assert.AreEqual(CadEntityReferenceStatus.Pending, binding.Status);
+                Assert.IsNull(binding.NativeReferenceBytes);
+                Assert.AreEqual("Sketch", binding.EntityKind);
+                Assert.AreEqual("SketchFeature", binding.NativeObjectKind);
+                Assert.AreEqual(3, binding.ReferenceFormatVersion);
+                Assert.AreEqual(attempt.ProspectiveModelRevisionId, binding.CreatedAtModelRevisionId);
+                Assert.AreEqual(model.CurrentModelRevisionId, currentModel.CurrentModelRevisionId,
+                    "Preparation must not claim the native sketch mutation has advanced the model.");
+                Assert.AreEqual(CadModelIdentityStatus.ActiveUnsaved, currentModel.Status);
+            });
+        }
+
+        [TestMethod]
+        public async Task SketchAttemptRejectsBeforeNewPartOutcomeIsApplied()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                    PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId));
+                Assert.IsNull(await repository.FindV2MutationAttemptAsync(job.Item1, job.Item2, "sketch", CancellationToken.None));
+                var snapshot = await repository.GetSnapshotAsync(job.Item1, CancellationToken.None);
+                Assert.IsNull(await repository.GetEntityBindingAsync(model.ModelId,
+                    CadPlanDocumentReader.ReadPersisted(snapshot.Revisions[0].PlanJson).CandidateV2.Steps[1].OutputEntityId.Value,
+                    "Default", CancellationToken.None));
+            });
+        }
+
+        [TestMethod]
+        public async Task SketchAttemptRejectsWrongStepCrossJobModelAndDuplicate()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var firstJob = await AddJobAsync(repository, NormalizedPlan());
+                var firstModel = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(firstJob.Item1, firstJob.Item2, "new", firstModel, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(firstJob.Item1, firstJob.Item2, "new", firstModel.ModelId,
+                    CadCommandResult.Ok(new { modelId = firstModel.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var secondJob = await AddJobAsync(repository, NormalizedPlan());
+                var secondModel = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(secondJob.Item1, secondJob.Item2, "new", secondModel, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(secondJob.Item1, secondJob.Item2, "new", secondModel.ModelId,
+                    CadCommandResult.Ok(new { modelId = secondModel.ModelId.ToString("D"), documentTitle = "Part2", configurationKey = "Default" }),
+                    CancellationToken.None);
+
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                    PrepareSketchAsync(repository, firstJob.Item1, firstJob.Item2, "wrong-step", firstModel.ModelId));
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                    PrepareSketchAsync(repository, firstJob.Item1, firstJob.Item2, "sketch", secondModel.ModelId));
+
+                var prepared = await PrepareSketchAsync(repository, firstJob.Item1, firstJob.Item2, "sketch", firstModel.ModelId);
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                    PrepareSketchAsync(repository, firstJob.Item1, firstJob.Item2, "sketch", firstModel.ModelId));
+                var stored = await repository.GetV2MutationAttemptAsync(prepared.Id, CancellationToken.None);
+                Assert.AreEqual(CadV2MutationAttemptStatus.Prepared, stored.Status);
+                Assert.AreEqual(firstJob.Item1, stored.JobId);
+                Assert.AreEqual(firstModel.ModelId, stored.ModelId);
+            });
+        }
+
+        [TestMethod]
+        public async Task FailedPendingBindingInsertRollsBackSketchAttempt()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                ExecuteSql(path, "CREATE TRIGGER FailPendingBinding BEFORE INSERT ON EntityReferenceBindings " +
+                    "WHEN NEW.Status = 'Pending' BEGIN SELECT RAISE(ABORT, 'forced pending binding failure'); END;");
+
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                    PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId));
+                Assert.IsNull(await repository.FindV2MutationAttemptAsync(job.Item1, job.Item2, "sketch", CancellationToken.None));
+                var snapshot = await repository.GetSnapshotAsync(job.Item1, CancellationToken.None);
+                Assert.IsNull(await repository.GetEntityBindingAsync(model.ModelId,
+                    CadPlanDocumentReader.ReadPersisted(snapshot.Revisions[0].PlanJson).CandidateV2.Steps[1].OutputEntityId.Value,
+                    "Default", CancellationToken.None));
+                Assert.AreEqual(CadModelIdentityStatus.ActiveUnsaved,
+                    (await repository.GetModelAsync(model.ModelId, CancellationToken.None)).Status);
+            });
+        }
+
+        [TestMethod]
+        public async Task StartupRecoveryMarksPreparedSketchBindingUncertainAtomically()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                using (var reopened = new SqliteJobRepository(path))
+                {
+                    await reopened.InitializeAsync();
+                    await reopened.RecoverInterruptedJobsAsync();
+                    var recoveredAttempt = await reopened.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None);
+                    var recoveredBinding = await reopened.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value,
+                        "Default", CancellationToken.None);
+                    var recoveredModel = await reopened.GetModelAsync(model.ModelId, CancellationToken.None);
+                    Assert.AreEqual(CadV2MutationAttemptStatus.Uncertain, recoveredAttempt.Status);
+                    Assert.AreEqual(CadEntityReferenceStatus.Uncertain, recoveredBinding.Status);
+                    Assert.AreEqual(attempt.ProspectiveModelRevisionId, recoveredBinding.CreatedAtModelRevisionId);
+                    Assert.AreEqual(CadModelIdentityStatus.Uncertain, recoveredModel.Status);
+                }
+            });
+        }
+
+        private static async Task<CadV2MutationAttemptRecord> PrepareSketchAsync(
+            SqliteJobRepository repository, Guid jobId, Guid revisionId, string stepKey, Guid modelId)
+        {
+            var method = typeof(SqliteJobRepository).GetMethod("PrepareV2SketchAttemptAsync");
+            Assert.IsNotNull(method, "The repository must expose atomic v2 sketch-attempt preparation.");
+            try
+            {
+                return await (Task<CadV2MutationAttemptRecord>)method.Invoke(repository,
+                    new object[] { jobId, revisionId, stepKey, modelId, CancellationToken.None });
+            }
+            catch (System.Reflection.TargetInvocationException exception) when (exception.InnerException != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+                throw;
+            }
+        }
+
+        [TestMethod]
         public async Task StartupRecoveryMarksPreparedAttemptUncertainWithoutAutomaticReplay()
         {
             await WithRepositoryAsync(async (path, repository) =>
@@ -226,6 +383,170 @@ namespace SolidWorksCadAgent.UnitTests
                         reopened.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
                             plausibleSuccess, CancellationToken.None));
                 }
+            });
+        }
+
+        [TestMethod]
+        public async Task StartupRecoveryMarksBridgeActivatedSketchBindingUncertainBeforeHostCommit()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                var binding = await repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None);
+                binding.NativeReferenceBytes = new byte[] { 1, 2, 3 };
+                binding.Status = CadEntityReferenceStatus.Active;
+                binding.UpdatedUtc = DateTime.UtcNow;
+                await repository.UpdateEntityBindingAsync(binding, CancellationToken.None);
+
+                using (var reopened = new SqliteJobRepository(path))
+                {
+                    await reopened.InitializeAsync();
+                    await reopened.RecoverInterruptedJobsAsync();
+                    Assert.AreEqual(CadV2MutationAttemptStatus.Uncertain,
+                        (await reopened.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None)).Status);
+                    Assert.AreEqual(CadModelIdentityStatus.Uncertain,
+                        (await reopened.GetModelAsync(model.ModelId, CancellationToken.None)).Status);
+                    var recoveredBinding = await reopened.GetEntityBindingAsync(
+                        model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None);
+                    Assert.AreEqual(CadEntityReferenceStatus.Uncertain, recoveredBinding.Status,
+                        "A Bridge-persisted active token must not outlive an uncommitted Host outcome.");
+                }
+            });
+        }
+
+        [TestMethod]
+        public async Task SketchDispatchCorrelatesBridgeReferenceAndAtomicallyAppliesExactAttempt()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                var executor = new RecordingVersionedExecutor(request =>
+                {
+                    Assert.AreEqual(2, request.PlanVersion);
+                    Assert.AreEqual(1, request.OperationVersion);
+                    Assert.AreEqual(CadCommandNames.CreateSketch, request.Command.Command);
+                    Assert.AreEqual(job.Item1, request.Command.ExecutionId);
+                    Assert.AreEqual(model.ModelId, request.Command.ManagedModelId);
+                    Assert.AreEqual(attempt.OutputEntityId.Value, request.Command.OutputEntityId);
+                    Assert.AreEqual("Top Plane", request.Command.Parameters.Value<string>("plane"));
+                    var nativeBinding = repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value,
+                        "Default", CancellationToken.None).GetAwaiter().GetResult();
+                    nativeBinding.NativeReferenceBytes = new byte[] { 9, 8, 7 };
+                    nativeBinding.Status = CadEntityReferenceStatus.Active;
+                    nativeBinding.UpdatedUtc = DateTime.UtcNow;
+                    repository.UpdateEntityBindingAsync(nativeBinding, CancellationToken.None).GetAwaiter().GetResult();
+                    return CadCommandResult.Ok(new { entityId = attempt.OutputEntityId.Value.ToString("D") });
+                });
+
+                var result = await new CadV2CreateSketchDispatchBoundary(repository, executor).DispatchAndCommitAsync(
+                    job.Item1, job.Item2, "sketch", attempt.Id, CancellationToken.None);
+
+                Assert.IsTrue(result.Success);
+                Assert.AreEqual(1, executor.CallCount);
+                Assert.AreEqual(CadV2MutationAttemptStatus.Applied,
+                    (await repository.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None)).Status);
+                var updatedModel = await repository.GetModelAsync(model.ModelId, CancellationToken.None);
+                Assert.AreEqual(CadModelIdentityStatus.ActiveUnsaved, updatedModel.Status);
+                Assert.AreEqual(attempt.ProspectiveModelRevisionId, updatedModel.CurrentModelRevisionId);
+                var activeBinding = await repository.GetEntityBindingAsync(
+                    model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None);
+                CollectionAssert.AreEqual(new byte[] { 9, 8, 7 }, activeBinding.NativeReferenceBytes);
+                Assert.AreEqual(CadEntityReferenceStatus.Active, activeBinding.Status);
+            });
+        }
+
+        [TestMethod]
+        public async Task SketchDispatchMismatchMakesAttemptModelAndActivatedBindingUncertainWithoutReplay()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                var executor = new RecordingVersionedExecutor(_ =>
+                {
+                    var binding = repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value,
+                        "Default", CancellationToken.None).GetAwaiter().GetResult();
+                    binding.NativeReferenceBytes = new byte[] { 4, 5, 6 };
+                    binding.Status = CadEntityReferenceStatus.Active;
+                    binding.UpdatedUtc = DateTime.UtcNow;
+                    repository.UpdateEntityBindingAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+                    return CadCommandResult.Ok(new { entityId = Guid.NewGuid().ToString("D") });
+                });
+                var boundary = new CadV2CreateSketchDispatchBoundary(repository, executor);
+
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => boundary.DispatchAndCommitAsync(
+                    job.Item1, job.Item2, "sketch", attempt.Id, CancellationToken.None));
+
+                Assert.AreEqual(1, executor.CallCount);
+                Assert.AreEqual(CadV2MutationAttemptStatus.Uncertain,
+                    (await repository.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None)).Status);
+                Assert.AreEqual(CadModelIdentityStatus.Uncertain,
+                    (await repository.GetModelAsync(model.ModelId, CancellationToken.None)).Status);
+                Assert.AreEqual(CadEntityReferenceStatus.Uncertain,
+                    (await repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None)).Status);
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => boundary.DispatchAndCommitAsync(
+                    job.Item1, job.Item2, "sketch", attempt.Id, CancellationToken.None));
+                Assert.AreEqual(1, executor.CallCount);
+            });
+        }
+
+        [TestMethod]
+        public async Task SketchOutcomeRequiresBridgeTokenAndRollsBackModelRevisionWhenAttemptCommitFails()
+        {
+            await WithRepositoryAsync(async (path, repository) =>
+            {
+                var job = await AddJobAsync(repository, NormalizedPlan());
+                var model = NewModel();
+                var newPart = await repository.PrepareV2NewPartAttemptAsync(job.Item1, job.Item2, "new", model, CancellationToken.None);
+                await repository.CommitV2NewPartOutcomeAsync(job.Item1, job.Item2, "new", model.ModelId,
+                    CadCommandResult.Ok(new { modelId = model.ModelId.ToString("D"), documentTitle = "Part1", configurationKey = "Default" }),
+                    CancellationToken.None);
+                var attempt = await PrepareSketchAsync(repository, job.Item1, job.Item2, "sketch", model.ModelId);
+                var result = CadCommandResult.Ok(new { entityId = attempt.OutputEntityId.Value.ToString("D") });
+
+                await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => repository.CommitV2SketchOutcomeAsync(
+                    job.Item1, job.Item2, "sketch", model.ModelId, result, CancellationToken.None));
+                Assert.AreEqual(CadV2MutationAttemptStatus.Prepared,
+                    (await repository.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None)).Status);
+                Assert.AreEqual(newPart.ProspectiveModelRevisionId,
+                    (await repository.GetModelAsync(model.ModelId, CancellationToken.None)).CurrentModelRevisionId);
+
+                var binding = await repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None);
+                binding.NativeReferenceBytes = new byte[] { 3, 2, 1 };
+                binding.Status = CadEntityReferenceStatus.Active;
+                binding.UpdatedUtc = DateTime.UtcNow;
+                await repository.UpdateEntityBindingAsync(binding, CancellationToken.None);
+                ExecuteSql(path, "CREATE TRIGGER FailSketchApplied BEFORE UPDATE ON V2MutationAttempts " +
+                    "WHEN NEW.StepKey = 'sketch' AND NEW.Status = 'Applied' BEGIN SELECT RAISE(ABORT, 'forced sketch commit failure'); END;");
+
+                await Assert.ThrowsExceptionAsync<System.Data.SQLite.SQLiteException>(() => repository.CommitV2SketchOutcomeAsync(
+                    job.Item1, job.Item2, "sketch", model.ModelId, result, CancellationToken.None));
+                Assert.AreEqual(CadV2MutationAttemptStatus.Prepared,
+                    (await repository.GetV2MutationAttemptAsync(attempt.Id, CancellationToken.None)).Status);
+                Assert.AreEqual(newPart.ProspectiveModelRevisionId,
+                    (await repository.GetModelAsync(model.ModelId, CancellationToken.None)).CurrentModelRevisionId,
+                    "The model revision must roll back with a failed attempt transition.");
+
+                await repository.MarkV2MutationAttemptUncertainAsync(attempt.Id, CancellationToken.None);
+                Assert.AreEqual(CadEntityReferenceStatus.Uncertain,
+                    (await repository.GetEntityBindingAsync(model.ModelId, attempt.OutputEntityId.Value, "Default", CancellationToken.None)).Status);
             });
         }
 

@@ -6,8 +6,14 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SolidWorksCadAgent.AgentHost.Jobs;
+using SolidWorksCadAgent.AgentHost.Persistence;
+using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Contracts.Jobs;
+using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Core.References;
 using SolidWorksCadAgent.Core.Workspace;
@@ -26,6 +32,13 @@ namespace SolidWorksCadAgent.IntegrationTests
     [TestCategory("PersistentReference")]
     public class ModelReferenceCapabilityTests
     {
+        private const string NativeManagedSketchCandidate = "{\"planVersion\":2,\"steps\":[" +
+            "{\"stepKey\":\"new\",\"command\":\"NewPart\",\"operationVersion\":1,\"parameters\":{}}," +
+            "{\"stepKey\":\"sketch\",\"command\":\"CreateSketch\",\"operationVersion\":1,\"parameters\":{\"plane\":\"Top Plane\"},\"outputKey\":\"profile\"}," +
+            "{\"stepKey\":\"rectangle\",\"command\":\"AddRectangle\",\"operationVersion\":1,\"parameters\":{\"centerXmm\":0,\"centerYmm\":0,\"widthMm\":20,\"heightMm\":10}}," +
+            "{\"stepKey\":\"exit\",\"command\":\"ExitSketch\",\"operationVersion\":1,\"parameters\":{}}," +
+            "{\"stepKey\":\"boss\",\"command\":\"Extrude\",\"operationVersion\":2,\"parameters\":{\"depthMm\":5},\"inputs\":{\"profileSketch\":{\"kind\":\"Sketch\",\"outputKey\":\"profile\"}}}]}";
+
         public TestContext TestContext { get; set; }
 
         [TestMethod]
@@ -144,6 +157,164 @@ namespace SolidWorksCadAgent.IntegrationTests
 #else
             await Task.CompletedTask;
             Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies to run native reference acceptance.");
+#endif
+        }
+
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task HostManagedCreateSketchDispatch_PersistsAndCommitsNativeReference()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            var workspace = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent", "g5c-native", Guid.NewGuid().ToString("N"));
+            var databasePath = Path.Combine(workspace, "host-state.sqlite");
+            var jobId = Guid.NewGuid();
+            var revisionId = Guid.NewGuid();
+            var model = NewPendingModel();
+            var createdTitle = (string)null;
+            var now = DateTime.UtcNow;
+            Directory.CreateDirectory(workspace);
+
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                using (var session = new SolidWorksSession())
+                using (var bridge = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace), repository))
+                {
+                    await repository.InitializeAsync();
+                    var normalizedPlan = JsonConvert.SerializeObject(CadPlanV2HostNormalizer.Normalize(
+                        CadPlanDocumentReader.ReadCandidate(NativeManagedSketchCandidate).CandidateV2));
+                    await repository.CreateAsync(new CadJob
+                    {
+                        Id = jobId,
+                        Prompt = "Controlled native acceptance: managed NewPart and first CreateSketch dispatch.",
+                        State = JobState.Executing,
+                        PlanValidated = true,
+                        IsSimulated = false,
+                        RequiresExplicitApproval = true,
+                        CreatedUtc = now,
+                        UpdatedUtc = now
+                    });
+                    await repository.AppendRevisionAsync(new JobRevision
+                    {
+                        Id = revisionId,
+                        JobId = jobId,
+                        RevisionNumber = 1,
+                        Prompt = "Controlled native acceptance fixture.",
+                        PlanJson = normalizedPlan,
+                        CreatedUtc = now
+                    });
+
+                    var sessionStatus = await session.AttachAsync(CancellationToken.None);
+                    Assert.IsTrue(sessionStatus.IsConnected, "Attach only to the existing SOLIDWORKS session. " + sessionStatus.ErrorMessage);
+                    Assert.IsNotNull(sessionStatus.RuntimeInfo);
+                    Assert.AreEqual(2020, sessionStatus.RuntimeInfo.ReleaseYear, "This opt-in acceptance is scoped to SOLIDWORKS 2020.");
+                    var original = await session.InvokeWithApplicationAsync(application => CaptureOriginal((SldWorks)application), CancellationToken.None);
+                    try
+                    {
+                        var newPartAttempt = await repository.PrepareV2NewPartAttemptAsync(
+                            jobId, revisionId, "new", model, CancellationToken.None);
+                        var newPart = await new CadV2NewPartDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "new", newPartAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(newPart.Success, newPart.Error?.Code + " " + newPart.Error?.Message);
+                        createdTitle = newPart.Data.Value<string>("documentTitle");
+                        Assert.IsFalse(string.IsNullOrWhiteSpace(createdTitle));
+                        Assert.AreEqual(model.ModelId.ToString("D"), newPart.Data.Value<string>("modelId"));
+
+                        var sketchAttempt = await repository.PrepareV2SketchAttemptAsync(
+                            jobId, revisionId, "sketch", model.ModelId, CancellationToken.None);
+                        var sketchResult = await new CadV2CreateSketchDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "sketch", sketchAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(sketchResult.Success, sketchResult.Error?.Code + " " + sketchResult.Error?.Message);
+
+                        var sketchEntityId = sketchAttempt.OutputEntityId.Value;
+                        Assert.AreEqual(sketchEntityId.ToString("D"), sketchResult.Data.Value<string>("entityId"));
+                        var appliedAttempt = await repository.GetV2MutationAttemptAsync(sketchAttempt.Id, CancellationToken.None);
+                        var activeModel = await repository.GetModelAsync(model.ModelId, CancellationToken.None);
+                        var activeBinding = await repository.GetEntityBindingAsync(
+                            model.ModelId, sketchEntityId, activeModel.ConfigurationKey, CancellationToken.None);
+                        Assert.AreEqual(CadV2MutationAttemptStatus.Applied, appliedAttempt.Status);
+                        Assert.AreEqual(CadModelIdentityStatus.ActiveUnsaved, activeModel.Status);
+                        Assert.AreEqual(sketchAttempt.ProspectiveModelRevisionId, activeModel.CurrentModelRevisionId);
+                        Assert.AreEqual(CadEntityReferenceStatus.Active, activeBinding.Status);
+                        Assert.IsNotNull(activeBinding.NativeReferenceBytes);
+                        Assert.IsTrue(activeBinding.NativeReferenceBytes.Length > 0 && activeBinding.NativeReferenceBytes.Length <= 1024 * 1024);
+                        Assert.AreEqual(sketchAttempt.ProspectiveModelRevisionId, activeBinding.CreatedAtModelRevisionId);
+
+                        // Keep the owned sketch when SOLIDWORKS leaves sketch edit mode; empty sketches can be discarded.
+                        var rectangle = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.AddRectangle,
+                            Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                            ExecutionId = jobId,
+                            ManagedModelId = model.ModelId
+                        }, CancellationToken.None);
+                        Assert.IsTrue(rectangle.Success, rectangle.Error?.Code + " " + rectangle.Error?.Message);
+                        var exitSketch = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.ExitSketch,
+                            Parameters = new JObject(),
+                            ExecutionId = jobId,
+                            ManagedModelId = model.ModelId
+                        }, CancellationToken.None);
+                        Assert.IsTrue(exitSketch.Success, exitSketch.Error?.Code + " " + exitSketch.Error?.Message);
+                        var resolved = await bridge.ResolveSketchReferenceAsync(model.ModelId, sketchEntityId, CancellationToken.None);
+                        Assert.IsTrue(resolved.Success, "The production Bridge resolver must resolve the Host-committed token: " +
+                            resolved.Error?.Code + " " + resolved.Error?.Message);
+
+                        TestContext?.WriteLine("Controlled Host v2 sketch dispatch passed on SOLIDWORKS " +
+                            sessionStatus.RuntimeInfo.ReleaseYear + "; job=" + jobId.ToString("D") +
+                            "; model=" + model.ModelId.ToString("D") + "; entity=" + sketchEntityId.ToString("D") +
+                            "; tokenBytes=" + activeBinding.NativeReferenceBytes.Length + "; no part file was saved.");
+                    }
+                    finally
+                    {
+                        await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var sw = (SldWorks)application;
+                            try
+                            {
+                                foreach (var document in (sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                                {
+                                    var ownedByTitle = createdTitle != null && string.Equals(
+                                        document.GetTitle(), createdTitle, StringComparison.OrdinalIgnoreCase);
+                                    var storedId = (string)null;
+                                    document.Extension.CustomPropertyManager[""].Get6(
+                                        "SolidWorksCadAgent.ModelId", false, out storedId, out _, out _, out _);
+                                    var ownedByIdentity = Guid.TryParse(storedId, out var parsedId) && parsedId == model.ModelId;
+                                    if (!ownedByTitle && !ownedByIdentity) continue;
+                                    Assert.IsFalse(IsOriginal(document, original), "Cleanup must never close the user's original document.");
+                                    sw.CloseDoc(document.GetTitle());
+                                }
+                                Assert.IsFalse((sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>()
+                                    .Any(document =>
+                                    {
+                                        if (createdTitle != null && string.Equals(document.GetTitle(), createdTitle, StringComparison.OrdinalIgnoreCase)) return true;
+                                        var storedId = (string)null;
+                                        document.Extension.CustomPropertyManager[""].Get6(
+                                            "SolidWorksCadAgent.ModelId", false, out storedId, out _, out _, out _);
+                                        return Guid.TryParse(storedId, out var parsedId) && parsedId == model.ModelId;
+                                    }),
+                                    "The test-owned unsaved part must be closed.");
+                            }
+                            finally
+                            {
+                                RestoreAndAssertOriginal(sw, original);
+                            }
+                            return true;
+                        }, CancellationToken.None);
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var suffix in new[] { "", "-wal", "-shm" })
+                    if (File.Exists(databasePath + suffix)) File.Delete(databasePath + suffix);
+                if (Directory.Exists(workspace)) Directory.Delete(workspace, true);
+            }
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies to run native Host-boundary acceptance.");
 #endif
         }
 
@@ -776,6 +947,23 @@ namespace SolidWorksCadAgent.IntegrationTests
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS") != "1")
                 Assert.Inconclusive("Set SOLIDWORKS_RUN_REFERENCE_TESTS=1 and SOLIDWORKS_EXPECTED_YEAR=2020 to opt into native reference acceptance.");
             Assert.AreEqual("2020", System.Environment.GetEnvironmentVariable("SOLIDWORKS_EXPECTED_YEAR"), "This native reference probe is scoped to SOLIDWORKS 2020.");
+        }
+
+        private static CadModelIdentityRecord NewPendingModel()
+        {
+            var now = DateTime.UtcNow;
+            return new CadModelIdentityRecord
+            {
+                ModelId = Guid.NewGuid(),
+                DocumentKind = "Part",
+                Status = CadModelIdentityStatus.Pending,
+                CustomPropertyKey = "SolidWorksCadAgent.ModelId",
+                CurrentModelRevisionId = Guid.NewGuid(),
+                ConfigurationKey = "Default",
+                RegistryVersion = 1,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            };
         }
 
 #if SOLIDWORKS_INTEROP
