@@ -100,6 +100,23 @@ namespace SolidWorksCadAgent.UnitTests
                 Assert.AreEqual(200, client.Forward("GET", "jobs/" + Guid.NewGuid() + "/artifact", null).Status);
         }
 
+        [TestMethod]
+        public void ApprovalSubmission_WaitsForTheHostReceiptBeyondStatusDeadline()
+        {
+            using (var client = new AgentHostRemoteClient(new SlowApprovalHandler()))
+                Assert.AreEqual(202, client.Forward("POST", "jobs/" + Guid.NewGuid() + "/approve", "{}").Status);
+        }
+
+        private sealed class SlowApprovalHandler : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                Assert.IsTrue(request.RequestUri.AbsolutePath.EndsWith("/approve-submit", StringComparison.Ordinal));
+                await Task.Delay(1200, token);
+                return new HttpResponseMessage(HttpStatusCode.Accepted) { Content = new StringContent("{}") };
+            }
+        }
+
         private sealed class SlowArtifactHandler : HttpMessageHandler
         {
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
