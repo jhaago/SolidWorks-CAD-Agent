@@ -188,7 +188,17 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
+                return CreateOnActiveSketch(model, centerXmm, centerYmm, widthMm, heightMm);
+#else
+                return InteropUnavailable();
+#endif
+            }, cancellationToken);
+        }
 
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateOnActiveSketch(ModelDoc2 model,
+            double centerXmm, double centerYmm, double widthMm, double heightMm)
+        {
                 var sketchManager = model.SketchManager;
                 if (sketchManager.ActiveSketch == null)
                     return Failure("NO_ACTIVE_SKETCH", "Execute", "A sketch must be active before adding a rectangle.");
@@ -210,11 +220,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("RECTANGLE_CREATION_FAILED", "Execute", "SOLIDWORKS did not create the rectangle.");
 
                 return Ok(new { centerXmm, centerYmm, widthMm, heightMm });
-#else
-                return InteropUnavailable();
-#endif
-            }, cancellationToken);
         }
+#endif
     }
 
     public sealed class AddCircleCommandHandler : SolidWorksCommandHandlerBase
@@ -289,20 +296,24 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 var model = RequireDocument(application) as ModelDoc2;
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
-
-                var sketchManager = model.SketchManager;
-                if (sketchManager.ActiveSketch == null)
-                    return Failure("NO_ACTIVE_SKETCH", "Execute", "No sketch is active.");
-
-                sketchManager.InsertSketch(true);
-                if (sketchManager.ActiveSketch != null)
-                    return Failure("SKETCH_EXIT_FAILED", "Execute", "SOLIDWORKS remained in sketch edit mode.");
-
-                return Ok(new { exited = true });
+                return ExitActiveSketch(model);
 #else
                 return InteropUnavailable();
 #endif
             }, cancellationToken);
         }
+
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult ExitActiveSketch(ModelDoc2 model)
+        {
+            var sketchManager = model.SketchManager;
+            if (sketchManager.ActiveSketch == null)
+                return Failure("NO_ACTIVE_SKETCH", "Execute", "No sketch is active.");
+            sketchManager.InsertSketch(true);
+            if (sketchManager.ActiveSketch != null)
+                return Failure("SKETCH_EXIT_FAILED", "Execute", "SOLIDWORKS remained in sketch edit mode.");
+            return Ok(new { exited = true });
+        }
+#endif
     }
 }

@@ -23,6 +23,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         private readonly bool _ownsSession;
         private readonly CadCommandRegistry _registry;
         private readonly IModelReferenceStore _modelReferenceStore;
+        private readonly SavePartCommandHandler _savePartHandler;
         private readonly SemaphoreSlim _commandGate = new SemaphoreSlim(1, 1);
         private bool _disposed;
 
@@ -80,11 +81,12 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             _ownsSession = ownsSession;
             _modelReferenceStore = modelReferenceStore;
             _commandSession = new DocumentScopedSession(_session);
+            _savePartHandler = new SavePartCommandHandler(_commandSession, workspacePolicy);
             _registry = new CadCommandRegistry(new ICadCommandHandler[]
             {
                 new NewPartCommandHandler(_commandSession),
                 new OpenPartCommandHandler(_commandSession, workspacePolicy, modelReferenceStore),
-                new SavePartCommandHandler(_commandSession, workspacePolicy),
+                _savePartHandler,
                 new CloseDocumentCommandHandler(_commandSession),
                 new CreateSketchCommandHandler(_commandSession, modelReferenceStore),
                 new AddLineCommandHandler(_commandSession),
@@ -122,10 +124,15 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 if (command != null && command.OutputEntityId.HasValue && !command.ManagedModelId.HasValue)
                     return IdentityFailure("INVALID_IDENTITY_CONTEXT", "An output entity ID requires a managed model ID.");
                 if (command != null && (command.ExecutionId.HasValue || command.ManagedModelId.HasValue || command.OutputEntityId.HasValue))
-                    await _session.InvokeWithApplicationAsync(application =>
+                {
+                    var identityMatches = await _session.InvokeWithApplicationAsync(application =>
                     {
                         var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
                         context.BeginExecution(command.ExecutionId);
+                        if (command.ManagedModelId.HasValue && command.Command != CadCommandNames.NewPart &&
+                            command.Command != CadCommandNames.OpenPart && context.ManagedModelId != command.ManagedModelId &&
+                            !(command.Command == CadCommandNames.CreateSketch && !context.ManagedModelId.HasValue))
+                            return false;
                         // OpenPart derives its identity from the validated file property and registry.
                         // Keep the current binding intact until BindPendingOpen succeeds.
                         if (command.Command != CadCommandNames.OpenPart &&
@@ -133,6 +140,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                             context.SetExecutionIdentity(command.ManagedModelId, command.OutputEntityId);
                         return true;
                     }, cancellationToken).ConfigureAwait(false);
+                    if (!identityMatches)
+                        return IdentityFailure("DOCUMENT_IDENTITY_MISMATCH", "The bound document belongs to another managed model.");
+                }
                 return await _registry.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally { _commandGate.Release(); }
@@ -150,8 +160,90 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             // dispatch and cannot fall through to the name-only v1 handlers.
             var legacyCommand = request?.Command?.Command;
             var versionOneFeature = legacyCommand == CadCommandNames.Extrude || legacyCommand == CadCommandNames.CutExtrude;
+            if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
+                legacyCommand == CadCommandNames.AddRectangle)
+            {
+                if (!request.TargetSketchEntityId.HasValue || request.TargetSketchEntityId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_SKETCH_REFERENCE", "A version-2 rectangle requires the Host-bound active sketch ID.");
+                if (!request.Command.ManagedModelId.HasValue || request.Command.ManagedModelId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_MODEL_REFERENCE", "A version-2 rectangle requires the Host-managed model ID.");
+                if (!request.Command.ExecutionId.HasValue || request.Command.ExecutionId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_EXECUTION_ID", "A version-2 rectangle requires the Host execution ID.");
+                if (request.ProfileSketchEntityId.HasValue || request.Command.OutputEntityId.HasValue)
+                    return IdentityFailure("INVALID_EXECUTION_CONTEXT", "A rectangle cannot bind a profile or output entity ID.");
+                var parameterError = CadPlanningCommandContract.Validate(request.Command);
+                if (parameterError != null)
+                    return IdentityFailure("INVALID_PARAMETERS", parameterError);
+                var parameters = request.Command.Parameters;
+                return await WithActiveSketchAsync(request.Command.ManagedModelId.Value,
+                    request.TargetSketchEntityId.Value,
+                    native =>
+                    {
+#if SOLIDWORKS_INTEROP
+                        return AddRectangleCommandHandler.CreateOnActiveSketch((ModelDoc2)native,
+                            parameters.Value<double>("centerXmm"), parameters.Value<double>("centerYmm"),
+                            parameters.Value<double>("widthMm"), parameters.Value<double>("heightMm"));
+#else
+                        return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "This build has no SOLIDWORKS interop libraries.");
+#endif
+                    }, cancellationToken, request.Command.ExecutionId.Value).ConfigureAwait(false);
+            }
+            if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
+                legacyCommand == CadCommandNames.ExitSketch)
+            {
+                if (!request.TargetSketchEntityId.HasValue || request.TargetSketchEntityId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_SKETCH_REFERENCE", "A version-2 ExitSketch requires the Host-bound active sketch ID.");
+                if (!request.Command.ManagedModelId.HasValue || request.Command.ManagedModelId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_MODEL_REFERENCE", "A version-2 ExitSketch requires the Host-managed model ID.");
+                if (!request.Command.ExecutionId.HasValue || request.Command.ExecutionId.Value == Guid.Empty)
+                    return IdentityFailure("MISSING_EXECUTION_ID", "A version-2 ExitSketch requires the Host execution ID.");
+                if (request.ProfileSketchEntityId.HasValue || request.Command.OutputEntityId.HasValue)
+                    return IdentityFailure("INVALID_EXECUTION_CONTEXT", "ExitSketch cannot bind a profile or output entity ID.");
+                var parameterError = CadPlanningCommandContract.Validate(request.Command);
+                if (parameterError != null)
+                    return IdentityFailure("INVALID_PARAMETERS", parameterError);
+                return await WithActiveSketchAsync(request.Command.ManagedModelId.Value,
+                    request.TargetSketchEntityId.Value,
+                    native =>
+                    {
+#if SOLIDWORKS_INTEROP
+                        return ExitSketchCommandHandler.ExitActiveSketch((ModelDoc2)native);
+#else
+                        return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "This build has no SOLIDWORKS interop libraries.");
+#endif
+                    }, cancellationToken, request.Command.ExecutionId.Value, verifyClosedReference: true).ConfigureAwait(false);
+            }
+            if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
+                legacyCommand == CadCommandNames.SavePart)
+            {
+                if (!request.Command.ManagedModelId.HasValue || request.Command.ManagedModelId.Value == Guid.Empty ||
+                    !request.Command.ExecutionId.HasValue || request.Command.ExecutionId.Value == Guid.Empty ||
+                    request.Command.OutputEntityId.HasValue || request.TargetSketchEntityId.HasValue ||
+                    request.ProfileSketchEntityId.HasValue ||
+                    request.Command.Parameters?.Value<bool?>("allowOverwrite") == true)
+                    return IdentityFailure("INVALID_EXECUTION_CONTEXT", "A version-2 save requires a managed model, execution ID and non-overwriting target.");
+                var parameterError = CadPlanningCommandContract.Validate(request.Command);
+                if (parameterError != null) return IdentityFailure("INVALID_PARAMETERS", parameterError);
+                await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    if (_modelReferenceStore == null)
+                        return IdentityFailure("MODEL_REFERENCE_STORE_UNAVAILABLE", "A managed reference store is required for version-2 save.");
+                    var identityMatches = await _session.InvokeWithApplicationAsync(application =>
+                    {
+                        var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
+                        context.BeginExecution(request.Command.ExecutionId);
+                        return context.ManagedModelId == request.Command.ManagedModelId;
+                    }, cancellationToken).ConfigureAwait(false);
+                    if (!identityMatches)
+                        return IdentityFailure("DOCUMENT_IDENTITY_MISMATCH", "The bound document belongs to another managed model.");
+                    return await _savePartHandler.ExecuteStagedV2Async(request.Command.Parameters,
+                        request.Command.ManagedModelId.Value, cancellationToken).ConfigureAwait(false);
+                }
+                finally { _commandGate.Release(); }
+            }
             if (request != null && (request.PlanVersion == 1 || request.PlanVersion == 2) &&
-                request.OperationVersion == 1 && !request.ProfileSketchEntityId.HasValue &&
+                request.OperationVersion == 1 && !request.ProfileSketchEntityId.HasValue && !request.TargetSketchEntityId.HasValue &&
                 !(request.PlanVersion == 2 && versionOneFeature))
                 return await ExecuteAsync(request.Command, cancellationToken).ConfigureAwait(false);
 
@@ -159,6 +251,54 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             // resolving and consuming the sketch in one STA operation. Unsupported
             // versions are rejected by the registry without entering the STA.
             return await _registry.ExecuteVersionedAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.
+        internal async Task<CadCommandResult> WithActiveSketchAsync(Guid modelId, Guid entityId,
+            Func<object, CadCommandResult> action, CancellationToken cancellationToken, Guid executionId,
+            bool verifyClosedReference = false)
+        {
+            await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_modelReferenceStore == null)
+                    return IdentityFailure("MODEL_REFERENCE_STORE_UNAVAILABLE", "A reference store is required for a version-2 sketch mutation.");
+                SketchReferencePreparation prepared;
+                try { prepared = await new SolidWorksReferenceResolver(_modelReferenceStore)
+                    .PrepareSketchResolutionAsync(modelId, entityId, cancellationToken).ConfigureAwait(false); }
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                { return IdentityFailure("SKETCH_REFERENCE_STORE_UNAVAILABLE", "The sketch binding could not be loaded: " + ex.Message); }
+                if (prepared.Error != null) return SolidWorksReferenceResolver.Failure(prepared.Error);
+                return await _session.InvokeWithApplicationAsync(application =>
+                {
+#if SOLIDWORKS_INTEROP
+                    var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
+                    context.BeginExecution(executionId);
+                    if (context.ManagedModelId != modelId)
+                        return IdentityFailure("SKETCH_REFERENCE_CONTEXT_MISMATCH", "The bound document belongs to another managed model.", "Resolve");
+                    ModelDoc2 model;
+                    try { model = context.RequireActive((application as SldWorks)?.ActiveDoc) as ModelDoc2; }
+                    catch (DocumentTargetException ex) { return IdentityFailure("DOCUMENT_TARGET_CHANGED", ex.Message, "Resolve"); }
+                    if (model == null || !string.Equals(model.ConfigurationManager.ActiveConfiguration.Name,
+                        prepared.Model.ConfigurationKey, StringComparison.Ordinal))
+                        return IdentityFailure("SKETCH_REFERENCE_CONFIGURATION_MISMATCH", "The active document configuration differs from the registered sketch context.", "Resolve");
+                    return SolidWorksSketchSelectionScope.RunActive(model, prepared.Binding.NativeReferenceBytes,
+                        native =>
+                        {
+                            var result = action(native);
+                            if (!verifyClosedReference || result == null || !result.Success) return result;
+                            if (model.SketchManager.ActiveSketch != null)
+                                return IdentityFailure("SKETCH_EXIT_FAILED", "SOLIDWORKS remained in sketch edit mode.", "Verify");
+                            var error = SolidWorksReferenceResolver.ResolveOnSta(model,
+                                prepared.Binding.NativeReferenceBytes, out _);
+                            return error == null ? result : SolidWorksReferenceResolver.Failure(error);
+                        });
+#else
+                    return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "This build has no SOLIDWORKS interop libraries.");
+#endif
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            finally { _commandGate.Release(); }
         }
 
         // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.

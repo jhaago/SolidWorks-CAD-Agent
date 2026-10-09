@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -9,6 +10,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.AgentHost.Jobs;
+using SolidWorksCadAgent.AgentHost.Host;
 using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.AgentHost.Planning;
 using SolidWorksCadAgent.Contracts.Cad;
@@ -38,6 +40,116 @@ namespace SolidWorksCadAgent.IntegrationTests
             "{\"stepKey\":\"rectangle\",\"command\":\"AddRectangle\",\"operationVersion\":1,\"parameters\":{\"centerXmm\":0,\"centerYmm\":0,\"widthMm\":20,\"heightMm\":10}}," +
             "{\"stepKey\":\"exit\",\"command\":\"ExitSketch\",\"operationVersion\":1,\"parameters\":{}}," +
             "{\"stepKey\":\"boss\",\"command\":\"Extrude\",\"operationVersion\":2,\"parameters\":{\"depthMm\":5},\"inputs\":{\"profileSketch\":{\"kind\":\"Sketch\",\"outputKey\":\"profile\"}}}]}";
+        private static readonly string NativeManagedSketchSaveCandidate =
+            NativeManagedSketchCandidate.Substring(0, NativeManagedSketchCandidate.Length - 2) +
+            ",{" + "\"stepKey\":\"save\",\"command\":\"SavePart\",\"operationVersion\":1," +
+            "\"parameters\":{\"path\":\"v2-owned.sldprt\",\"allowOverwrite\":false}}]}";
+
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task ApprovedV2RectangleBossJob_CreatesVerifiesSavesAndReopensOwnedPart()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            var workspace = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent", "g5m-native", Guid.NewGuid().ToString("N"));
+            var database = Path.Combine(workspace, "jobs.sqlite");
+            Directory.CreateDirectory(workspace);
+            Guid ownedModelId = Guid.Empty;
+            try
+            {
+                using (var repository = new SqliteJobRepository(database))
+                using (var session = new SolidWorksSession())
+                using (var bridge = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace), repository))
+                {
+                    await repository.InitializeAsync();
+                    var status = await session.AttachAsync(CancellationToken.None);
+                    Assert.IsTrue(status.IsConnected, status.ErrorMessage);
+                    Assert.AreEqual(2020, status.RuntimeInfo.ReleaseYear);
+                    var original = await session.InvokeWithApplicationAsync(app => CaptureOriginal((SldWorks)app), CancellationToken.None);
+                    try
+                    {
+                        var coordinator = new JobCoordinator(repository, new DeterministicCadPlanningProvider(), bridge,
+                            new AgentSettings { WorkspaceRoot = workspace, ExecutionMode = ExecutionMode.Real, AutoMode = true });
+                        var routes = new AgentRoutes(repository, session, coordinator);
+                        var created = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                            new JObject { ["prompt"] = "V2 rectangle boss: 20 x 10 x 5 mm; save as v2-owned.sldprt" }.ToString()),
+                            CancellationToken.None);
+                        Assert.AreEqual(201, created.StatusCode, created.JsonBody);
+                        var jobId = Guid.Parse(JObject.Parse(created.JsonBody).Value<string>("id"));
+                        var plan = await repository.GetSnapshotAsync(jobId, CancellationToken.None);
+                        Assert.AreEqual(JobState.AwaitingApproval, plan.Job.State);
+                        Assert.AreEqual(0, plan.Commands.Count);
+                        var approved = await routes.HandleAsync(new AgentRequest("POST", "/jobs/" + jobId.ToString("D") + "/approve",
+                            new JObject { ["revisionId"] = plan.Revisions.Single().Id.ToString("D") }.ToString()), CancellationToken.None);
+                        Assert.AreEqual(200, approved.StatusCode, approved.JsonBody);
+                        var result = await repository.GetSnapshotAsync(jobId, CancellationToken.None);
+                        Assert.AreEqual(JobState.ReadyForReview, result.Job.State);
+                        Assert.AreEqual(6, result.Commands.Count);
+                        CollectionAssert.AreEqual(new[] { CadCommandNames.NewPart, CadCommandNames.CreateSketch,
+                            CadCommandNames.AddRectangle, CadCommandNames.ExitSketch, CadCommandNames.Extrude,
+                            CadCommandNames.SavePart }, result.Commands.Select(command => command.CommandName).ToArray());
+                        Assert.IsTrue(result.Verifications.Last().Passed);
+                        ownedModelId = Guid.Parse(JObject.Parse(result.Commands.First().ResultJson).Value<string>("modelId"));
+                        var savedPath = Path.Combine(workspace, "v2-owned.sldprt");
+                        Assert.IsTrue(File.Exists(savedPath));
+                        Assert.AreEqual(savedPath, result.Job.OutputPath,
+                            "The ordinary CAD job response must expose the verified file for the download button.");
+                        var artifact = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + jobId.ToString("D") + "/artifact", null),
+                            CancellationToken.None);
+                        Assert.AreEqual(200, artifact.StatusCode, artifact.JsonBody);
+                        byte[] savedBytes;
+                        using (var read = new FileStream(savedPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                        {
+                            savedBytes = new byte[checked((int)read.Length)];
+                            var offset = 0;
+                            while (offset < savedBytes.Length)
+                            {
+                                var count = read.Read(savedBytes, offset, savedBytes.Length - offset);
+                                Assert.IsTrue(count > 0);
+                                offset += count;
+                            }
+                        }
+                        CollectionAssert.AreEqual(savedBytes, Convert.FromBase64String(
+                            JObject.Parse(artifact.JsonBody).Value<string>("base64")));
+                        var model = await repository.GetModelAsync(ownedModelId, CancellationToken.None);
+                        Assert.AreEqual(CadModelIdentityStatus.ActiveSaved, model.Status);
+                        Assert.AreEqual(savedPath, model.CanonicalPath, true);
+                        TestContext?.WriteLine("Approved v2 job " + plan.Job.Id + "; SOLIDWORKS " + status.RuntimeInfo.ReleaseYear +
+                            "; model " + ownedModelId + "; saved/reopened " + savedPath + "; hash " + model.LastSavedSha256);
+                    }
+                    finally
+                    {
+                        await session.InvokeWithApplicationAsync(app =>
+                        {
+                            var sw = (SldWorks)app;
+                            try
+                            {
+                                foreach (var doc in (sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                                {
+                                    doc.Extension.CustomPropertyManager[""].Get6("SolidWorksCadAgent.ModelId", false,
+                                        out var text, out _, out _, out _);
+                                    if (ownedModelId != Guid.Empty && Guid.TryParse(text, out var id) && id == ownedModelId &&
+                                        !IsOriginal(doc, original)) sw.CloseDoc(doc.GetTitle());
+                                }
+                            }
+                            finally { RestoreAndAssertOriginal(sw, original); }
+                            return true;
+                        }, CancellationToken.None);
+                    }
+                }
+            }
+            finally
+            {
+                var ownedRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent", "g5m-native"))
+                    .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                Assert.IsTrue(Path.GetFullPath(workspace).StartsWith(ownedRoot, StringComparison.OrdinalIgnoreCase));
+                if (Directory.Exists(workspace)) Directory.Delete(workspace, true);
+            }
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies for approved v2 native acceptance.");
+#endif
+        }
 
         public TestContext TestContext { get; set; }
 
@@ -315,6 +427,314 @@ namespace SolidWorksCadAgent.IntegrationTests
 #else
             await Task.CompletedTask;
             Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies to run native Host-boundary acceptance.");
+#endif
+        }
+
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task HostManagedRectangleDispatch_VerifiesGeometryAndRejectsWrongActiveSketch()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            var workspace = Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent", "g5f-native", Guid.NewGuid().ToString("N"));
+            var databasePath = Path.Combine(workspace, "host-state.sqlite");
+            var jobId = Guid.NewGuid();
+            var revisionId = Guid.NewGuid();
+            var modelIdentity = NewPendingModel();
+            string ownedTitle = null;
+            var now = DateTime.UtcNow;
+            Directory.CreateDirectory(workspace);
+            try
+            {
+                using (var repository = new SqliteJobRepository(databasePath))
+                using (var session = new SolidWorksSession())
+                using (var bridge = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace), repository))
+                {
+                    await repository.InitializeAsync();
+                    var normalizedPlan = JsonConvert.SerializeObject(CadPlanV2HostNormalizer.Normalize(
+                        CadPlanDocumentReader.ReadCandidate(NativeManagedSketchSaveCandidate).CandidateV2));
+                    await repository.CreateAsync(new CadJob
+                    {
+                        Id = jobId, Prompt = "Owned native rectangle boundary acceptance.",
+                        State = JobState.Executing, PlanValidated = true, IsSimulated = false,
+                        RequiresExplicitApproval = true, CreatedUtc = now, UpdatedUtc = now
+                    });
+                    await repository.AppendRevisionAsync(new JobRevision
+                    {
+                        Id = revisionId, JobId = jobId, RevisionNumber = 1,
+                        Prompt = "Owned native rectangle boundary fixture.",
+                        PlanJson = normalizedPlan, CreatedUtc = now
+                    });
+
+                    var status = await session.AttachAsync(CancellationToken.None);
+                    Assert.IsTrue(status.IsConnected, "Attach only to the existing SOLIDWORKS session. " + status.ErrorMessage);
+                    Assert.AreEqual(2020, status.RuntimeInfo.ReleaseYear);
+                    var original = await session.InvokeWithApplicationAsync(application =>
+                        CaptureOriginal((SldWorks)application), CancellationToken.None);
+                    try
+                    {
+                        var newAttempt = await repository.PrepareV2NewPartAttemptAsync(
+                            jobId, revisionId, "new", modelIdentity, CancellationToken.None);
+                        var created = await new CadV2NewPartDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "new", newAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(created.Success, created.Error?.Code + " " + created.Error?.Message);
+                        ownedTitle = created.Data.Value<string>("documentTitle");
+                        Assert.IsFalse(string.IsNullOrWhiteSpace(ownedTitle));
+                        Assert.AreNotEqual(original?.Title, ownedTitle);
+
+                        var sketchAttempt = await repository.PrepareV2SketchAttemptAsync(
+                            jobId, revisionId, "sketch", modelIdentity.ModelId, CancellationToken.None);
+                        var sketchResult = await new CadV2CreateSketchDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "sketch", sketchAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(sketchResult.Success, sketchResult.Error?.Code + " " + sketchResult.Error?.Message);
+                        var sketchId = sketchAttempt.OutputEntityId.Value;
+
+                        var rectangleAttempt = await repository.PrepareV2RectangleAttemptAsync(
+                            jobId, revisionId, "rectangle", modelIdentity.ModelId, CancellationToken.None);
+                        var rectangle = await new CadV2RectangleDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "rectangle", rectangleAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(rectangle.Success, rectangle.Error?.Code + " " + rectangle.Error?.Message);
+                        Assert.AreEqual(CadV2MutationAttemptStatus.Applied,
+                            (await repository.GetV2MutationAttemptAsync(rectangleAttempt.Id, CancellationToken.None)).Status);
+                        var committedModel = await repository.GetModelAsync(modelIdentity.ModelId, CancellationToken.None);
+                        Assert.AreEqual(CadModelIdentityStatus.ActiveUnsaved, committedModel.Status);
+                        Assert.AreEqual(rectangleAttempt.ProspectiveModelRevisionId, committedModel.CurrentModelRevisionId);
+
+                        var originalSegments = await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var native = (ModelDoc2)((SldWorks)application).ActiveDoc;
+                            Assert.AreEqual(ownedTitle, native.GetTitle());
+                            Assert.AreEqual("", native.GetPathName(), "The test part must remain unsaved.");
+                            var active = native.SketchManager.ActiveSketch as Sketch;
+                            Assert.IsNotNull(active);
+                            AssertRectangleGeometry(active, 20.0, 10.0);
+                            return CountProfileSegments(active);
+                        }, CancellationToken.None);
+
+                        var exitAttempt = await repository.PrepareV2ExitSketchAttemptAsync(
+                            jobId, revisionId, "exit", modelIdentity.ModelId, CancellationToken.None);
+                        var exit = await new CadV2ExitSketchDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "exit", exitAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(exit.Success, exit.Error?.Code + " " + exit.Error?.Message);
+                        Assert.AreEqual(true, exit.Data.Value<bool>("exited"));
+                        Assert.AreEqual(CadV2MutationAttemptStatus.Applied,
+                            (await repository.GetV2MutationAttemptAsync(exitAttempt.Id, CancellationToken.None)).Status);
+                        Assert.AreEqual(exitAttempt.ProspectiveModelRevisionId,
+                            (await repository.GetModelAsync(modelIdentity.ModelId, CancellationToken.None)).CurrentModelRevisionId);
+
+                        var boundSketch = await repository.GetEntityBindingAsync(modelIdentity.ModelId, sketchId,
+                            committedModel.ConfigurationKey, CancellationToken.None);
+                        Assert.IsNotNull(boundSketch?.NativeReferenceBytes);
+                        var beforeRejection = await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var native = (ModelDoc2)((SldWorks)application).ActiveDoc;
+                            Assert.IsNull(native.SketchManager.ActiveSketch, "The bound sketch must be closed.");
+                            Assert.IsTrue(native.EditRebuild3(), "The owned rectangle sketch must rebuild cleanly.");
+                            var resolvedFirst = native.Extension.GetObjectByPersistReference3(boundSketch.NativeReferenceBytes,
+                                out var nativeStatus);
+                            Assert.AreEqual(0, nativeStatus);
+                            var first = resolvedFirst as Sketch ?? (resolvedFirst as Feature)?.GetSpecificFeature2() as Sketch;
+                            Assert.IsNotNull(first);
+                            var firstSignature = SketchSegmentGeometrySignature(first);
+                            native.ClearSelection2(true);
+                            Assert.IsTrue(native.Extension.SelectByID2("Front Plane", "PLANE", 0, 0, 0,
+                                false, 0, null, (int)swSelectOption_e.swSelectOptionDefault));
+                            native.SketchManager.InsertSketch(true);
+                            var second = native.SketchManager.ActiveSketch as Sketch;
+                            Assert.IsNotNull(second);
+                            Assert.AreEqual(0, CountProfileSegments(second));
+                            return Tuple.Create(firstSignature, SketchSegmentGeometrySignature(second));
+                        }, CancellationToken.None);
+
+                        var wrongActive = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                            new CadCommandEnvelope
+                            {
+                                Command = CadCommandNames.AddRectangle,
+                                Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                                ExecutionId = jobId, ManagedModelId = modelIdentity.ModelId
+                            }, targetSketchEntityId: sketchId), CancellationToken.None);
+                        Assert.IsFalse(wrongActive.Success);
+                        Assert.AreEqual("ACTIVE_SKETCH_MISMATCH", wrongActive.Error.Code);
+                        var wrongExit = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                            new CadCommandEnvelope
+                            {
+                                Command = CadCommandNames.ExitSketch, Parameters = new JObject(),
+                                ExecutionId = jobId, ManagedModelId = modelIdentity.ModelId
+                            }, targetSketchEntityId: sketchId), CancellationToken.None);
+                        Assert.IsFalse(wrongExit.Success);
+                        Assert.AreEqual("ACTIVE_SKETCH_MISMATCH", wrongExit.Error.Code);
+                        await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var native = (ModelDoc2)((SldWorks)application).ActiveDoc;
+                            Assert.AreEqual(beforeRejection.Item2,
+                                SketchSegmentGeometrySignature((Sketch)native.SketchManager.ActiveSketch),
+                                "Rejected mutation must leave the second sketch segment geometry unchanged.");
+                            var resolved = native.Extension.GetObjectByPersistReference3(boundSketch.NativeReferenceBytes, out var nativeStatus);
+                            Assert.AreEqual(0, nativeStatus);
+                            var first = resolved as Sketch ?? (resolved as Feature)?.GetSpecificFeature2() as Sketch;
+                            Assert.IsNotNull(first);
+                            Assert.AreEqual(originalSegments, CountProfileSegments(first));
+                            Assert.AreEqual(beforeRejection.Item1, SketchSegmentGeometrySignature(first),
+                                "Rejected mutation must leave the bound sketch segment geometry unchanged.");
+                            Assert.IsTrue(native.EditRebuild3(), "The owned part must still rebuild after rejection.");
+                            native.SketchManager.InsertSketch(true);
+                            Assert.IsNull(native.SketchManager.ActiveSketch);
+                            return true;
+                        }, CancellationToken.None);
+                        var noActive = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                            new CadCommandEnvelope
+                            {
+                                Command = CadCommandNames.ExitSketch, Parameters = new JObject(),
+                                ExecutionId = jobId, ManagedModelId = modelIdentity.ModelId
+                            }, targetSketchEntityId: sketchId), CancellationToken.None);
+                        Assert.IsFalse(noActive.Success);
+                        Assert.AreEqual("NO_ACTIVE_SKETCH", noActive.Error.Code);
+                        var bossAttempt = await repository.PrepareV2BossAttemptAsync(
+                            jobId, revisionId, "boss", modelIdentity.ModelId, CancellationToken.None);
+                        var boss = await new CadV2BossDispatchBoundary(repository, bridge).DispatchAndCommitAsync(
+                            jobId, revisionId, "boss", bossAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(boss.Success, boss.Error?.Code + " " + boss.Error?.Message);
+                        Assert.AreEqual(5.0, boss.Data.Value<double>("depthMm"));
+                        Assert.AreEqual(CadV2MutationAttemptStatus.Applied,
+                            (await repository.GetV2MutationAttemptAsync(bossAttempt.Id, CancellationToken.None)).Status);
+                        Assert.AreEqual(bossAttempt.ProspectiveModelRevisionId,
+                            (await repository.GetModelAsync(modelIdentity.ModelId, CancellationToken.None)).CurrentModelRevisionId);
+                        var verified = await new CadV2RectangleBossVerifier(repository, bridge).VerifyAsync(
+                            jobId, revisionId, modelIdentity.ModelId, CancellationToken.None);
+                        Assert.IsTrue(verified.Passed, verified.Reason);
+                        var bounds = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.GetBoundingBox, Parameters = new JObject(),
+                            ExecutionId = jobId, ManagedModelId = modelIdentity.ModelId
+                        }, CancellationToken.None);
+                        Assert.IsTrue(bounds.Success, bounds.Error?.Code + " " + bounds.Error?.Message);
+                        var extents = new[] { bounds.Data.Value<double>("sizeXmm"), bounds.Data.Value<double>("sizeYmm"),
+                            bounds.Data.Value<double>("sizeZmm") }.OrderBy(value => value).ToArray();
+                        var expectedExtents = new[] { 5.0, 10.0, 20.0 };
+                        for (var axis = 0; axis < 3; axis++)
+                            Assert.AreEqual(expectedExtents[axis], extents[axis], 0.02);
+                        await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var native = (ModelDoc2)((SldWorks)application).ActiveDoc;
+                            Assert.IsTrue(native.EditRebuild3());
+                            var bodies = ((PartDoc)native).GetBodies2((int)swBodyType_e.swSolidBody, false) as object[];
+                            Assert.AreEqual(1, bodies?.Length);
+                            var mass = ((Body2)bodies[0]).GetMassProperties(1.0) as double[];
+                            Assert.IsNotNull(mass);
+                            Assert.AreEqual(1000.0, mass[3] * 1e9, 0.05);
+                            Assert.AreEqual(0, ((SelectionMgr)native.SelectionManager).GetSelectedObjectCount2(-1));
+                            Assert.AreEqual("", native.GetPathName(), "This acceptance part must remain unsaved.");
+                            return true;
+                        }, CancellationToken.None);
+                        var wrongModelId = Guid.NewGuid();
+                        var wrongObservation = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.GetBodyCount, Parameters = new JObject(),
+                            ExecutionId = jobId, ManagedModelId = wrongModelId
+                        }, CancellationToken.None);
+                        Assert.AreEqual("DOCUMENT_IDENTITY_MISMATCH", wrongObservation.Error?.Code);
+                        var wrongClose = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.CloseDocument, Parameters = new JObject(),
+                            ExecutionId = jobId, ManagedModelId = wrongModelId
+                        }, CancellationToken.None);
+                        Assert.AreEqual("DOCUMENT_IDENTITY_MISMATCH", wrongClose.Error?.Code);
+                        var wrongSave = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                            new CadCommandEnvelope
+                            {
+                                Command = CadCommandNames.SavePart,
+                                Parameters = JObject.FromObject(new { path = "wrong-model.sldprt", allowOverwrite = false }),
+                                ExecutionId = jobId, ManagedModelId = wrongModelId
+                            }), CancellationToken.None);
+                        Assert.AreEqual("DOCUMENT_IDENTITY_MISMATCH", wrongSave.Error?.Code);
+                        Assert.IsFalse(File.Exists(Path.Combine(workspace, "wrong-model.sldprt")));
+                        var saveAttempt = await repository.PrepareV2SaveAttemptAsync(
+                            jobId, revisionId, "save", modelIdentity.ModelId, CancellationToken.None);
+                        var saved = await new CadV2SaveDispatchBoundary(repository, bridge,
+                            new WorkspacePolicy(workspace)).DispatchAndCommitAsync(
+                            jobId, revisionId, "save", saveAttempt.Id, CancellationToken.None);
+                        Assert.IsTrue(saved.Success, saved.Error?.Code + " " + saved.Error?.Message);
+                        var savedPath = Path.Combine(workspace, "v2-owned.sldprt");
+                        Assert.AreEqual(savedPath, saved.Data.Value<string>("path"), true);
+                        Assert.IsTrue(File.Exists(savedPath));
+                        var savedModel = await repository.GetModelAsync(modelIdentity.ModelId, CancellationToken.None);
+                        Assert.AreEqual(CadModelIdentityStatus.ActiveSaved, savedModel.Status);
+                        Assert.AreEqual(saveAttempt.ProspectiveModelRevisionId, savedModel.CurrentModelRevisionId);
+                        Assert.AreEqual(savedPath, savedModel.CanonicalPath, true);
+                        Assert.AreEqual(CadV2MutationAttemptStatus.Applied,
+                            (await repository.GetV2MutationAttemptAsync(saveAttempt.Id, CancellationToken.None)).Status);
+                        using (var stream = new FileStream(savedPath, FileMode.Open, FileAccess.Read,
+                            FileShare.ReadWrite | FileShare.Delete))
+                        using (var sha = SHA256.Create())
+                            Assert.AreEqual(BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant(),
+                                savedModel.LastSavedSha256);
+                        Assert.IsTrue(await new CadV2SavedVerificationRecorder(repository, bridge,
+                            new WorkspacePolicy(workspace)).VerifyAndRecordAsync(
+                            jobId, revisionId, modelIdentity.ModelId, CancellationToken.None),
+                            "The recorder must own managed close/reopen before observing geometry.");
+                        var reopenedBounds = await bridge.ExecuteAsync(new CadCommandEnvelope
+                        {
+                            Command = CadCommandNames.GetBoundingBox, Parameters = new JObject(),
+                            ExecutionId = jobId, ManagedModelId = modelIdentity.ModelId
+                        }, CancellationToken.None);
+                        Assert.IsTrue(reopenedBounds.Success, reopenedBounds.Error?.Code + " " + reopenedBounds.Error?.Message);
+                        Assert.AreEqual(20.0, reopenedBounds.Data.Value<double>("sizeXmm"), 0.02);
+                        Assert.AreEqual(5.0, reopenedBounds.Data.Value<double>("sizeYmm"), 0.02);
+                        Assert.AreEqual(10.0, reopenedBounds.Data.Value<double>("sizeZmm"), 0.02);
+                        var reopenedVerification = await new CadV2RectangleBossVerifier(repository, bridge).VerifySavedAsync(
+                            jobId, revisionId, modelIdentity.ModelId, new WorkspacePolicy(workspace), CancellationToken.None);
+                        Assert.IsTrue(reopenedVerification.Passed, reopenedVerification.Reason);
+                        var evidence = (await repository.GetSnapshotAsync(jobId, CancellationToken.None)).Verifications.Last();
+                        Assert.AreEqual(CadV2SavedVerificationRecorder.CheckName, evidence.CheckName);
+                        Assert.IsTrue(evidence.Passed);
+                        Assert.AreEqual(savedModel.LastSavedSha256, JObject.Parse(evidence.ActualJson).Value<string>("sha256"));
+                        Assert.IsFalse(File.Exists(CadV2SavePath.StageFor(savedPath, modelIdentity.ModelId)),
+                            "The owned staging copy must be removed after its native document is closed.");
+                        TestContext?.WriteLine("SOLIDWORKS " + status.RuntimeInfo.ReleaseYear +
+                            " Host rectangle: job=" + jobId + "; model=" + modelIdentity.ModelId +
+                            "; four profile edges; ExitSketch/boss/save Applied; 20 x 10 x 5 mm, 1000 mm3; saved and reopened.");
+                    }
+                    finally
+                    {
+                        await session.InvokeWithApplicationAsync(application =>
+                        {
+                            var sw = (SldWorks)application;
+                            try
+                            {
+                                foreach (var document in (sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                                {
+                                    var titleMatches = ownedTitle != null && string.Equals(document.GetTitle(), ownedTitle, StringComparison.OrdinalIgnoreCase);
+                                    document.Extension.CustomPropertyManager[""].Get6("SolidWorksCadAgent.ModelId", false,
+                                        out var storedId, out _, out _, out _);
+                                    if (!titleMatches && (!Guid.TryParse(storedId, out var parsedId) || parsedId != modelIdentity.ModelId)) continue;
+                                    Assert.IsFalse(IsOriginal(document, original));
+                                    sw.CloseDoc(document.GetTitle());
+                                }
+                                Assert.IsFalse((sw.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>()
+                                    .Any(document =>
+                                    {
+                                        if (ownedTitle != null && string.Equals(document.GetTitle(), ownedTitle, StringComparison.OrdinalIgnoreCase)) return true;
+                                        document.Extension.CustomPropertyManager[""].Get6("SolidWorksCadAgent.ModelId", false,
+                                            out var storedId, out _, out _, out _);
+                                        return Guid.TryParse(storedId, out var parsedId) && parsedId == modelIdentity.ModelId;
+                                    }), "The test-owned unsaved part must be closed.");
+                            }
+                            finally { RestoreAndAssertOriginal(sw, original); }
+                            return true;
+                        }, CancellationToken.None);
+                    }
+                }
+            }
+            finally
+            {
+                var ownedRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "SolidWorksCadAgent", "g5f-native"))
+                    .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                Assert.IsTrue(Path.GetFullPath(workspace).StartsWith(ownedRoot, StringComparison.OrdinalIgnoreCase));
+                if (Directory.Exists(workspace)) Directory.Delete(workspace, true);
+            }
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies for native Host rectangle acceptance.");
 #endif
         }
 
@@ -941,6 +1361,58 @@ namespace SolidWorksCadAgent.IntegrationTests
             Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies for native v2 Extrude acceptance.");
 #endif
         }
+
+#if SOLIDWORKS_INTEROP
+        private static int CountProfileSegments(Sketch sketch) =>
+            (sketch.GetSketchSegments() as object[] ?? Array.Empty<object>())
+                .Cast<SketchSegment>().Count(segment => !segment.ConstructionGeometry);
+
+        private static string SketchSegmentGeometrySignature(Sketch sketch)
+        {
+            var descriptions = new List<string>();
+            foreach (var segment in (sketch.GetSketchSegments() as object[] ?? Array.Empty<object>()).Cast<SketchSegment>())
+            {
+                Assert.AreEqual((int)swSketchSegments_e.swSketchLINE, segment.GetType(),
+                    "This owned test sketch should contain only line segments.");
+                var line = (SketchLine)segment;
+                var start = (SketchPoint)line.GetStartPoint2();
+                var end = (SketchPoint)line.GetEndPoint2();
+                var endpoints = new[]
+                {
+                    start.X.ToString("R", CultureInfo.InvariantCulture) + "," + start.Y.ToString("R", CultureInfo.InvariantCulture),
+                    end.X.ToString("R", CultureInfo.InvariantCulture) + "," + end.Y.ToString("R", CultureInfo.InvariantCulture)
+                };
+                Array.Sort(endpoints, StringComparer.Ordinal);
+                descriptions.Add((segment.ConstructionGeometry ? "construction:" : "profile:") +
+                    endpoints[0] + "->" + endpoints[1]);
+            }
+            return string.Join("|", descriptions.OrderBy(value => value, StringComparer.Ordinal));
+        }
+
+        private static void AssertRectangleGeometry(Sketch sketch, double widthMm, double heightMm)
+        {
+            var lines = (sketch.GetSketchSegments() as object[] ?? Array.Empty<object>())
+                .Cast<SketchSegment>().Where(segment => !segment.ConstructionGeometry).ToArray();
+            Assert.AreEqual(4, lines.Length, "Exactly four nonconstruction rectangle edges are required.");
+            Assert.IsTrue(lines.All(segment => segment.GetType() == (int)swSketchSegments_e.swSketchLINE));
+            var vertices = new List<Tuple<double, double>>();
+            foreach (var segment in lines)
+            {
+                var line = (SketchLine)segment;
+                var start = (SketchPoint)line.GetStartPoint2();
+                var end = (SketchPoint)line.GetEndPoint2();
+                vertices.Add(Tuple.Create(start.X * 1000.0, start.Y * 1000.0));
+                vertices.Add(Tuple.Create(end.X * 1000.0, end.Y * 1000.0));
+                var length = Math.Sqrt(Math.Pow(end.X - start.X, 2) + Math.Pow(end.Y - start.Y, 2)) * 1000.0;
+                Assert.IsTrue(Math.Abs(length - widthMm) < 0.001 || Math.Abs(length - heightMm) < 0.001,
+                    "Unexpected native rectangle edge length: " + length);
+            }
+            foreach (var x in new[] { -widthMm / 2.0, widthMm / 2.0 })
+                foreach (var y in new[] { -heightMm / 2.0, heightMm / 2.0 })
+                    Assert.AreEqual(2, vertices.Count(point => Math.Abs(point.Item1 - x) < 0.001 &&
+                        Math.Abs(point.Item2 - y) < 0.001), "Expected native rectangle corner (" + x + ", " + y + ") mm.");
+        }
+#endif
 
         private static void RequireOptIn()
         {

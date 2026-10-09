@@ -341,7 +341,8 @@ UPDATE Jobs SET
     IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
-    UpdatedUtc = @UpdatedUtc
+    UpdatedUtc = @UpdatedUtc,
+    RequiresExplicitApproval = @RequiresExplicitApproval
 WHERE Id = @Id AND State = @ExpectedState AND (@ExpectedRevision IS NULL OR (SELECT Id FROM Revisions WHERE JobId = @Id ORDER BY RevisionNumber DESC LIMIT 1) = @ExpectedRevision);";
                 BindJob(command, job);
                 Add(command, "@ExpectedState", (int)expectedState);
@@ -456,7 +457,8 @@ UPDATE Jobs SET
     IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
-    UpdatedUtc = @UpdatedUtc
+    UpdatedUtc = @UpdatedUtc,
+    RequiresExplicitApproval = @RequiresExplicitApproval
 WHERE Id = @Id AND State = @ExpectedState;";
                     BindJob(update, job);
                     Add(update, "@ExpectedState", (int)expectedState);
@@ -906,7 +908,7 @@ FROM CommandExecutions WHERE JobId = @JobId ORDER BY RevisionNumber, SequenceNum
                 command.Transaction = transaction;
                 command.CommandText = @"
 SELECT Id, JobId, RevisionNumber, CheckName, Passed, ExpectedJson, ActualJson, CreatedUtc
-FROM VerificationResults WHERE JobId = @JobId ORDER BY RevisionNumber, CreatedUtc;";
+FROM VerificationResults WHERE JobId = @JobId ORDER BY RevisionNumber, CreatedUtc, rowid;";
                 Add(command, "@JobId", GuidText(jobId));
                 using (var reader = command.ExecuteReader())
                 {

@@ -38,12 +38,39 @@ namespace SolidWorksCadAgent.AgentHost.Planning
             if (errors.Count > 0) return CadPlanV2ExecutionReadinessResult.Fail(errors);
 
             var requests = new List<CadVersionedCommandRequest>();
-            foreach (var step in parsed.CandidateV2.Steps)
+            var steps = parsed.CandidateV2.Steps;
+            for (var index = 0; index < steps.Count; index++)
             {
+                var step = steps[index];
                 var version = step.OperationVersion.Value;
                 if (step.Command == CadCommandNames.SavePart)
                 {
-                    errors.Add("STEP_" + step.StepKey + ": SavePart requires Host overwrite authorization and artifact finalization binding before version-2 execution.");
+                    if (index != 5 || steps.Count != 6 || version != 1 ||
+                        steps[0].Command != CadCommandNames.NewPart ||
+                        steps[1].Command != CadCommandNames.CreateSketch ||
+                        steps[2].Command != CadCommandNames.AddRectangle ||
+                        steps[3].Command != CadCommandNames.ExitSketch ||
+                        steps[4].Command != CadCommandNames.Extrude ||
+                        steps[4].OperationVersion != 2 ||
+                        steps[1].Parameters?.Value<string>("plane") != "Top Plane" ||
+                        steps[2].Parameters?.Value<double>("centerXmm") != 0.0 ||
+                        steps[2].Parameters?.Value<double>("centerYmm") != 0.0 ||
+                        string.IsNullOrWhiteSpace(step.Parameters?.Value<string>("path")) ||
+                        step.Parameters.Value<bool?>("allowOverwrite") != false)
+                    {
+                        errors.Add("STEP_" + step.StepKey + ": SavePart preview supports only the final non-overwriting save of the first rectangle-boss plan.");
+                        continue;
+                    }
+                    if (!availability.IsOperationRegistered(step.Command, version))
+                    {
+                        errors.Add("STEP_" + step.StepKey + ": No handler is registered for SavePart operation version 1.");
+                        continue;
+                    }
+                    requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
+                    {
+                        Command = step.Command, Parameters = (JObject)step.Parameters.DeepClone(),
+                        ExecutionId = executionId, ManagedModelId = managedModelId
+                    }));
                     continue;
                 }
                 if (!availability.IsOperationRegistered(step.Command, version))
@@ -74,6 +101,27 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     continue;
                 }
 
+                Guid? targetSketchId = null;
+                if (step.Command == CadCommandNames.AddRectangle)
+                {
+                    if (index != 2 || steps[1].Command != CadCommandNames.CreateSketch ||
+                        !steps[1].OutputEntityId.HasValue)
+                    {
+                        errors.Add("STEP_" + step.StepKey + ": The Host can bind only a third-step rectangle to the preceding sketch.");
+                        continue;
+                    }
+                    targetSketchId = steps[1].OutputEntityId;
+                }
+                if (step.Command == CadCommandNames.ExitSketch)
+                {
+                    if (index != 3 || steps[1].Command != CadCommandNames.CreateSketch ||
+                        !steps[1].OutputEntityId.HasValue || steps[2].Command != CadCommandNames.AddRectangle)
+                    {
+                        errors.Add("STEP_" + step.StepKey + ": The Host can bind only a fourth-step ExitSketch to the rectangle's sketch.");
+                        continue;
+                    }
+                    targetSketchId = steps[1].OutputEntityId;
+                }
                 requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
                 {
                     Command = step.Command,
@@ -81,7 +129,7 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     ExecutionId = executionId,
                     ManagedModelId = managedModelId,
                     OutputEntityId = step.Command == CadCommandNames.CreateSketch ? step.OutputEntityId : null
-                }));
+                }, targetSketchEntityId: targetSketchId));
             }
 
             return errors.Count == 0

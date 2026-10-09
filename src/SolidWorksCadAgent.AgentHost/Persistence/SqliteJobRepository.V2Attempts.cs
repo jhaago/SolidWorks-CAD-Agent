@@ -641,6 +641,165 @@ VALUES (@Id, @JobId, @RevisionId, @PlanSha256, @StepKey, @ModelId, NULL,
             }
         }
 
+        /// <summary>
+        /// Commits one successful no-output rectangle result from its correlated Host dispatch.
+        /// The result's parameter echo is a dispatch contract, not independent geometry readback.
+        /// </summary>
+        public Task CommitV2RectangleOutcomeAsync(
+            Guid jobId, Guid revisionId, string stepKey, Guid modelId,
+            CadCommandResult observedResult, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            GuidText(jobId);
+            GuidText(revisionId);
+            GuidText(modelId);
+            if (string.IsNullOrWhiteSpace(stepKey)) throw new ArgumentException("A step key is required.", nameof(stepKey));
+            if (observedResult == null || !observedResult.Success || observedResult.Error != null || observedResult.Data == null)
+                throw new InvalidOperationException("Only a successful observed AddRectangle result can be committed.");
+
+            using (var connection = OpenConnection())
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                string planJson;
+                using (var current = connection.CreateCommand())
+                {
+                    current.Transaction = transaction;
+                    current.CommandText = @"
+SELECT r.PlanJson FROM Revisions r JOIN Jobs j ON j.Id = r.JobId
+WHERE r.JobId = @JobId AND r.Id = @RevisionId AND j.IsSimulated = 0
+  AND j.PlanValidated = 1 AND j.State = @Executing
+  AND r.Id = (SELECT Id FROM Revisions WHERE JobId = @JobId ORDER BY RevisionNumber DESC LIMIT 1);";
+                    Add(current, "@JobId", GuidText(jobId));
+                    Add(current, "@RevisionId", GuidText(revisionId));
+                    Add(current, "@Executing", (int)JobState.Executing);
+                    planJson = current.ExecuteScalar() as string;
+                }
+                var parsed = CadPlanDocumentReader.ReadPersisted(planJson);
+                if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null ||
+                    parsed.CandidateV2.Steps.Count < 3)
+                    throw new InvalidOperationException("The rectangle result does not belong to the current normalized executing plan.");
+                var steps = parsed.CandidateV2.Steps;
+                var rectangle = steps[2];
+                if (!string.Equals(steps[0].Command, CadCommandNames.NewPart, StringComparison.Ordinal) ||
+                    !string.Equals(steps[1].Command, CadCommandNames.CreateSketch, StringComparison.Ordinal) ||
+                    steps[1].OperationVersion != 1 || !steps[1].OutputEntityId.HasValue ||
+                    !string.Equals(rectangle.StepKey, stepKey, StringComparison.Ordinal) ||
+                    !string.Equals(rectangle.Command, CadCommandNames.AddRectangle, StringComparison.Ordinal) ||
+                    rectangle.OperationVersion != 1 || rectangle.OutputEntityId.HasValue ||
+                    !MatchesRectangleEcho(rectangle.Parameters, observedResult.Data))
+                    throw new InvalidOperationException("The observed rectangle result does not match the exact third normalized plan step.");
+
+                var attempt = FindV2MutationAttemptInTransaction(connection, transaction, jobId, revisionId, stepKey);
+                if (attempt == null || attempt.Status != CadV2MutationAttemptStatus.Prepared ||
+                    attempt.ModelId != modelId || attempt.OutputEntityId.HasValue ||
+                    !string.Equals(attempt.PlanSha256, HashPlan(planJson), StringComparison.Ordinal))
+                    throw new InvalidOperationException("The rectangle result does not match a Prepared attempt for the current stored plan.");
+
+                var sketchAttempt = FindV2MutationAttemptInTransaction(
+                    connection, transaction, jobId, revisionId, steps[1].StepKey);
+                var newPartAttempt = FindV2MutationAttemptInTransaction(
+                    connection, transaction, jobId, revisionId, steps[0].StepKey);
+                if (sketchAttempt == null || sketchAttempt.Status != CadV2MutationAttemptStatus.Applied ||
+                    sketchAttempt.ModelId != modelId || sketchAttempt.OutputEntityId != steps[1].OutputEntityId ||
+                    !string.Equals(sketchAttempt.PlanSha256, attempt.PlanSha256, StringComparison.Ordinal) ||
+                    newPartAttempt == null || newPartAttempt.Status != CadV2MutationAttemptStatus.Applied ||
+                    newPartAttempt.ModelId != modelId || newPartAttempt.OutputEntityId.HasValue ||
+                    !string.Equals(newPartAttempt.PlanSha256, attempt.PlanSha256, StringComparison.Ordinal))
+                    throw new InvalidOperationException("The rectangle result requires matching Applied NewPart and CreateSketch attempts.");
+
+                CadModelIdentityRecord model;
+                using (var currentModel = connection.CreateCommand())
+                {
+                    currentModel.Transaction = transaction;
+                    currentModel.CommandText = @"SELECT ModelId, ParentModelId, DocumentKind, Status, CustomPropertyKey, CanonicalPath, LastSavedSha256,
+ CurrentModelRevisionId, ConfigurationKey, SolidWorksRevision, RegistryVersion, CreatedUtc, UpdatedUtc
+FROM ManagedModels WHERE ModelId = @ModelId;";
+                    Add(currentModel, "@ModelId", GuidText(modelId));
+                    using (var reader = currentModel.ExecuteReader()) model = reader.Read() ? ReadModel(reader) : null;
+                }
+                if (model == null || model.Status != CadModelIdentityStatus.ActiveUnsaved ||
+                    model.CurrentModelRevisionId != sketchAttempt.ProspectiveModelRevisionId ||
+                    !string.Equals(model.DocumentKind, "Part", StringComparison.Ordinal) ||
+                    !string.IsNullOrWhiteSpace(model.CanonicalPath) || !string.IsNullOrWhiteSpace(model.LastSavedSha256))
+                    throw new InvalidOperationException("The model is no longer at the committed pre-rectangle sketch revision.");
+
+                using (var owner = connection.CreateCommand())
+                {
+                    owner.Transaction = transaction;
+                    owner.CommandText = @"SELECT COUNT(*) FROM V2ModelOwnerships
+WHERE ModelId = @ModelId AND JobId = @JobId AND FirstRevisionId = @RevisionId;";
+                    Add(owner, "@ModelId", GuidText(modelId));
+                    Add(owner, "@JobId", GuidText(jobId));
+                    Add(owner, "@RevisionId", GuidText(revisionId));
+                    if (Convert.ToInt32(owner.ExecuteScalar(), CultureInfo.InvariantCulture) != 1)
+                        throw new InvalidOperationException("The managed part is not owned by this job and revision.");
+                }
+
+                using (var binding = connection.CreateCommand())
+                {
+                    binding.Transaction = transaction;
+                    binding.CommandText = @"SELECT EntityKind, ConfigurationKey, NativeObjectKind, ReferenceFormatVersion,
+NativeReferenceBytes, CreatedAtModelRevisionId, Status FROM EntityReferenceBindings
+WHERE ModelId = @ModelId AND EntityId = @EntityId AND ConfigurationKey = @ConfigurationKey;";
+                    Add(binding, "@ModelId", GuidText(modelId));
+                    Add(binding, "@EntityId", GuidText(steps[1].OutputEntityId.Value));
+                    Add(binding, "@ConfigurationKey", model.ConfigurationKey);
+                    using (var reader = binding.ExecuteReader())
+                    {
+                        var bytes = reader.Read() && !reader.IsDBNull(4) ? (byte[])reader[4] : null;
+                        if (bytes == null || bytes.Length == 0 || bytes.Length > 1024 * 1024 ||
+                            reader.GetString(0) != "Sketch" || reader.GetString(1) != model.ConfigurationKey ||
+                            reader.GetString(2) != "SketchFeature" || reader.GetInt32(3) != 3 ||
+                            Guid.Parse(reader.GetString(5)) != sketchAttempt.ProspectiveModelRevisionId ||
+                            reader.GetString(6) != CadEntityReferenceStatus.Active.ToString())
+                            throw new InvalidOperationException("The committed sketch reference is no longer active and bounded.");
+                    }
+                }
+
+                using (var updateModel = connection.CreateCommand())
+                {
+                    updateModel.Transaction = transaction;
+                    updateModel.CommandText = @"UPDATE ManagedModels SET CurrentModelRevisionId = @NextRevision, UpdatedUtc = @Now
+WHERE ModelId = @ModelId AND Status = @Active AND CurrentModelRevisionId = @PreviousRevision;";
+                    Add(updateModel, "@NextRevision", GuidText(attempt.ProspectiveModelRevisionId));
+                    Add(updateModel, "@Now", DateText(DateTime.UtcNow));
+                    Add(updateModel, "@ModelId", GuidText(modelId));
+                    Add(updateModel, "@Active", CadModelIdentityStatus.ActiveUnsaved.ToString());
+                    Add(updateModel, "@PreviousRevision", GuidText(sketchAttempt.ProspectiveModelRevisionId));
+                    if (updateModel.ExecuteNonQuery() != 1)
+                        throw new InvalidOperationException("The model revision changed before the rectangle result could commit.");
+                }
+                using (var updateAttempt = connection.CreateCommand())
+                {
+                    updateAttempt.Transaction = transaction;
+                    updateAttempt.CommandText = "UPDATE V2MutationAttempts SET Status = 'Applied', UpdatedUtc = @Now WHERE Id = @Id AND Status = 'Prepared';";
+                    Add(updateAttempt, "@Now", DateText(DateTime.UtcNow));
+                    Add(updateAttempt, "@Id", GuidText(attempt.Id));
+                    if (updateAttempt.ExecuteNonQuery() != 1)
+                        throw new InvalidOperationException("The rectangle attempt is no longer Prepared.");
+                }
+                transaction.Commit();
+            }
+            return Task.CompletedTask;
+        }
+
+        private static bool MatchesRectangleEcho(JObject expected, JObject observed)
+        {
+            if (expected == null || observed == null) return false;
+            foreach (var key in new[] { "centerXmm", "centerYmm", "widthMm", "heightMm" })
+            {
+                var planned = expected[key];
+                var returned = observed[key];
+                if (planned == null || returned == null ||
+                    (planned.Type != JTokenType.Integer && planned.Type != JTokenType.Float) ||
+                    (returned.Type != JTokenType.Integer && returned.Type != JTokenType.Float) ||
+                    planned.Value<double>() != returned.Value<double>())
+                    return false;
+            }
+            return true;
+        }
+
         public Task<Guid?> GetV2ModelOwnerAsync(Guid modelId, CancellationToken token)
         {
             ThrowIfDisposed();

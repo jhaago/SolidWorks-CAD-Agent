@@ -32,7 +32,8 @@ namespace SolidWorksCadAgent.RemoteAgent
                 var pairing = new RemotePairingCoordinator(clock, new DpapiDeviceCredentialStore(path));
                 var capture = new WindowsDesktopCapture(clock);
                 var input = new WindowsInputSink(capture);
-                using (var sessions = new RemoteSessionCoordinator(clock, pairing, input))
+                using (var sessions = new RemoteSessionCoordinator(clock, pairing, input,
+                    nativeControlLeaseFactory: () => CadNativeControlLease.TryAcquire()))
                 using (var watchdog = new System.Threading.Timer(_ => sessions.Tick(), null, 250, 250))
                 using (var agentHost = new AgentHostRemoteClient())
                 using (var server = new RemoteHttpServer(new RemoteRoutes(pairing, sessions, new RemoteFrameCache(clock, capture.Capture), clock, agentHost.Forward)))

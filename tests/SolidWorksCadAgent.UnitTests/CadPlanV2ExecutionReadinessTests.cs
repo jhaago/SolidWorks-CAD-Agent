@@ -36,6 +36,8 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsTrue(result.Requests.All(request => request.Command.ExecutionId == executionId &&
                 request.Command.ManagedModelId == modelId));
             Assert.AreEqual(2, result.Requests.Last().OperationVersion);
+            Assert.AreEqual(result.Requests[1].Command.OutputEntityId, result.Requests[2].TargetSketchEntityId);
+            Assert.AreEqual(result.Requests[1].Command.OutputEntityId, result.Requests[3].TargetSketchEntityId);
             Assert.AreEqual(result.Requests[1].Command.OutputEntityId, result.Requests.Last().ProfileSketchEntityId);
             Assert.AreEqual(5.0, result.Requests.Last().Command.Parameters.Value<double>("depthMm"));
         }
@@ -97,6 +99,57 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public void NarrowFinalSaveCanBePreviewedWithoutGrantingExecution()
+        {
+            var candidate = JObject.Parse(ExtrudeCandidate);
+            ((JArray)candidate["steps"]).Add(JObject.FromObject(new
+            {
+                stepKey = "save", command = CadCommandNames.SavePart, operationVersion = 1,
+                parameters = new { path = "review-only-part.sldprt", allowOverwrite = false }
+            }));
+            var executionId = Guid.NewGuid();
+            var modelId = Guid.NewGuid();
+            var result = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                ExecutionMode.Real, new RegisteredExecutor(), executionId, modelId);
+            Assert.IsTrue(result.IsReady, string.Join(" ", result.Errors));
+            Assert.AreEqual(6, result.Requests.Count);
+            var save = result.Requests.Last();
+            Assert.AreEqual(CadCommandNames.SavePart, save.Command.Command);
+            Assert.AreEqual(executionId, save.Command.ExecutionId);
+            Assert.AreEqual(modelId, save.Command.ManagedModelId);
+            Assert.AreEqual("review-only-part.sldprt", save.Command.Parameters.Value<string>("path"));
+            Assert.AreEqual(false, save.Command.Parameters.Value<bool>("allowOverwrite"));
+            var unavailable = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                ExecutionMode.Real, new RegisteredExecutor { SupportsSave = false }, executionId, modelId);
+            Assert.IsFalse(unavailable.IsReady);
+            Assert.AreEqual(0, unavailable.Requests.Count);
+            Assert.IsTrue(unavailable.Errors.Any(error => error.Contains("SavePart")), string.Join(" ", unavailable.Errors));
+        }
+
+        [TestMethod]
+        public void FinalSaveScopeRejectsOffsetRectangleAndOtherSketchPlane()
+        {
+            var candidate = JObject.Parse(ExtrudeCandidate);
+            ((JArray)candidate["steps"]).Add(JObject.FromObject(new
+            {
+                stepKey = "save", command = CadCommandNames.SavePart, operationVersion = 1,
+                parameters = new { path = "part.sldprt", allowOverwrite = false }
+            }));
+            var steps = (JArray)candidate["steps"];
+            steps[2]["parameters"]["centerXmm"] = 3;
+            var offset = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                ExecutionMode.Real, new RegisteredExecutor(), Guid.NewGuid(), Guid.NewGuid());
+            Assert.IsFalse(offset.IsReady);
+            Assert.AreEqual(0, offset.Requests.Count);
+            steps[2]["parameters"]["centerXmm"] = 0;
+            steps[1]["parameters"]["plane"] = "Front Plane";
+            var plane = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                ExecutionMode.Real, new RegisteredExecutor(), Guid.NewGuid(), Guid.NewGuid());
+            Assert.IsFalse(plane.IsReady);
+            Assert.AreEqual(0, plane.Requests.Count);
+        }
+
+        [TestMethod]
         public void BridgeWithoutManagedReferenceStoreCannotClaimReady()
         {
             using (var session = new SolidWorksSession())
@@ -112,10 +165,11 @@ namespace SolidWorksCadAgent.UnitTests
         private class RegistrationOnlyExecutor : ICadCommandExecutor, ICadOperationAvailability
         {
             public bool SupportsManagedReferences => true;
+            public bool SupportsSave { get; set; } = true;
             public bool IsOperationRegistered(string commandName, int operationVersion) =>
                 operationVersion == 1 && (commandName == CadCommandNames.NewPart ||
                     commandName == CadCommandNames.CreateSketch || commandName == CadCommandNames.AddRectangle ||
-                    commandName == CadCommandNames.ExitSketch || commandName == CadCommandNames.SavePart) ||
+                    commandName == CadCommandNames.ExitSketch || commandName == CadCommandNames.SavePart && SupportsSave) ||
                 operationVersion == 2 && commandName == CadCommandNames.Extrude;
 
             public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken) =>

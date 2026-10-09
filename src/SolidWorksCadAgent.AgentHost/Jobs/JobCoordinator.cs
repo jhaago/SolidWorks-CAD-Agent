@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -15,6 +16,8 @@ using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Core.Jobs;
+using SolidWorksCadAgent.Core.Remote;
+using SolidWorksCadAgent.Core.Workspace;
 
 namespace SolidWorksCadAgent.AgentHost.Jobs
 {
@@ -27,6 +30,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         private readonly ExecutionMode _executionMode;
         private readonly Func<DateTime> _utcNow;
         private readonly JobStateMachine _stateMachine;
+        private readonly Func<CadNativeControlLease> _nativeControlLeaseFactory;
         private readonly SemaphoreSlim _executionGate = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _submissionSlots = new SemaphoreSlim(4, 4);
         private readonly object _submittedSync = new object();
@@ -37,7 +41,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             ICadPlanningProvider planningProvider,
             ICadCommandExecutor executor,
             AgentSettings settings)
-            : this(repository, planningProvider, executor, settings, () => DateTime.UtcNow)
+            : this(repository, planningProvider, executor, settings, () => DateTime.UtcNow, () => CadNativeControlLease.TryAcquire())
+        {
+        }
+
+        public JobCoordinator(SqliteJobRepository repository, ICadPlanningProvider planningProvider,
+            ICadCommandExecutor executor, AgentSettings settings, Func<CadNativeControlLease> nativeControlLeaseFactory)
+            : this(repository, planningProvider, executor, settings, () => DateTime.UtcNow, nativeControlLeaseFactory)
         {
         }
 
@@ -46,7 +56,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             ICadPlanningProvider planningProvider,
             ICadCommandExecutor executor,
             AgentSettings settings,
-            Func<DateTime> utcNow)
+            Func<DateTime> utcNow,
+            Func<CadNativeControlLease> nativeControlLeaseFactory = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _planningProvider = planningProvider ?? throw new ArgumentNullException(nameof(planningProvider));
@@ -55,6 +66,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             _executionMode = _settings.ExecutionMode;
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
             _stateMachine = new JobStateMachine(_utcNow);
+            _nativeControlLeaseFactory = nativeControlLeaseFactory ?? (() => CadNativeControlLease.TryAcquire());
         }
 
         public string WorkspaceRoot => _settings.WorkspaceRoot;
@@ -111,6 +123,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            if (CadV2RectangleBossPrompt.IsRequest(prompt))
+            {
+                if (image != null)
+                    throw new JobCoordinatorException("V2_IMAGE_UNSUPPORTED", "The narrow v2 rectangle-boss request cannot interpret an image.");
+                try { CadV2RectangleBossPrompt.BuildCandidate(prompt); }
+                catch (ArgumentException ex) { throw new JobCoordinatorException("V2_REQUEST_INVALID", ex.Message); }
+            }
             if (image != null && !SupportsImageInputs)
                 throw new JobCoordinatorException("IMAGE_PLANNING_UNAVAILABLE", "The active CAD planner cannot interpret pictures.");
 
@@ -146,7 +165,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                     Prompt = job.Prompt,
                     Image = await _repository.GetInputImageAsync(job.Id, cancellationToken).ConfigureAwait(false)
                 };
-                if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
+                if (CadV2RectangleBossPrompt.IsRequest(job.Prompt))
+                    version2Plan = NormalizeVersion2Candidate(CadV2RectangleBossPrompt.BuildCandidate(job.Prompt));
+                else if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
                     version2Plan = NormalizeVersion2Candidate(await versionedProvider.PlanDocumentAsync(request, cancellationToken).ConfigureAwait(false));
                 else
                     plan = await _planningProvider.PlanAsync(request, cancellationToken).ConfigureAwait(false);
@@ -247,8 +268,53 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 throw new JobCoordinatorException(errorCode, "The persisted CAD plan could not be accepted: " + string.Join(" ", parsedPlan.Errors));
             }
             if (parsedPlan.Version != 1)
-                throw new JobCoordinatorException("UNSUPPORTED_PLAN_VERSION",
-                    "This CAD Agent can approve only historical unversioned version-1 plans; version-2 candidates are not executable yet.");
+            {
+                if (parsedPlan.Version != 2 || parsedPlan.CandidateV2 == null ||
+                    !WasV2Admitted(revision))
+                    throw new JobCoordinatorException("UNSUPPORTED_PLAN_VERSION",
+                        "This version-2 candidate was not admitted to the narrow executable scope.");
+                var ready = CadPlanV2ExecutionReadiness.Assess(revision.PlanJson, _executionMode,
+                    _executor, jobId, Guid.NewGuid());
+                if (!ready.IsReady || ready.Requests.Count != 6)
+                    throw new JobCoordinatorException("INVALID_PLAN", "The version-2 plan no longer passes native preflight: " + string.Join(" ", ready.Errors));
+                try
+                {
+                    new WorkspacePolicy(_settings.WorkspaceRoot).ResolveForWrite(
+                        parsedPlan.CandidateV2.Steps[5].Parameters.Value<string>("path"), false);
+                }
+                catch (WorkspacePolicyException ex)
+                { throw new JobCoordinatorException("INVALID_PLAN", "The version-2 output path is unavailable: " + ex.Message); }
+
+                var nativeControl = _nativeControlLeaseFactory();
+                if (nativeControl == null)
+                    throw new JobCoordinatorException("MANUAL_CONTROL_ACTIVE",
+                        "Remote manual control is active or the CAD control lease is unavailable.");
+                try
+                {
+                    if (!await TransitionAsync(snapshot.Job, JobState.Approved, cancellationToken, revisionId).ConfigureAwait(false))
+                        throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while approval was being processed.");
+                    var approvedPlanSha256 = ComputePlanSha256(revision.PlanJson);
+                    if (enqueue)
+                    {
+                        var transferred = nativeControl;
+                        TrackBackground(jobId, () => ExecuteApprovedV2Async(snapshot.Job, revision, transferred,
+                            approvedPlanSha256, cancellationToken));
+                        nativeControl = null;
+                        return snapshot;
+                    }
+                    var execution = ExecuteApprovedV2Async(snapshot.Job, revision, nativeControl,
+                        approvedPlanSha256, cancellationToken);
+                    nativeControl = null;
+                    return await execution.ConfigureAwait(false);
+                }
+                catch
+                {
+                    if (nativeControl != null)
+                        await FailIfCurrentAsync(jobId, JobState.Approved, CancellationToken.None).ConfigureAwait(false);
+                    throw;
+                }
+                finally { nativeControl?.Dispose(); }
+            }
             if (parsedPlan.LegacyPlan == null)
                 throw new JobCoordinatorException("INVALID_PLAN", "The persisted CAD plan could not be loaded.");
             var plan = parsedPlan.LegacyPlan;
@@ -289,6 +355,10 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var currentRevision = snapshot.Revisions.OrderBy(item => item.RevisionNumber).LastOrDefault();
             if (currentRevision == null || currentRevision.Id != expectedRevisionId)
                 throw new JobCoordinatorException("STALE_PLAN", "The requested changes do not target the current CAD job revision.");
+            if (CadPlanDocumentReader.ReadPersisted(currentRevision.PlanJson).Version == 2 &&
+                WasV2Admitted(currentRevision))
+                throw new JobCoordinatorException("V2_CHANGE_UNSUPPORTED",
+                    "This narrow version-2 part cannot be revised in place. Submit a new explicit rectangle-boss request with a new output filename.");
             if (snapshot.Job.State != JobState.AwaitingApproval && snapshot.Job.State != JobState.AwaitingClarification && snapshot.Job.State != JobState.ReadyForReview)
                 throw new JobCoordinatorException("INVALID_JOB_STATE", "Changes require a pending plan or a result ready for review.");
 
@@ -652,6 +722,63 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             return errors;
         }
 
+        private async Task<JobSnapshot> ExecuteApprovedV2Async(CadJob job, JobRevision revision,
+            CadNativeControlLease nativeControl, string approvedPlanSha256, CancellationToken token)
+        {
+            try
+            {
+                using (nativeControl)
+                {
+                    await _executionGate.WaitAsync(token).ConfigureAwait(false);
+                    try
+                    {
+                        var current = await _repository.GetAsync(job.Id, token).ConfigureAwait(false);
+                        if (current == null || current.State == JobState.Cancelled)
+                            return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
+                        if (!ApprovalPolicy.CanExecute(current, _settings) || current.State != JobState.Approved)
+                            throw new JobCoordinatorException("APPROVAL_REQUIRED", "The version-2 job is not approved for execution.");
+                        if (!await TransitionAsync(current, JobState.Executing, token, revision.Id).ConfigureAwait(false))
+                            return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
+
+                        var passed = await new CadV2SixStepRunner(_repository, _executor,
+                            new WorkspacePolicy(_settings.WorkspaceRoot)).RunAsync(job.Id, revision.Id, token,
+                                approvedPlanSha256).ConfigureAwait(false);
+                        current = await _repository.GetAsync(job.Id, token).ConfigureAwait(false);
+                        if (current == null || current.State == JobState.Cancelled)
+                            return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
+                        if (passed)
+                        {
+                            var evidence = await _repository.GetSnapshotAsync(job.Id, token).ConfigureAwait(false);
+                            var saved = evidence.Verifications.LastOrDefault(item =>
+                                item.RevisionNumber == revision.RevisionNumber &&
+                                item.CheckName == CadV2SavedVerificationRecorder.CheckName);
+                            if (saved == null || !saved.Passed)
+                                throw new InvalidOperationException("The verified v2 output has no passing saved evidence.");
+                            current.OutputPath = new WorkspacePolicy(_settings.WorkspaceRoot).ResolveForRead(
+                                JObject.Parse(saved.ExpectedJson).Value<string>("path"));
+                        }
+                        if (!await TransitionAsync(current, JobState.Verifying, token, revision.Id).ConfigureAwait(false))
+                            return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
+                        await TransitionAsync(current, passed ? JobState.ReadyForReview : JobState.Failed,
+                            token, revision.Id).ConfigureAwait(false);
+                        return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
+                    }
+                    finally { _executionGate.Release(); }
+                }
+            }
+            catch (Exception executionFailure)
+            {
+                try
+                {
+                    foreach (var state in new[] { JobState.Approved, JobState.Executing, JobState.Verifying })
+                        await FailIfCurrentAsync(job.Id, state, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception persistenceFailure)
+                { executionFailure.Data["CadV2FailureTransitionError"] = persistenceFailure; }
+                throw;
+            }
+        }
+
         private static CadPlanV2Document NormalizeVersion2Candidate(string json)
         {
             var parsed = CadPlanDocumentReader.ReadCandidate(json);
@@ -673,7 +800,6 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             const string simulationUnsupported = "Version-2 feature plans are unsupported in simulation because the simulator cannot resolve profileSketch references or verify resulting feature geometry.";
             plan.Ambiguities = plan.Ambiguities ?? new List<string>();
             plan.Ambiguities.RemoveAll(item => string.Equals(item, reviewOnly, StringComparison.Ordinal));
-            plan.Ambiguities.Add(reviewOnly);
             plan.Ambiguities.RemoveAll(item => string.Equals(item, simulationUnsupported, StringComparison.Ordinal));
             if (_executionMode == ExecutionMode.Simulation)
                 plan.Ambiguities.Add(simulationUnsupported);
@@ -683,9 +809,26 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 plan.Assumptions.Add("The previous result remains unchanged; this version-2 candidate is a proposed replacement only.");
             }
 
-            job.PlanValidated = false;
-            job.HasUnresolvedAmbiguity = true;
-            job.AmbiguityMessage = string.Join(Environment.NewLine, plan.Ambiguities);
+            var planJson = JsonConvert.SerializeObject(plan);
+            var readiness = CadPlanV2ExecutionReadiness.Assess(planJson, _executionMode,
+                _executor, job.Id, Guid.NewGuid());
+            var admitted = plan.Ambiguities.Count == 0 && readiness.IsReady && readiness.Requests.Count == 6;
+            if (admitted)
+            {
+                try
+                {
+                    new WorkspacePolicy(_settings.WorkspaceRoot).ResolveForWrite(
+                        plan.Steps[5].Parameters.Value<string>("path"), false);
+                }
+                catch (WorkspacePolicyException ex)
+                { plan.Ambiguities.Add("The version-2 output path is unavailable: " + ex.Message); admitted = false; }
+            }
+            if (!admitted && _executionMode != ExecutionMode.Simulation && plan.Ambiguities.Count == 0)
+                plan.Ambiguities.Add(reviewOnly + " " + string.Join(" ", readiness.Errors));
+            job.PlanValidated = admitted;
+            job.HasUnresolvedAmbiguity = !admitted;
+            job.AmbiguityMessage = admitted ? null : string.Join(Environment.NewLine, plan.Ambiguities);
+            job.RequiresExplicitApproval = true;
             job.OverwriteRequested = CadPlanningCommandContract.RequestsOverwrite(plan.Steps.Select(step => new CadCommandEnvelope
             {
                 Command = step.Command,
@@ -705,7 +848,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                     plan.Assumptions,
                     plan.Ambiguities,
                     PlanVersion = plan.PlanVersion,
-                    ExecutionAvailable = false
+                    ExecutionAvailable = admitted
                 }),
                 PlanJson = JsonConvert.SerializeObject(plan),
                 CreatedUtc = _utcNow()
@@ -713,14 +856,14 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
 
             if (expectedRevisionId.HasValue)
             {
-                _stateMachine.Transition(job, JobState.AwaitingClarification);
+                _stateMachine.Transition(job, admitted ? JobState.AwaitingApproval : JobState.AwaitingClarification);
                 if (!await _repository.TryAppendRevisionAsync(job, JobState.Interpreting, expectedRevisionId.Value, revision, cancellationToken).ConfigureAwait(false))
                     throw new JobCoordinatorException("CONCURRENT_JOB_UPDATE", "The CAD job changed while the version-2 candidate was being persisted.");
             }
             else
             {
                 await _repository.AppendRevisionAsync(revision, cancellationToken).ConfigureAwait(false);
-                if (!await TransitionAsync(job, JobState.AwaitingClarification, cancellationToken).ConfigureAwait(false))
+                if (!await TransitionAsync(job, admitted ? JobState.AwaitingApproval : JobState.AwaitingClarification, cancellationToken).ConfigureAwait(false))
                     return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
             }
 
@@ -857,6 +1000,24 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var sha256 = SHA256.Create())
                 return BitConverter.ToString(sha256.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
+        }
+
+        private static string ComputePlanSha256(string json)
+        {
+            using (var sha = SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(json)))
+                    .Replace("-", string.Empty).ToLowerInvariant();
+        }
+
+        private static bool WasV2Admitted(JobRevision revision)
+        {
+            try
+            {
+                var interpretation = JObject.Parse(revision.InterpretationJson ?? "{}");
+                return interpretation.Value<int?>("PlanVersion") == 2 &&
+                    interpretation.Value<bool?>("ExecutionAvailable") == true;
+            }
+            catch (JsonException) { return false; }
         }
 
         private static CadPlanningResult NormalizePlan(CadPlanningResult plan)

@@ -136,6 +136,61 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task ExplicitV2JobInputReturnsPlanAndRejectsIncompleteDimensions()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cad-v2-route-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                    new SimulatedCadCommandExecutor(), new AgentSettings
+                    { WorkspaceRoot = root, ExecutionMode = ExecutionMode.Simulation });
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+                var invalid = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                    new JObject { ["prompt"] = "V2 rectangle boss: 20 x 10 mm; save as part.sldprt" }.ToString()), CancellationToken.None);
+                Assert.AreEqual(400, invalid.StatusCode);
+                Assert.AreEqual("V2_REQUEST_INVALID", JObject.Parse(invalid.JsonBody)["error"]["code"]);
+                var valid = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                    new JObject { ["prompt"] = "V2 rectangle boss: 20 x 10 x 5 mm; save as part.sldprt" }.ToString()), CancellationToken.None);
+                Assert.AreEqual(201, valid.StatusCode);
+                var body = JObject.Parse(valid.JsonBody);
+                Assert.AreEqual(2, body["plan"].Value<int>("planVersion"));
+                Assert.AreEqual("AwaitingClarification", body.Value<string>("state"),
+                    "The normal UI must show v2 syntax without advertising native execution in simulation.");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        [TestMethod]
+        public async Task Artifact_RejectsVersionTwoSaveWithoutOwnedVerificationEvidence()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "CAD-v2-artifact-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var file = Path.Combine(root, "owned.sldprt");
+                File.WriteAllBytes(file, new byte[] { 1, 2, 3 });
+                var job = new CadJob { Id = Guid.NewGuid(), Prompt = "owned v2 part",
+                    State = JobState.ReadyForReview, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow };
+                await _repository.CreateAsync(job);
+                await _repository.AppendRevisionAsync(new JobRevision { Id = Guid.NewGuid(), JobId = job.Id,
+                    RevisionNumber = 1, Prompt = job.Prompt,
+                    PlanJson = "{\"planVersion\":2,\"steps\":[]}", InterpretationJson = "{}", CreatedUtc = DateTime.UtcNow });
+                await _repository.AppendCommandAsync(new CommandExecutionRecord { Id = Guid.NewGuid(),
+                    JobId = job.Id, RevisionNumber = 1, SequenceNumber = 1, CommandName = "SavePart",
+                    Success = true, ParametersJson = "{}", ResultJson = new JObject { ["path"] = file }.ToString(),
+                    StartedUtc = DateTime.UtcNow, CompletedUtc = DateTime.UtcNow });
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                    new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = root });
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+                var response = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(409, response.StatusCode);
+                Assert.AreEqual("ARTIFACT_NOT_READY", (string)JObject.Parse(response.JsonBody)["error"]["code"]);
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        [TestMethod]
         public async Task Artifact_DownloadsSavedPartWhileNativeEditorKeepsWritableHandleOpen()
         {
             var root = Path.Combine(Path.GetTempPath(), "CAD-open-artifact-" + Guid.NewGuid().ToString("N"));

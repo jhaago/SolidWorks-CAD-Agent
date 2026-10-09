@@ -1,5 +1,7 @@
 # Versioned CAD plan v2 release readiness
 
+> Historical review, superseded for the exact six-step rectangle-boss pilot by [the current implementation handoff](CAD_IMPLEMENTATION_STATUS.md) and [installed-workstation validation](windows-validation-v2-installed-2026-10-09.md). The decision and blocking list below describe the 2026-10-08 source state; they are not current release gates. The installed workstation has passed the bounded V2 native workflow. A paired physical-phone run of Android 0.4.1 remains outstanding.
+
 Reviewed 2026-10-08 against branch `feature/v2-face-sketches-and-finishing`, HEAD `dfa309e568affaa20d2787b745f9d14bc3586612`, including uncommitted 7d-g5a–g5d work. This is a source review, not release authorization or a claim about installed binaries. The repository also uses “V2” for desktop, image-intake and Android milestones that still run the legacy CAD job path; this review concerns `planVersion: 2` execution.
 
 ## Decision

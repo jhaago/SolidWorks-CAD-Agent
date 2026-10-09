@@ -15,6 +15,7 @@ using SolidWorksCadAgent.AgentHost.Persistence;
 using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Ai;
+using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Core.Jobs;
 using SolidWorksCadAgent.SolidWorksBridge;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
@@ -218,6 +219,9 @@ namespace SolidWorksCadAgent.AgentHost.Host
             var save = snapshot.Commands.Where(item => item.CommandName == "SavePart" && item.Success && item.RevisionNumber == currentRevision?.RevisionNumber)
                 .OrderBy(item => item.CompletedUtc).LastOrDefault();
             if (save == null) return Error(409, "ARTIFACT_NOT_READY", "This job has no successful native save evidence.");
+            var parsedPlan = CadPlanDocumentReader.ReadPersisted(currentRevision.PlanJson);
+            if (parsedPlan.Version != 1 && parsedPlan.Version != 2)
+                return Error(409, "ARTIFACT_NOT_READY", "The saved plan cannot authorize artifact delivery.");
             var workspace = _settingsService?.Current.WorkspaceRoot ?? _coordinator?.WorkspaceRoot;
             if (string.IsNullOrEmpty(workspace)) return Error(409, "ARTIFACT_NOT_CONFIGURED", "The workspace is not configured.");
             try
@@ -225,6 +229,24 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 var path = (string)JObject.Parse(save.ResultJson)["path"];
                 var policy = new WorkspacePolicy(workspace);
                 path = policy.ResolveForRead(path);
+                string expectedV2Hash = null;
+                if (parsedPlan.Version == 2)
+                {
+                    var latest = snapshot.Verifications?.Where(item => item.JobId == id &&
+                        item.RevisionNumber == currentRevision.RevisionNumber &&
+                        item.CheckName == CadV2SavedVerificationRecorder.CheckName).LastOrDefault();
+                    if (latest == null || !latest.Passed ||
+                        !Guid.TryParse(JObject.Parse(latest.ExpectedJson).Value<string>("modelId"), out var modelId))
+                        return Error(409, "ARTIFACT_NOT_READY", "The version-2 artifact has no passing saved-model verification.");
+                    var model = await _repository.GetModelAsync(modelId, cancellationToken).ConfigureAwait(false);
+                    var owner = await _repository.GetV2ModelOwnerAsync(modelId, cancellationToken).ConfigureAwait(false);
+                    var attempt = await _repository.FindV2MutationAttemptAsync(id, currentRevision.Id,
+                        parsedPlan.CandidateV2?.Steps.LastOrDefault()?.StepKey ?? "missing", cancellationToken).ConfigureAwait(false);
+                    if (!CadV2ArtifactAuthorization.IsAuthorized(snapshot, currentRevision, save,
+                        attempt, model, owner, path, policy))
+                        return Error(409, "ARTIFACT_NOT_READY", "The version-2 artifact is not bound to passing owned-model evidence.");
+                    expectedV2Hash = model.LastSavedSha256;
+                }
                 if (Path.GetFileName(path).Length > 128)
                     return Error(409, "ARTIFACT_FILENAME_INVALID", "The saved filename is too long for remote download.");
                 // SOLIDWORKS retains a writable handle while the saved document is open.
@@ -245,6 +267,11 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     }
                     if (stream.Length != bytes.Length || File.GetLastWriteTimeUtc(path) != lastWriteUtc)
                         return Error(409, "ARTIFACT_UNAVAILABLE", "The native CAD artifact changed while it was being read.");
+                    if (expectedV2Hash != null)
+                    {
+                        if (!CadV2ArtifactAuthorization.MatchesBytes(bytes, expectedV2Hash))
+                            return Error(409, "ARTIFACT_UNAVAILABLE", "The saved CAD artifact no longer matches its verified hash.");
+                    }
                     policy.ResolveForRead(path);
                     return Json(200, new { fileName = Path.GetFileName(path), contentType = "application/octet-stream", byteLength = bytes.Length, base64 = Convert.ToBase64String(bytes) });
                 }
@@ -551,7 +578,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 }
                 catch (JobCoordinatorException ex)
                 {
-                    return Error(ex.Code == "PROMPT_REQUIRED" ? 400 : 409, ex.Code, ex.Message);
+                    return Error(ex.Code == "PROMPT_REQUIRED" || ex.Code == "V2_REQUEST_INVALID" ||
+                        ex.Code == "V2_IMAGE_UNSUPPORTED" ? 400 : 409, ex.Code, ex.Message);
                 }
                 catch (OpenAiPlanningException ex)
                 {

@@ -156,6 +156,86 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task VersionTwoRectangle_RequiresHostBoundSketchBeforeSta()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var result = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.AddRectangle,
+                        Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                        ManagedModelId = Guid.NewGuid(), ExecutionId = Guid.NewGuid()
+                    }), CancellationToken.None);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("MISSING_SKETCH_REFERENCE", result.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+
+                var bound = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.AddRectangle,
+                        Parameters = JObject.FromObject(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 }),
+                        ManagedModelId = Guid.NewGuid(), ExecutionId = Guid.NewGuid()
+                    }, targetSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.IsFalse(bound.Success);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", bound.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
+        public async Task VersionTwoExitSketch_RequiresHostBindingAndEmptyParametersBeforeSta()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var envelope = new CadCommandEnvelope
+                {
+                    Command = CadCommandNames.ExitSketch, Parameters = new JObject(),
+                    ManagedModelId = Guid.NewGuid(), ExecutionId = Guid.NewGuid()
+                };
+                var missing = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1, envelope), CancellationToken.None);
+                Assert.AreEqual("MISSING_SKETCH_REFERENCE", missing.Error.Code);
+                var invalid = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                    new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.ExitSketch, Parameters = JObject.FromObject(new { unexpected = 1 }),
+                        ManagedModelId = envelope.ManagedModelId, ExecutionId = envelope.ExecutionId
+                    }, targetSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.AreEqual("INVALID_PARAMETERS", invalid.Error.Code);
+                var bound = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1,
+                    envelope, targetSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", bound.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
+        public async Task VersionTwoSavePart_RejectsMissingIdentityAndOverwriteBeforeSta()
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                CadVersionedCommandRequest Request(Guid? modelId, bool overwrite) =>
+                    new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
+                    {
+                        Command = CadCommandNames.SavePart,
+                        Parameters = JObject.FromObject(new { path = "owned.sldprt", allowOverwrite = overwrite }),
+                        ExecutionId = Guid.NewGuid(), ManagedModelId = modelId
+                    });
+                var missing = await bridge.ExecuteVersionedAsync(Request(null, false), CancellationToken.None);
+                Assert.AreEqual("INVALID_EXECUTION_CONTEXT", missing.Error.Code);
+                var overwrite = await bridge.ExecuteVersionedAsync(Request(Guid.NewGuid(), true), CancellationToken.None);
+                Assert.AreEqual("INVALID_EXECUTION_CONTEXT", overwrite.Error.Code);
+                var noStore = await bridge.ExecuteVersionedAsync(Request(Guid.NewGuid(), false), CancellationToken.None);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", noStore.Error.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [TestMethod]
         public async Task VersionTwoExtrude_RequiresManagedReferenceStoreBeforeSta()
         {
             var session = new RecordingSession();

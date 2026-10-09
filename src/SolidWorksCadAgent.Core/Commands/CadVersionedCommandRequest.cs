@@ -16,17 +16,21 @@ namespace SolidWorksCadAgent.Core.Commands
             int planVersion,
             int operationVersion,
             CadCommandEnvelope command,
-            Guid? profileSketchEntityId = null)
+            Guid? profileSketchEntityId = null,
+            Guid? targetSketchEntityId = null)
         {
             PlanVersion = planVersion;
             OperationVersion = operationVersion;
             Command = command;
             ProfileSketchEntityId = profileSketchEntityId;
+            TargetSketchEntityId = targetSketchEntityId;
         }
 
         public int PlanVersion { get; }
         public int OperationVersion { get; }
         public CadCommandEnvelope Command { get; }
         public Guid? ProfileSketchEntityId { get; }
+        // Execution-only identity for sketch mutations; never part of persisted plans.
+        public Guid? TargetSketchEntityId { get; }
     }
 }
