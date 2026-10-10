@@ -75,7 +75,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             if (_document == null || active == null || !SameIdentity(_document, active)) throw new DocumentTargetException();
             return _document;
         }
-        private static bool SameIdentity(object expected, object active)
+        internal static bool SameIdentity(object expected, object active)
         {
             if (ReferenceEquals(expected, active)) return true;
             if (!Marshal.IsComObject(expected) || !Marshal.IsComObject(active)) return false;

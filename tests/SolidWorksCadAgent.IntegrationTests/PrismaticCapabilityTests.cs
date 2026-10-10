@@ -139,6 +139,66 @@ namespace SolidWorksCadAgent.IntegrationTests
 #endif
         }
 
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task SavePart_RejectsAnotherOpenDocumentsFileNameBeforeSaving()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            var name = "save-collision-" + Guid.NewGuid().ToString("N") + ".sldprt";
+            var workspace = Path.Combine(@"C:\SolidWorks-CAD-Agent\Workspace\capability-tests", Guid.NewGuid().ToString("N"));
+            using (var session = new SolidWorksSession())
+            using (var first = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace)))
+            using (var second = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace)))
+            {
+                var status = await session.AttachAsync(CancellationToken.None);
+                Assert.IsTrue(status.IsConnected, status.ErrorMessage);
+                Assert.AreEqual(2020, status.RuntimeInfo.ReleaseYear);
+                var original = await session.InvokeWithApplicationAsync(app => CaptureOriginal((SldWorks)app), CancellationToken.None);
+                var ownedTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    ownedTitles.Add((await Execute(first, "NewPart", new { })).Data.Value<string>("documentTitle"));
+                    var saved = await Execute(first, "SavePart", new { path = "first/" + name, allowOverwrite = false });
+                    ownedTitles.Add(await session.InvokeWithApplicationAsync(app => ((ModelDoc2)((SldWorks)app).ActiveDoc).GetTitle(), CancellationToken.None));
+                    var secondTitle = (await Execute(second, "NewPart", new { })).Data.Value<string>("documentTitle");
+                    ownedTitles.Add(secondTitle);
+                    var result = await second.ExecuteAsync(new CadCommandEnvelope
+                    {
+                        Command = "SavePart",
+                        Parameters = JObject.FromObject(new { path = "second/" + name, allowOverwrite = false })
+                    }, CancellationToken.None);
+                    Assert.IsFalse(result.Success, "Saving another open document's filename must fail before SOLIDWORKS SaveAs.");
+                    Assert.AreEqual("DOCUMENT_NAME_CONFLICT", result.Error?.Code);
+                    Assert.IsFalse(File.Exists(Path.Combine(workspace, "second", name)));
+                    await session.InvokeWithApplicationAsync(app =>
+                    {
+                        var sw = (SldWorks)app;
+                        var active = (ModelDoc2)sw.ActiveDoc;
+                        Assert.AreEqual(secondTitle, active.GetTitle());
+                        Assert.AreEqual(string.Empty, active.GetPathName());
+                        Assert.IsTrue((sw.GetDocuments() as object[]).OfType<ModelDoc2>().Any(doc =>
+                            string.Equals(doc.GetPathName(), saved.Data.Value<string>("path"), StringComparison.OrdinalIgnoreCase)));
+                        return true;
+                    }, CancellationToken.None);
+                }
+                finally
+                {
+                    await session.InvokeWithApplicationAsync(app =>
+                    {
+                        var sw = (SldWorks)app;
+                        // Titles are unique to this fixture, including the colliding saved name.
+                        foreach (var title in ownedTitles) sw.CloseDoc(title);
+                        RestoreAndAssertOriginal(sw, original);
+                        return true;
+                    }, CancellationToken.None);
+                }
+            }
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Installed SOLIDWORKS interop is required.");
+#endif
+        }
         private static void RequireOptIn()
         {
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_PRISMATIC_TESTS") != "1")
@@ -148,6 +208,7 @@ namespace SolidWorksCadAgent.IntegrationTests
 #if SOLIDWORKS_INTEROP
         private async Task WithOwnedPartAsync(string name, Func<SolidWorksBridgeFacade, SolidWorksSession, Task> build, Func<SolidWorksBridgeFacade, SolidWorksSession, Task> verify)
         {
+            name += "-" + Guid.NewGuid().ToString("N");
             var workspace = Path.Combine(@"C:\SolidWorks-CAD-Agent\Workspace\capability-tests", Guid.NewGuid().ToString("N"));
             using (var session = new SolidWorksSession())
             using (var bridge = new SolidWorksBridgeFacade(session, new WorkspacePolicy(workspace)))

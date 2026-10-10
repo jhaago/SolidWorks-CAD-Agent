@@ -1,5 +1,26 @@
 # CAD implementation handoff
 
+## SOLIDWORKS 2020 native acceptance and save-conflict correction - 10 October 2026
+
+The user authorized live testing and closure of open test documents. Six controlled native cases now pass on SOLIDWORKS 2020 SP0 (revision 28.0.0), using the reviewed Bridge and in-process Host components. Installed Host/Desktop/RemoteAgent binaries were not replaced.
+
+| Check | Executed result | Evidence |
+|---|---|---|
+| Hidden sole and additional solid, count/bounds and sole-body volume, before and after save/reopen | 2 passed | `review-live-prismatic-fixed.trx` |
+| Rotated slot through-cut plus hexagonal blind pocket; rotated hexagonal boss | 2 passed, native feature/profile/volume evidence before and after reopen | `review-live-prismatic-fixed.trx` |
+| Reject Save As when another open document uses that filename | 1 passed; no conflicting output, original saved document remains open, target stays unsaved | `review-live-prismatic-fixed.trx` |
+| Exact approved V2 rectangle boss through six commands, managed save/reopen, verification and artifact bytes | 1 passed | `review-live-approved-v2.trx` |
+| Complete Release solution builds, interop disabled and enabled | Both succeeded, 0 warnings/errors | Native build restored last |
+| Full Release unit suites, interop disabled and enabled | 630 passed in each mode, 0 failed/skipped | `review-live-fix-disabled-unit.trx`, `review-live-fix-native-unit.trx` |
+
+TRX files are under the corresponding IntegrationTests/UnitTests `TestResults` directories. Four successful prismatic geometry artifacts remain in unique folders under `C:/SolidWorks-CAD-Agent/Workspace/capability-tests/`; the V2 fixture intentionally cleans up its temporary database/part after checking delivery. V2 job `249fda62-43bd-44d4-ae98-7911d7b6695a` recorded artifact SHA-256 `1477e249ec916ca8fae2261bd12944510621f8fbf5f38f2baa6f477f271cb8be` before cleanup.
+
+The first native run had 2 passes and 2 failures (`review-live-prismatic.trx`): a reopen identity failure and loss of the original same-named hexagon test document from the open-document set. The fixture reused filenames across different directories; title-based native close/reopen is ambiguous in this situation. A focused native regression then demonstrated that SavePart incorrectly accepted another open document's filename (`review-save-collision-red.trx`, 1 expected failure). The Bridge now rejects a conflicting final or staging filename on its STA before SaveAs; the existing COM identity comparison exempts the same model. Test artifacts now receive unique filenames, not merely unique directories. The final successful tests assert original-document restoration. No existing CAD file was deliberately overwritten; the initial failure did close an existing test document, so this run must not be described as preserving every original open document.
+
+Updated native candidate: `artifacts/engineering-review-native-accepted-20261010/SolidWorksCadAgent-Windows-Test-Bundle.zip`, SHA-256 `F004FF9BCC1B837A6894D2D6FB909861AD27385E7593476650F287FEC6C05A1B`. Production bundle validation passed. It includes the new Bridge correction and the preserved RemoteHttpServer diagnostic edit. The earlier Windows candidate below is superseded; Android is unchanged. No deployment or publication occurred.
+
+Remaining gates: the missing packaging regression script is still unresolved; live Remote/manual-input exclusion and physical-phone lifecycle tests remain pending. Save conflict prevention does not certify arbitrary pre-existing duplicate-title documents opened outside the Agent: explicitly harden and test OpenPart/CloseDocument for that case before supporting broad existing-document workflows. Native acceptance covers these six cases, not all CAD capabilities or production readiness.
+
 ## Acceptance preparation and local candidates - 10 October 2026
 
 Local candidates are under `artifacts/engineering-review-20261010/`. They have not been installed, published or used for live CAD acceptance. Running applications remain the October 9 installed builds.

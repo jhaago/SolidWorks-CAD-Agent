@@ -89,6 +89,22 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("NO_ACTIVE_DOCUMENT", "Save", "No active SOLIDWORKS document is available to save.");
                 }
 
+                // SOLIDWORKS document activation/closure is title-based. Saving a second
+                // open model under the same filename can make later close/reopen target
+                // the wrong document even when the directories are different.
+                var targetNames = new[] { resolvedPath, stagingPath }.Where(path => path != null)
+                    .Select(Path.GetFileName).ToArray();
+                foreach (var open in (swApp.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                {
+                    if (SolidWorksDocumentContext.SameIdentity(model, open)) continue;
+                    var openPath = open.GetPathName();
+                    var openName = string.IsNullOrWhiteSpace(openPath) ? open.GetTitle() : Path.GetFileName(openPath);
+                    if (targetNames.Any(name => string.Equals(name, openName, StringComparison.OrdinalIgnoreCase) ||
+                        (string.IsNullOrWhiteSpace(openPath) && string.Equals(Path.GetFileNameWithoutExtension(name),
+                            openName, StringComparison.OrdinalIgnoreCase))))
+                        return Failure("DOCUMENT_NAME_CONFLICT", "Save",
+                            "Another open document already uses the requested filename. Choose a unique filename or close that document before saving.");
+                }
                 // Recheck on the STA after queueing, before creating directories or saving.
                 _workspacePolicy.ResolveForWrite(resolvedPath, allowOverwrite);
                 var parent = Path.GetDirectoryName(resolvedPath);
