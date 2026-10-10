@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -19,6 +20,7 @@ namespace SolidWorksCadAgent.AgentHost.Ai
     public sealed class OpenAiCadPlanningProvider : IImageCadPlanningProvider
     {
         public const string OpenAiCredentialTarget = "SolidWorksCadAgent/OpenAI";
+        private const int MaximumResponseBytes = 256 * 1024;
         private static readonly Uri ResponsesEndpoint = new Uri("https://api.openai.com/v1/responses");
         private readonly HttpClient _httpClient;
         private readonly Func<string> _getApiKey;
@@ -53,18 +55,36 @@ namespace SolidWorksCadAgent.AgentHost.Ai
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new OpenAiPlanningException("OPENAI_CREDENTIAL_MISSING", "No OpenAI API credential is configured.");
 
+            using (var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, ResponsesEndpoint))
             {
+                // ResponseHeadersRead does not apply HttpClient.Timeout to body reads.
+                if (_httpClient.Timeout != Timeout.InfiniteTimeSpan) operation.CancelAfter(_httpClient.Timeout);
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 httpRequest.Content = new StringContent(
                     BuildRequest(request).ToString(Formatting.None),
                     Encoding.UTF8,
                     "application/json");
 
-                HttpResponseMessage response;
                 try
                 {
-                    response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+                    using (var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, operation.Token).ConfigureAwait(false))
+                    {
+                        string body;
+                        try
+                        {
+                            body = await ReadResponseBodyAsync(response.Content, operation.Token).ConfigureAwait(false);
+                        }
+                        catch (OpenAiPlanningException) when (!response.IsSuccessStatusCode)
+                        {
+                            // Oversized or absent error bodies still retain their safe HTTP status.
+                            throw ParseHttpError((int)response.StatusCode, string.Empty, apiKey);
+                        }
+                        if (!response.IsSuccessStatusCode)
+                            throw ParseHttpError((int)response.StatusCode, body, apiKey);
+                        operation.Token.ThrowIfCancellationRequested();
+                        return ParseResponse(body);
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -78,17 +98,28 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 {
                     throw new OpenAiPlanningException("OPENAI_REQUEST_FAILED", "The OpenAI planning request could not be completed.");
                 }
-
-                using (response)
+                catch (IOException)
                 {
-                    var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw ParseHttpError((int)response.StatusCode, body, apiKey);
-                    }
-
-                    return ParseResponse(body);
+                    throw new OpenAiPlanningException("OPENAI_REQUEST_FAILED", "The OpenAI planning response could not be read.");
                 }
+            }
+        }
+
+        private static async Task<string> ReadResponseBodyAsync(HttpContent content, CancellationToken cancellationToken)
+        {
+            if (content == null || content.Headers.ContentLength > MaximumResponseBytes)
+                throw InvalidResponse();
+            using (var stream = await content.ReadAsStreamAsync().ConfigureAwait(false))
+            using (var buffer = new MemoryStream())
+            {
+                var chunk = new byte[8192];
+                int count;
+                while ((count = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    if (buffer.Length + count > MaximumResponseBytes) throw InvalidResponse();
+                    buffer.Write(chunk, 0, count);
+                }
+                return Encoding.UTF8.GetString(buffer.ToArray());
             }
         }
 
@@ -228,67 +259,122 @@ namespace SolidWorksCadAgent.AgentHost.Ai
 
         private CadPlanningResult ParseResponse(string body)
         {
-            JObject response;
             try
             {
-                response = JObject.Parse(body);
-            }
-            catch (JsonException)
-            {
-                throw new OpenAiPlanningException("INVALID_OPENAI_RESPONSE", "OpenAI returned invalid JSON.");
-            }
-
-            var functionCalls = (response["output"] as JArray ?? new JArray())
-                .OfType<JObject>()
-                .Where(item => (string)item["type"] == "function_call")
-                .ToList();
-            var unexpected = functionCalls.FirstOrDefault(item => (string)item["name"] != "propose_cad_plan");
-            if (unexpected != null)
-            {
-                throw new OpenAiPlanningException(
-                    "UNEXPECTED_TOOL_CALL",
-                    "OpenAI requested an unsupported planning tool.");
-            }
-
-            if (functionCalls.Count != 1)
-                throw new OpenAiPlanningException("PLAN_TOOL_CALL_MISSING", "OpenAI did not return the required CAD planning tool call.");
-            var call = functionCalls[0];
-
-            JObject arguments;
-            try
-            {
-                arguments = JObject.Parse((string)call["arguments"] ?? string.Empty);
-            }
-            catch (JsonException)
-            {
-                throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD planning tool arguments were invalid JSON.");
-            }
-
-            var result = new CadPlanningResult
-            {
-                Provider = "openai",
-                Model = (string)response["model"] ?? _model,
-                Summary = (string)arguments["summary"],
-                Assumptions = ReadStrings(arguments["assumptions"]),
-                Ambiguities = ReadStrings(arguments["ambiguities"]),
-                ProposedCommands = ReadCommands(arguments["commands"]),
-                Usage = new CadPlanningUsage
+                var response = ReadObject(body);
+                ValidateCompletedStatus(response);
+                if (!(response["output"] is JArray output)) throw InvalidResponse();
+                var functionCalls = new List<JObject>();
+                foreach (var entry in output)
                 {
-                    InputTokens = (int?)response["usage"]?["input_tokens"] ?? 0,
-                    OutputTokens = (int?)response["usage"]?["output_tokens"] ?? 0
+                    if (!(entry is JObject item)) throw InvalidResponse();
+                    if (ReadString(item["type"], "INVALID_OPENAI_RESPONSE") != "function_call") continue;
+                    ValidateCompletedStatus(item);
+                    if (ReadString(item["name"], "INVALID_OPENAI_RESPONSE") != "propose_cad_plan")
+                        throw new OpenAiPlanningException("UNEXPECTED_TOOL_CALL", "OpenAI requested an unsupported planning tool.");
+                    functionCalls.Add(item);
                 }
-            };
 
-            if (result.Ambiguities.Count > 0)
-                result.ProposedCommands.Clear();
+                if (functionCalls.Count != 1)
+                    throw new OpenAiPlanningException("PLAN_TOOL_CALL_MISSING", "OpenAI did not return the required CAD planning tool call.");
+                var argumentsJson = ReadString(functionCalls[0]["arguments"], "INVALID_OPENAI_RESPONSE");
+                JObject arguments;
+                try
+                {
+                    arguments = ReadObject(argumentsJson);
+                }
+                catch (JsonException)
+                {
+                    throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD planning tool arguments were invalid JSON.");
+                }
+                ExactPlanFields(arguments, "summary", "assumptions", "ambiguities", "commands");
+
+                var model = response["model"];
+                var usage = ReadUsage(response["usage"]);
+                var result = new CadPlanningResult
+                {
+                    Provider = "openai",
+                    Model = model == null || model.Type == JTokenType.Null ? _model : ReadString(model, "INVALID_OPENAI_RESPONSE"),
+                    Summary = ReadString(arguments["summary"], "INVALID_PLAN_ARGUMENTS"),
+                    Assumptions = ReadStrings(arguments["assumptions"]),
+                    Ambiguities = ReadStrings(arguments["ambiguities"]),
+                    ProposedCommands = ReadCommands(arguments["commands"]),
+                    Usage = usage
+                };
+
+                if (result.Ambiguities.Count > 0) result.ProposedCommands.Clear();
+                return result;
+            }
+            catch (JsonException)
+            {
+                throw InvalidResponse();
+            }
+            catch (OverflowException)
+            {
+                throw InvalidResponse();
+            }
+        }
+
+        private static JObject ReadObject(string json)
+        {
+            using (var text = new StringReader(json))
+            using (var reader = new JsonTextReader(text) { DateParseHandling = DateParseHandling.None, MaxDepth = 64 })
+            {
+                var result = JObject.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+                if (reader.Read()) throw new JsonReaderException("Unexpected content after the JSON object.");
+                return result;
+            }
+        }
+
+        private static void ValidateCompletedStatus(JObject item)
+        {
+            if (item["status"] != null && ReadString(item["status"], "INVALID_OPENAI_RESPONSE") != "completed")
+                throw InvalidResponse();
+        }
+
+        private static CadPlanningUsage ReadUsage(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return new CadPlanningUsage();
+            if (!(token is JObject usage)) throw InvalidResponse();
+            var result = new CadPlanningUsage
+            {
+                InputTokens = ReadTokenCount(usage["input_tokens"]),
+                OutputTokens = ReadTokenCount(usage["output_tokens"])
+            };
+            if (result.InputTokens > int.MaxValue - result.OutputTokens) throw InvalidResponse();
             return result;
         }
+
+        private static int ReadTokenCount(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null) return 0;
+            if (token.Type != JTokenType.Integer) throw InvalidResponse();
+            var value = (long)token;
+            if (value < 0 || value > int.MaxValue) throw InvalidResponse();
+            return (int)value;
+        }
+
+        private static string ReadString(JToken token, string code)
+        {
+            if (token?.Type != JTokenType.String)
+                throw new OpenAiPlanningException(code, "The CAD planning response contained an invalid string value.");
+            return (string)token;
+        }
+
+        private static void ExactPlanFields(JObject item, params string[] fields)
+        {
+            if (item.Count != fields.Length || item.Properties().Any(p => !fields.Contains(p.Name, StringComparer.Ordinal)))
+                throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD plan contained invalid fields.");
+        }
+
+        private static OpenAiPlanningException InvalidResponse() =>
+            new OpenAiPlanningException("INVALID_OPENAI_RESPONSE", "OpenAI returned an invalid or oversized planning response.");
 
         private static List<string> ReadStrings(JToken token)
         {
             if (!(token is JArray array))
                 throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD plan contained an invalid string list.");
-            return array.Values<string>().ToList();
+            return array.Select(item => ReadString(item, "INVALID_PLAN_ARGUMENTS")).ToList();
         }
 
         private static List<CadCommandEnvelope> ReadCommands(JToken token)
@@ -297,16 +383,19 @@ namespace SolidWorksCadAgent.AgentHost.Ai
                 throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD plan contained an invalid command list.");
 
             var commands = new List<CadCommandEnvelope>();
-            foreach (var item in array.OfType<JObject>())
+            foreach (var entry in array)
             {
-                var name = (string)item["command"];
+                if (!(entry is JObject item))
+                    throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "The CAD plan contained an invalid command entry.");
+                ExactPlanFields(item, "command", "parameters_json");
+                var name = ReadString(item["command"], "INVALID_PLAN_ARGUMENTS");
                 if (string.IsNullOrWhiteSpace(name))
                     throw new OpenAiPlanningException("INVALID_PLAN_ARGUMENTS", "A proposed CAD command had no name.");
 
                 JObject parameters;
                 try
                 {
-                    parameters = JObject.Parse((string)item["parameters_json"] ?? string.Empty);
+                    parameters = ReadObject(ReadString(item["parameters_json"], "INVALID_PLAN_ARGUMENTS"));
                 }
                 catch (JsonException)
                 {
