@@ -174,7 +174,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
             catch
             {
-                await FailIfCurrentAsync(job.Id, JobState.Interpreting, cancellationToken).ConfigureAwait(false);
+                await FailIfCurrentAsync(job.Id, JobState.Interpreting, CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
 
@@ -409,7 +409,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             }
             catch
             {
-                await FailIfCurrentAsync(jobId, expectedState, cancellationToken).ConfigureAwait(false);
+                await FailIfCurrentAsync(jobId, expectedState, CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
 
@@ -490,17 +490,38 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             CadPlanningResult plan,
             CancellationToken cancellationToken)
         {
-            await _executionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var current = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
-                if (current == null || current.State == JobState.Cancelled)
-                    return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
-                return await ExecuteApprovedWithinGateAsync(current, revision, plan, cancellationToken).ConfigureAwait(false);
+                await _executionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var current = await _repository.GetAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                    if (current == null || current.State == JobState.Cancelled)
+                        return await SnapshotAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                    // Acquire after the local execution gate so queued jobs do not reserve
+                    // native control ahead of the job currently using SOLIDWORKS.
+                    using (var nativeControl = _executionMode == ExecutionMode.Real ? _nativeControlLeaseFactory() : null)
+                    {
+                        if (_executionMode == ExecutionMode.Real && nativeControl == null)
+                            throw new JobCoordinatorException("MANUAL_CONTROL_ACTIVE",
+                                "Remote manual control is active or the CAD control lease is unavailable.");
+                        return await ExecuteApprovedWithinGateAsync(current, revision, plan, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                finally { _executionGate.Release(); }
             }
-            finally
+            catch (Exception executionFailure)
             {
-                _executionGate.Release();
+                // Cancellation or a thrown native/verification call must not leave an
+                // approved or executing job stranded until the next Host restart.
+                try
+                {
+                    foreach (var state in new[] { JobState.Approved, JobState.Executing, JobState.Verifying })
+                        await FailIfCurrentAsync(job.Id, state, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception persistenceFailure)
+                { executionFailure.Data["CadFailureTransitionError"] = persistenceFailure; }
+                throw;
             }
         }
 
@@ -597,9 +618,11 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         {
             var checks = new[]
             {
+                // GetRebuildErrors forces a native rebuild; observe the resulting solid
+                // only afterward so passing evidence cannot describe stale geometry.
+                new { Name = "RebuildErrors", Command = CadCommandNames.GetRebuildErrors },
                 new { Name = "BodyCount", Command = CadCommandNames.GetBodyCount },
-                new { Name = "BoundingBox", Command = CadCommandNames.GetBoundingBox },
-                new { Name = "RebuildErrors", Command = CadCommandNames.GetRebuildErrors }
+                new { Name = "BoundingBox", Command = CadCommandNames.GetBoundingBox }
             };
             var allPassed = true;
             foreach (var check in checks)
@@ -1040,16 +1063,25 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
 
         private static bool EvaluateVerification(string name, CadCommandResult result)
         {
-            if (result == null || !result.Success) return false;
-            if (name == "BodyCount") return (int?)result.Data?["bodyCount"] == 1;
+            if (result == null || !result.Success || result.Error != null || result.Data == null) return false;
+            if (name == "BodyCount") return result.Data["bodyCount"]?.Type == JTokenType.Integer &&
+                result.Data["bodyCount"].ToString(Formatting.None) == "1";
             if (name == "BoundingBox")
             {
-                return (double?)result.Data?["sizeXmm"] > 0 &&
-                       (double?)result.Data?["sizeYmm"] > 0 &&
-                       (double?)result.Data?["sizeZmm"] > 0;
+                return IsPositiveFiniteNumber(result.Data["sizeXmm"]) &&
+                       IsPositiveFiniteNumber(result.Data["sizeYmm"]) &&
+                       IsPositiveFiniteNumber(result.Data["sizeZmm"]);
             }
-            if (name == "RebuildErrors") return (bool?)result.Data?["hasErrors"] == false;
+            if (name == "RebuildErrors") return result.Data["hasErrors"]?.Type == JTokenType.Boolean &&
+                result.Data.Value<bool>("hasErrors") == false;
             return false;
+        }
+
+        private static bool IsPositiveFiniteNumber(JToken token)
+        {
+            if (token == null || token.Type != JTokenType.Integer && token.Type != JTokenType.Float) return false;
+            var value = token.Value<double>();
+            return value > 0 && !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         private static JObject ExpectedVerification(string name)

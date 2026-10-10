@@ -15,6 +15,7 @@ using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Contracts.Cad;
+using SolidWorksCadAgent.Core.Remote;
 
 namespace SolidWorksCadAgent.UnitTests
 {
@@ -941,6 +942,169 @@ namespace SolidWorksCadAgent.UnitTests
             var executed = await coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None);
             Assert.AreEqual(JobState.ReadyForReview, executed.Job.State);
             Assert.IsTrue(executor.ExecutedCommands.Count > 0);
+        }
+
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public async Task LegacyRealExecution_HoldsNativeLeaseThroughVerification(bool autoMode)
+        {
+            var leasePath = Path.Combine(_workspace, "control.lock");
+            var executor = new LeaseCheckingExecutor(leasePath);
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace, AutoMode = autoMode },
+                () => CadNativeControlLease.TryAcquire(leasePath));
+            var snapshot = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            if (!autoMode)
+                snapshot = await coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.ReadyForReview, snapshot.Job.State);
+            Assert.IsTrue(executor.CheckedCalls > 3, "Both mutations and final inspection must hold the lease.");
+            using (var released = CadNativeControlLease.TryAcquire(leasePath)) Assert.IsNotNull(released);
+        }
+
+        [TestMethod]
+        public async Task LegacyRealExecution_ManualControlBlocksAllCadCommands()
+        {
+            var executor = new RecordingSuccessfulExecutor();
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace }, () => null);
+            var snapshot = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var error = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() =>
+                coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None));
+            Assert.AreEqual("MANUAL_CONTROL_ACTIVE", error.Code);
+            Assert.AreEqual(0, executor.CallCount);
+            Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(snapshot.Job.Id)).State);
+        }
+
+        [TestMethod]
+        public async Task LegacyRealExecution_ThrownMutationFailsJobAndReleasesLease()
+        {
+            var leasePath = Path.Combine(_workspace, "control.lock");
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new ThrowingExecutor(),
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace },
+                () => CadNativeControlLease.TryAcquire(leasePath));
+            var snapshot = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None));
+            Assert.AreEqual(JobState.Failed, (await _repository.GetAsync(snapshot.Job.Id)).State);
+            using (var released = CadNativeControlLease.TryAcquire(leasePath)) Assert.IsNotNull(released);
+        }
+
+        [TestMethod]
+        public async Task LegacySimulation_DoesNotAcquireNativeLease()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(),
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = _workspace },
+                () => throw new AssertFailedException("Simulation must not reserve native control."));
+            var snapshot = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var result = await coordinator.ApproveAndExecuteAsync(snapshot.Job.Id, snapshot.Revisions.Last().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.ReadyForReview, result.Job.State);
+        }
+
+        private sealed class LeaseCheckingExecutor : RecordingSuccessfulExecutor
+        {
+            private readonly string _leasePath;
+            public int CheckedCalls { get; private set; }
+            public LeaseCheckingExecutor(string leasePath) { _leasePath = leasePath; }
+            public override Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token)
+            {
+                using (var competing = CadNativeControlLease.TryAcquire(_leasePath))
+                    Assert.IsNull(competing, "Remote input could acquire native control during " + command.Command);
+                CheckedCalls++;
+                return base.ExecuteAsync(command, token);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("BodyCount", "{\"bodyCount\":1.2}")]
+        [DataRow("BodyCount", "{\"bodyCount\":\"1\"}")]
+        [DataRow("BoundingBox", "{\"sizeXmm\":\"Infinity\",\"sizeYmm\":60,\"sizeZmm\":10}")]
+        [DataRow("BoundingBox", "{\"sizeXmm\":\"100\",\"sizeYmm\":60,\"sizeZmm\":10}")]
+        [DataRow("RebuildErrors", "{\"hasErrors\":\"false\"}")]
+        public async Task LegacyVerification_RejectsMalformedObservation(string check, string json)
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                new ObservationExecutor(check, JObject.Parse(json)),
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = _workspace });
+            var planned = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var result = await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Last().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.Failed, result.Job.State);
+            Assert.IsTrue(result.Verifications.Any(record => record.CheckName == check && !record.Passed));
+        }
+
+        [TestMethod]
+        public async Task LegacyVerification_ObservesGeometryAfterRebuild()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                new ObservationExecutor(null, null),
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = _workspace });
+            var planned = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var result = await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Last().Id, CancellationToken.None);
+            Assert.AreEqual(JobState.Failed, result.Job.State, "Rebuild revealed a second solid which must fail verification.");
+            Assert.IsTrue(result.Verifications.Any(record => record.CheckName == "BodyCount" && !record.Passed));
+        }
+
+        private sealed class ObservationExecutor : RecordingSuccessfulExecutor
+        {
+            private readonly string _check;
+            private readonly JObject _data;
+            private bool _rebuilt;
+            public ObservationExecutor(string check, JObject data) { _check = check; _data = data; }
+            public override Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token)
+            {
+                if (command.Command == CadCommandNames.GetRebuildErrors) _rebuilt = true;
+                if (_check != null && command.Command == "Get" + _check)
+                    return Task.FromResult(new CadCommandResult { Success = true, Data = _data });
+                if (_check == null && _rebuilt && command.Command == CadCommandNames.GetBodyCount)
+                    return Task.FromResult(CadCommandResult.Ok(new { bodyCount = 2 }));
+                return base.ExecuteAsync(command, token);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public async Task DirectPlanningCancellation_PersistsFailedState(bool replan)
+        {
+            JobSnapshot initial = null;
+            if (replan)
+                initial = await CreateCoordinator(new SimulatedCadCommandExecutor(), false).CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var planner = new PendingPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(),
+                new AgentSettings { ExecutionMode = ExecutionMode.Simulation, WorkspaceRoot = _workspace });
+            using (var cancelled = new CancellationTokenSource())
+            {
+                var work = replan
+                    ? coordinator.RequestChangesAsync(initial.Job.Id, initial.Revisions.Last().Id, "Make it wider", cancelled.Token)
+                    : coordinator.CreateAndPlanAsync(AcceptancePrompt, cancelled.Token);
+                await planner.Started.Task;
+                cancelled.Cancel();
+                planner.Result.TrySetCanceled();
+                try { await work; Assert.Fail("Planning must propagate cancellation."); }
+                catch (OperationCanceledException) { }
+                var job = (await _repository.ListAsync(10, null)).Items.Single();
+                Assert.AreEqual(JobState.Failed, job.State, "An interrupted cloud call must not strand Interpreting.");
+            }
+        }
+
+        [TestMethod]
+        public async Task LegacyExecution_FailureDoesNotReplacePersistedCancellation()
+        {
+            var executor = new PendingExecutor();
+            var leasePath = Path.Combine(_workspace, "control.lock");
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), executor,
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace },
+                () => CadNativeControlLease.TryAcquire(leasePath));
+            var planned = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
+            var work = coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Last().Id, CancellationToken.None);
+            await executor.Started.Task;
+            var job = await _repository.GetAsync(planned.Job.Id);
+            new SolidWorksCadAgent.Core.Jobs.JobStateMachine().Transition(job, JobState.Cancelled);
+            Assert.IsTrue(await _repository.TryUpdateFromStateAsync(job, JobState.Executing));
+            executor.Result.TrySetException(new InvalidOperationException("Injected failure after cancellation."));
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => work);
+            Assert.AreEqual(JobState.Cancelled, (await _repository.GetAsync(job.Id)).State);
+            using (var released = CadNativeControlLease.TryAcquire(leasePath)) Assert.IsNotNull(released);
         }
 
         private const string AcceptancePrompt =
