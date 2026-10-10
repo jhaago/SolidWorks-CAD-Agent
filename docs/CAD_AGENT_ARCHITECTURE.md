@@ -1,5 +1,66 @@
 # SolidWorks CAD Agent architecture
 
+## Engineering review and corrections — 10 October 2026
+
+This section supersedes the October 6 current-state assertions below; the earlier assessment remains useful architectural history. Exact fresh build/test evidence is in [the implementation handoff](CAD_IMPLEMENTATION_STATUS.md).
+
+### Baseline and scope
+
+The empty review workspace was populated from the newest accessible repositories: desktop `consolidation-work/solidworks`, branch `feature/v2-face-sketches-and-finishing`, HEAD `abd11f1`; Android `consolidation-work/android`, branch `feature/phone-first-v2`, HEAD `7c636f5` (0.4.3/code 7). Both review checkouts retain their branch history. The desktop's pre-existing RemoteHttpServer request-limit edit and PrismaticCapabilityTests whitespace change were copied intact; the older October 5 tree and its unfinished face-finishing work were not overwritten. Review checkouts live in `C:/Users/j_haa/Documents/Codex/2026-10-10/solidworks-cad-agent-comprehensive-engineering-review/{solidworks,android}`. Their origins are local source repositories, not new GitHub remotes. No installed bundle, running service, database, credential or user CAD file was changed.
+
+Review covered source/project inventory, recent history, the capability/status/architecture/roadmap documents, build scripts and CI, Contracts/Core validation, Host planning/approval/revisions/persistence/verification, design intake, Desktop HTTP/UI lifecycle, native COM/session/dispatch/inspection/handlers, V2 attempt transactions, RemoteAgent pairing/authority/proxy/input, and Android production transport/driver and tests. This was a source and automated engineering audit, not certification of every capability or a penetration test.
+
+### Actual architecture and capability boundary
+
+The existing .NET Framework 4.8 process boundaries remain appropriate: Desktop talks to loopback Host; paired Android uses private HTTPS through RemoteAgent, which forwards a narrow job API to Host. Contracts/Core stay independent of COM. Host chooses deterministic explicit V2 planning or AI V1 planning, validates and persists revisions, requires applicable approval, serializes execution, and records results. The Bridge owns one STA, document identity and native feature creation. SQLite preserves jobs and model/attempt evidence. Image/design intake has a separate revisioned brief/approval workflow before CAD approval.
+
+V2 already implements typed operations, model/sketch identity, dependency checks, pre-dispatch durable attempts, no replay of uncertain mutations, non-overwriting staged save, exact rectangle-boss dimensions/volume checks, managed reopen, and hash-bound delivery. These are implemented foundations, not proposed replacements. Its publicly executable scope is still the exact centred Top Plane rectangle + blind boss + new save. The October 9 installed 20 x 10 x 5 mm acceptance is historical evidence only.
+
+V1 supports native origin-plane sketches and prismatic features; simulator acceptance is a narrower plate state machine, not a geometry kernel. Native profiles are editable features but are not generally governed by managed driving dimensions/relations. Face sketches, semantic edge finishing and broad model editing remain drafts or gated. Assemblies/mates, patterns, loft/sweep, modelled threads, broad surfaces, drawings and CAM are not newly implemented or certified here. Keep the existing catalogue and capability gates; grow a second bounded operation through identity, prerequisites, observation and native acceptance before advertising hundreds of commands.
+
+### Demonstrated findings addressed
+
+| Priority | Finding and evidence | Correction |
+|---|---|---|
+| P1 | Clean clone cannot build: `CadV2SavePath` is referenced but the existing source was ignored by the general `Workspace/` output rule. | Restore the existing helper verbatim from the current source checkout and exempt the Core source directory from that ignore rule. |
+| P1 | Android `RemoteEndpoint.url` rejects every `agent/jobs/<GUID>` path, although production polling/approval/download uses them. Fake-driver tests bypassed this boundary. | Explicit route allowlist including canonical GUID job paths; test real endpoint and HTTPS transport composition. |
+| P1 | AI command arrays use `OfType<JObject>()`, silently dropping malformed operations and returning a partial plan. | Reject the whole response on malformed entries, coercible fields, duplicate fields or incomplete status; preserve clarification and downstream command validation. |
+| P1 | V1 real execution and Auto Mode lack V2's cross-process native-control lease. | Acquire the existing lease after the local execution gate, hold through mutation and inspection, fail without dispatch if unavailable, always release. No second locking architecture. |
+| P1 | Legacy verifier accepts fractional/string body counts and string/infinite dimensions, and samples geometry before the rebuild that can change it. Regression fixtures reached ReadyForReview. | Rebuild first; require exact typed observations, positive finite extents and no contradictory error result. |
+| P1 | Native inspection calls `GetBodies2(..., true)`, excluding hidden material from count/bounds/volume evidence. | Include all solid bodies. New owned native fixtures cover a hidden sole body and hidden extra body, before and after save/reopen; fresh native execution remains pending. |
+| P2 | Direct execution exceptions strand Executing; direct cloud cancellation strands Interpreting, while background wrappers hide this difference. | Persist conditional failure with an uncancelled cleanup token; preserve an already Cancelled job and propagate the original operation failure. |
+| P2 | AI response buffering is unbounded; token usage can overflow. | Stream at most 256 KiB with caller/client deadline, depth/duplicate checks and safe error diagnostics; validate aggregate token count. No blind mutation retries. |
+| P2 | Android mistakes rotating bearer tokens for session identity; renewal during an action can strand pending flags, cancel a valid submission or drop responses. | Fence responses by connection attempt, stable session and action generation; retain current token/authority, reset obsolete flags on reconnect. |
+| P2 | Definitively rejected Android submissions remain indefinitely active. | Clear the rejected placeholder and permit retry; retain uncertainty for timeout/server failure where a receipt may have been lost. |
+
+No new demonstrated P0 was established. These priorities describe evidence from this review, not an assertion that undiscovered vulnerabilities cannot exist.
+
+### Remaining priorities and evidence limits
+
+| Priority | Remaining issue | Evidence / next bounded work |
+|---|---|---|
+| P1 | V1 verification still checks only one body, nonzero bounds and rebuild status; it does not prove approved dimensions, hole location/depth, volume or saved bytes. | Demonstrated source limitation in `JobCoordinator.VerifyAsync` and legacy `AgentRoutes.ArtifactAsync`. Port intent assertions and saved-artifact evidence incrementally from V2; do not label V1 sanity checks dimensional acceptance. |
+| P1 | V1 lacks V2's complete durable attempt/reopen/hash pipeline; COM can partially mutate before an exception. | Fail-stop and identity uncertainty are present; rollback/replay safety and existing-model edits need checkpoints and explicit reconciliation. Do not auto-retry uncertain CAD commands. |
+| P2 | Unknown-result phone submissions are reconciled by prompt equality, which can misidentify another matching job or leave a pending placeholder. | Add a durable client submission ID and idempotent lookup across Android, proxy and Host; requires a coordinated protocol increment. |
+| P2 | Desktop/manual edits are not comprehensively observed by model revision stamps; lease excludes remote manual input, not all human interaction. | Add native change observation and approval invalidation before broad editing. Test authority transitions on the physical workstation. |
+| P2 | STA shutdown joins indefinitely and cannot interrupt an active synchronous COM call. | Existing behavior, not a measured hang here. Add queue/execution diagnostics and bounded supervisor recovery without killing user SOLIDWORKS or replaying mutations. |
+| P2 | Attach/Launch can probe a disconnected RCW outside recovery catch; status polling currently releases it. | Source-level reconnect weakness in `SolidWorksSession.AttachCore`; reproduce external shutdown then attach without status poll before changing lifecycle handling. |
+| P2 | Native error traversal is top-level; close reports success without explicit document disappearance check. | Extend owned native fixtures for nested feature errors, close failure and warning policy before widening capability claims. |
+| P2 | Design intake uses a global lock and non-atomic handoff between design and job databases. | Per-session concurrency and idempotent brief-revision/job linkage; no new service framework needed. |
+| P2 | CAD error stage/detail and operational logging remain incomplete; ordinary CI does not certify native interop/runtime. | Preserve structured diagnostics with redaction, add a controlled 2020 native lane and clean-checkout validation. Dependency vulnerability audit was not performed in this offline-focused run. |
+| P3 | Android lint warnings and historical status prose remain. | Fix relevant UI/accessibility/dependency warnings in their own scoped change; retain dated evidence rather than treating it as current certification. |
+
+### Required live acceptance before rollout
+
+1. On an idle SOLIDWORKS 2020 workstation, run the new hidden-solids fixture with `SOLIDWORKS_RUN_PRISMATIC_TESTS=1` and filter `HiddenSolids_AreIncludedInCountVolumeAndBoundsAfterSaveReopen`. Verify both data rows, retained native files, and restoration of the original document/dirty flag. Then rerun owned prismatic and exact V2 approved-job/save/reopen/hash acceptance. Do not run the entire unfiltered native suite against user documents.
+2. Exercise V1 manual and Auto Mode while Remote has control: expect no CAD dispatch. Release control, run an approved job, and attempt remote input during build and verification. Confirm view-only/manual control can resume after success, failure and cancellation.
+3. Install a deliberately signed review APK and matching Windows review bundle through the existing release workflow. Test pairing, create, detail polling, revision-bound approval, review/complete/cancel and native artifact hash/download over Wi-Fi and mobile data. Let renewal occur during each action and interrupt/reconnect networking. The local review APK is not published or deployed by this session.
+4. Test image/brief clarification and separate approvals with synthetic references, then compare independently measured native geometry against the approved dimensions. No paid live AI call or image-to-native claim was made here.
+
+The next development investment is broader intent-derived verification and safe feature/dimension editing within the existing typed model. New modelling families should follow these foundations, not bypass them.
+
+---
+
 Review date: 2026-10-06. This is an engineering blueprint, not an implementation claim.
 
 Companion documents: [capability matrix](CAD_CAPABILITY_MATRIX.md) and [dependency-driven roadmap, including the next ten increments](CAD_IMPLEMENTATION_ROADMAP.md).

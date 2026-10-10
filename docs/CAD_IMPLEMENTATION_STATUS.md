@@ -1,5 +1,33 @@
 # CAD implementation handoff
 
+## Engineering review completed in local review checkouts — 10 October 2026
+
+Baseline: desktop `abd11f1` on `feature/v2-face-sketches-and-finishing`; Android `7c636f5` on `feature/phone-first-v2`. Review checkouts are `solidworks` and `android` in the October 10 comprehensive-engineering-review workspace. Original checkouts and installed binaries remain unchanged. The original RemoteHttpServer edit and integration-test whitespace change are preserved separately from review commits. No push, merge, publication or deployment was performed.
+
+Read the new [engineering assessment](CAD_AGENT_ARCHITECTURE.md#engineering-review-and-corrections--10-october-2026) for the actual architecture, prioritized findings, unresolved issues and exact live acceptance sequence. The entries below this section are historical milestones, not current test counts.
+
+Implemented: restore the ignored existing CadV2SavePath source and correct its ignore rule; reject malformed/partial AI plans with bounded streamed responses, cancellation/deadlines and safe diagnostics; protect real legacy execution with the existing native-control lease; record terminal failure after thrown execution or cancelled planning without replacing Cancelled; rebuild before strict typed/finite observations; include hidden solids in native inspection. Android now permits the actual GUID job routes, clears definite rejection placeholders, and preserves session/action ownership through token renewal, reconnect and artifact download.
+
+Fresh verification (all tests use local fakes or ordinary production components, not a paid AI service):
+
+| Check | Result | Evidence |
+|---|---|---|
+| Complete solution, installed SOLIDWORKS interop enabled | Build succeeded, 0 warnings/errors | `dotnet build SolidWorksCadAgent.sln --no-restore -p:SolidWorksInteropAvailable=true --verbosity quiet`; includes native test compilation |
+| Unit suite, interop enabled | 630 passed, 0 failed/skipped | `tests/SolidWorksCadAgent.UnitTests/TestResults/review-native-unit.trx` |
+| Complete solution, interop disabled | Build succeeded; subsequent conditional test run executed | `dotnet build SolidWorksCadAgent.sln --no-restore -p:SolidWorksInteropAvailable=false --verbosity quiet` |
+| Unit suite, interop disabled | 630 passed, 0 failed/skipped | `tests/SolidWorksCadAgent.UnitTests/TestResults/review-disabled-final-unit.trx` |
+| Android JVM unit suite | 123 passed, 0 failed/errors/skipped, 20 suites | companion `app/build/test-results/testDebugUnitTest/TEST-*.xml` |
+| Android debug + instrumentation APK compilation and lint | BUILD SUCCESSFUL; lint 0 errors, 17 warnings | companion `build/review-logs/android-final-verification.log`, `app/build/reports/lint-results-debug.xml` |
+| Diff whitespace checks | Passed for both checkouts | `git diff --check` |
+
+Regression evidence: desktop `regressions-red.trx` had 41 expected failures/3 passes before parser and lease fixes; `verification-red.trx` had 6 legacy-verification failures/58 passes; `cancellation-red.trx` had 2 stranded-planning failures/1 pass. The initial clean clone failed compilation because CadV2SavePath was absent from Git. A later full run exposed one aggregate-token overflow (622 passes/1 failure), corrected before both final 630-test runs. Android targeted RED logs cover routing, rejection, renewal/reconnect and final artifact/placeholder consistency; final full suite is green. Intermediate build setup failures (sandbox restrictions, a duplicate test helper and unavailable net48 HttpStatusCode enum name) were corrected; they are not reported as passing tests.
+
+Native runtime acceptance was NOT executed. SOLIDWORKS and installed Host/RemoteAgent were running; this session did not take over that workstation or change user models. The new hidden-solid native tests were compiled with the installed 2020 interop only. Android instrumentation tests were compiled, not run on a device/emulator. No physical pairing, mobile-data, screen/input, live AI, manufacturing or image-to-native acceptance was performed. NuGet vulnerability audit was disabled for the available cached restore, so this is not a dependency security certification.
+
+Next: an idle-workstation acceptance window for hidden sole/extra solids, V1 remote exclusion, owned V2 build/save/reopen/hash regression and the paired-phone lifecycle through renewal. Then prioritize intent-derived verification and artifact integrity for V1, durable submission IDs, and constrained feature/dimension editing. Retain the existing strict capability gates.
+
+---
+
 Updated 2026-10-09. The bounded 7d-g5e through 7d-g5m source is committed locally as `3ea1436e2b3fb5c0dc2ab6f3be63ed6e1fac71ae` on `feature/v2-face-sketches-and-finishing`. The pre-existing unrelated whitespace-only change in `PrismaticCapabilityTests.cs` remains untouched. A side-by-side workstation rollout was performed. The SolidWorks repository was not pushed or merged; the Android 0.4.1 source and APK were published separately as recorded below.
 
 ## Current release scope: Task 7d-g5m — exact approved v2 rectangle boss

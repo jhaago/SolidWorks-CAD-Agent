@@ -1,5 +1,7 @@
 # Master CAD capability matrix
 
+October 10 review: see CAD_IMPLEMENTATION_STATUS.md for current automated evidence. Hidden-solid inspection is corrected and native regression fixtures compile; no capability is promoted to native-certified by this review. The dated baseline below records earlier capability milestones.
+
 Review date: 2026-10-07. Authoritative expansion checklist for this repository. Read with [architecture](CAD_AGENT_ARCHITECTURE.md) and [roadmap](CAD_IMPLEMENTATION_ROADMAP.md).
 
 Baseline for this continuation: committed HEAD `179f81db2bc7ace560408cbe7739f6049eda7b0a` plus reviewed uncommitted increment-2 slices recorded in [the handoff](CAD_IMPLEMENTATION_STATUS.md). Historical verified rows describe only their bounded native scenarios; a successful build does not certify new face-sketch or finishing behavior or deployment readiness.
@@ -637,7 +639,7 @@ Source review found no existing comprehensive matrix; [prismatic capability note
 
 ## Version and scope maintenance
 
-The historical native baseline is SOLIDWORKS Premium 2020 SP0.0. Newer API documentation is explanatory, not support certification. All new features require exact installed-interop signature checks, native-enabled compilation, and version/SP/template evidence before native status promotion. Multi-body, surface, assembly and drawing workflows require different verification policies from the current single-visible-solid rule. Formats beyond `.sldprt` require scoped workspace/export changes.
+The historical native baseline is SOLIDWORKS Premium 2020 SP0.0. Newer API documentation is explanatory, not support certification. All new features require exact installed-interop signature checks, native-enabled compilation, and version/SP/template evidence before native status promotion. Multi-body, surface, assembly and drawing workflows require different verification policies from the current single-solid rule (including hidden solids after the October 10 inspection correction; fresh native acceptance pending). Formats beyond `.sldprt` require scoped workspace/export changes.
 
 Additional core domains explicitly included above are helix/projected/composite curves, sketch blocks/pictures, dimension tolerances, Pack and Go, linked imports, document events, assembly loading states, drawing dangling-reference checks, manufacturing rule provenance, gauge tables, and point-cloud/reverse engineering. Specialist products remain separate; no current source dependency justifies placing them ahead of reliable core modelling.
 

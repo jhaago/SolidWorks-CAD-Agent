@@ -1,5 +1,7 @@
 # SolidWorks CAD Agent implementation roadmap
 
+Current priority update (10 October 2026): the bounded V2 identity/attempt/save pipeline is implemented; do not restart those completed increments. The comprehensive review fixed build reproducibility, AI parsing, V1 execution/observation safeguards and Android lifecycle defects. Follow the current review and evidence in CAD_AGENT_ARCHITECTURE.md and CAD_IMPLEMENTATION_STATUS.md. Next gates are fresh 2020/phone acceptance, V1 intent/artifact verification, durable remote submission IDs, then constrained parametric editing. The October 6 dependency blueprint below remains historical context.
+
 Review date: 2026-10-06. Dependency-driven blueprint; no implementation sprint is authorized by this document itself. Read the [architecture assessment](CAD_AGENT_ARCHITECTURE.md) and [capability matrix](CAD_CAPABILITY_MATRIX.md) first.
 
 ## 1. Starting point and governing decision
