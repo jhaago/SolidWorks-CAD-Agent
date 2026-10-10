@@ -1,5 +1,19 @@
 # CAD implementation handoff
 
+## Acceptance preparation and local candidates - 10 October 2026
+
+Local candidates are under `artifacts/engineering-review-20261010/`. They have not been installed, published or used for live CAD acceptance. Running applications remain the October 9 installed builds.
+
+- Native Release solution build: succeeded, 0 warnings/errors, installed SOLIDWORKS 2020 interop. Production ZIP validation passed (`NativeSolidWorksInterop`).
+- Fresh Release unit suite: **630 passed, 0 failed/skipped**, evidence `tests/SolidWorksCadAgent.UnitTests/TestResults/rollout-release-unit.trx`. Bundle file-lock regression passed.
+- Windows ZIP SHA-256: `450EA1F3CACDF1E714E50CF47B92B619187645BBA549FA925BC3FCFAFBDF3B3A`. Source is review commit `782d6b4` plus the preserved RemoteHttpServer diagnostic edit, not a clean-HEAD-only release.
+- Android candidate `solidworks-cad-agent-android-0.4.3-review-c2ab52a.apk`: SHA-256 `550A31F35F7E0BFCE4916279AFA58A227D2A0CC99B164F9BA50B34DBFC4A641D`. Signature verification passed; certificate SHA-256 `c00c3f9daff94a963c6fab61ceae2488eb9af92466f145d714e2f03f319d1e63` matches earlier published previews. This is a debug-signed acceptance candidate. ADB reported no connected device; no installation or instrumentation run occurred.
+- Read-only installed-host checks reported real/native mode, SOLIDWORKS 2020 revision 28.0.0 and no executing/interpreting/approved/verifying jobs. An existing document was active. Native tests remain pending an idle-workstation window.
+
+Packaging regression blocker: `test-windows-bundle-validator.ps1` assumes compile-only input and always changes its marker to native, so it fails with an already-native ZIP without introducing a contradiction. Production validation correctly accepted the valid ZIP. The intended correction is to validate the source, switch to the opposite marker and require the specific compiled-capability mismatch. During that correction the tracked script became inaccessible and disappeared. Restoring the original HEAD version also failed with Windows Permission denied. Folder ACLs permit user writes; no matching Defender event was found. Bitdefender is running, but the cause is unconfirmed. The correction is not verified or committed. Do not commit the missing script as a deletion; resolve the workstation restriction and restore it before rerunning the regression. No security settings were changed.
+
+Next acceptance gates: hidden sole/additional solids before and after save/reopen; approved V2 six-step job with artifact hash and original-document restoration; legacy CAD/remote-input exclusion; paired-phone submit/approve/cancel/renew/reconnect/download. Obtain an idle window and prevent competing native input. Compilation and unit tests do not prove native geometry acceptance. Resolve the packaging regression blocker before promoting these candidates.
+
 ## Engineering review completed in local review checkouts — 10 October 2026
 
 Baseline: desktop `abd11f1` on `feature/v2-face-sketches-and-finishing`; Android `7c636f5` on `feature/phone-first-v2`. Review checkouts are `solidworks` and `android` in the October 10 comprehensive-engineering-review workspace. Original checkouts and installed binaries remain unchanged. The original RemoteHttpServer edit and integration-test whitespace change are preserved separately from review commits. No push, merge, publication or deployment was performed.
