@@ -22,6 +22,8 @@ appsettings.local.json
 Workspace/
 .design-intake/
 workspace/
+!src/SolidWorksCadAgent.Core/Workspace/
+!src/SolidWorksCadAgent.Core/Workspace/**
 *.SLDPRT
 *.SLDASM
 *.SLDDRW
