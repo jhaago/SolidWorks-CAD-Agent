@@ -25,6 +25,55 @@ namespace SolidWorksCadAgent.IntegrationTests
     {
         public TestContext TestContext { get; set; }
 
+        [DataTestMethod]
+        [DataRow(1)]
+        [DataRow(2)]
+        [Timeout(180000)]
+        public async Task HiddenSolids_AreIncludedInCountVolumeAndBoundsAfterSaveReopen(int bodyCount)
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            await WithOwnedPartAsync("hidden-solids-" + bodyCount, async (bridge, session) =>
+            {
+                await Execute(bridge, "CreateSketch", new { plane = "Top Plane" });
+                await Execute(bridge, "AddRectangle", new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 10.0, heightMm = 10.0 });
+                if (bodyCount == 2)
+                    await Execute(bridge, "AddRectangle", new { centerXmm = 30.0, centerYmm = 0.0, widthMm = 10.0, heightMm = 10.0 });
+                await Execute(bridge, "ExitSketch", new { });
+                await Execute(bridge, "Extrude", new { depthMm = 5.0 });
+            }, async (bridge, session) =>
+            {
+                await session.InvokeWithApplicationAsync(app =>
+                {
+                    var model = (ModelDoc2)((SldWorks)app).ActiveDoc;
+                    var part = (PartDoc)model;
+                    var bodies = part.GetBodies2((int)swBodyType_e.swSolidBody, false) as object[] ?? Array.Empty<object>();
+                    Assert.AreEqual(bodyCount, bodies.Length, "The fixture must contain the requested disconnected solids.");
+                    foreach (Body2 body in bodies)
+                    {
+                        Assert.IsTrue(body.GetExtremePoint(1.0, 0.0, 0.0, out var maxX, out _, out _));
+                        body.HideBody(bodyCount == 1 || maxX > 0.020);
+                    }
+                    var visible = part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[] ?? Array.Empty<object>();
+                    Assert.AreEqual(bodyCount == 1 ? 0 : 1, visible.Length, "The fixture must actually hide the sole or additional solid.");
+                    return true;
+                }, CancellationToken.None);
+
+                var count = (await Execute(bridge, "GetBodyCount", new { })).Data;
+                Assert.AreEqual(bodyCount, count.Value<int>("bodyCount"), "Display visibility must not change the physical solid count.");
+                if (bodyCount == 1)
+                    Assert.AreEqual(500.0, count.Value<double>("volumeMm3"), 0.05, "The hidden boss still has its complete physical volume.");
+                var bounds = (await Execute(bridge, "GetBoundingBox", new { })).Data;
+                Assert.AreEqual(bodyCount == 1 ? 10.0 : 40.0, bounds.Value<double>("sizeXmm"), 0.02, "Bounds must include the hidden solid.");
+                Assert.AreEqual(5.0, bounds.Value<double>("sizeYmm"), 0.02);
+                Assert.AreEqual(10.0, bounds.Value<double>("sizeZmm"), 0.02);
+            });
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Build with installed SOLIDWORKS interop assemblies to run native capability acceptance.");
+#endif
+        }
+
         [TestMethod]
         [Timeout(180000)]
         public async Task RotatedSlotThroughCutAndHexagonalBlindPocket_SaveReopenPreservingOriginalDocument()

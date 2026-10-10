@@ -39,7 +39,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
                 throw new InvalidOperationException("The active SOLIDWORKS document is not a part document.");
             }
 
-            return part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[] ?? Array.Empty<object>();
+            // Visibility is presentation state; physical verification includes hidden solids.
+            return part.GetBodies2((int)swBodyType_e.swSolidBody, false) as object[] ?? Array.Empty<object>();
         }
 
         public static PreciseBoundingBox GetPreciseBoundingBox(ModelDoc2 model)
