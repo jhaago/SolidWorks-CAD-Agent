@@ -72,11 +72,19 @@ Executed evidence:
   1/1 (`v2-cut-readback.trx`), the semicircle through-cut passed 1/1
   (`v2-cut-contour-readback.trx`), and the V1 slot/hex pocket regression passed
   1/1 (`v1-prismatic-readback-regression.trx`). They do not verify the new exact
-  segment matcher. In the current session, the 4-cut and contour native fixtures
-  failed at AttachAsync before creating a model because no registered SOLIDWORKS
-  COM application was available. The SOLIDWORKS lifecycle test then timed out
-  waiting for COM registration from a fresh launch. The exact segment matcher
-  therefore still needs live 2020 acceptance.
+  segment matcher. Current attempts have not reached native model creation. The
+  four-cut and contour fixtures failed at AttachAsync; a retry after closing the
+  stale headless SOLIDWORKS process again failed at AttachAsync. The lifecycle
+  test launched a new SOLIDWORKS process but timed out after one minute waiting
+  for COM registration. Windows displayed an application error reporting a
+  breakpoint exception (`0x80000003`); only the test-launched process was closed.
+  The registered `SldWorks.Application` COM server points to the installed
+  `SLDWORKS.exe`, but this does not establish that startup is healthy. Evidence is
+  in `segment-readback-native-semicircle.trx` and
+  `segment-readback-native-lifecycle.trx`. The latest semicircle fixture left
+  only its unique `jobs.sqlite` test metadata under the capability-test workspace;
+  no model was created. The four-cut case was not retried. The exact segment
+  matcher therefore still needs live 2020 acceptance after startup/COM recovery.
   The current full interop-disabled unit run recorded 351 passed and 4 failed
   (one route expected 200 but received 409; three coordinator approvals reported
   an unavailable CAD control lease), then the test host was aborted after its
@@ -114,9 +122,9 @@ Production bundle validation passed. ZIP SHA-256:
 The candidate contains the preserved local RemoteHttpServer diagnostic edit.
 No installed applications were replaced and no physical phone acceptance was run.
 Remaining priorities:
-- P1: rerun the four-cut and line/arc native acceptance tests on SOLIDWORKS 2020
-  with the exact segment matcher enabled. Current attempts could not attach to the
-  registered COM application, and the fresh launch timed out before native work.
+- P1: recover a stable SOLIDWORKS 2020 startup/COM session, then rerun the
+  semicircle and four-cut native acceptance tests with the exact segment matcher.
+  Current launches fail before native model creation with a breakpoint exception.
 - P1: extend beyond the admitted single-loop contour to multiple boss features,
   supported edit operations and additional independently verified topology.
 - P2: migrate retired narrow persistence/boundary tests to the shared APIs, then
