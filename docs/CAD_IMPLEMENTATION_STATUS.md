@@ -57,6 +57,13 @@ Executed evidence:
   physical volume/bounds, clean rebuild, managed save/reopen, native line/arc sketch
   content and persistent sketch-reference resolution. V1 native prismatic
   regressions passed 5/5 (`v1-prismatic-regression.trx`).
+- Multi-boss probe (11 October 2026): exploratory edge-joined rectangular boss
+  jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
+  measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's
+  pre-save verifier blocked all three before save; the plans remain unsupported.
+  Verification diagnostics now include observed volume and bounds to aid a future
+  native sketch/feature investigation. Existing single-boss V2 suite still passed
+  9/9 and V1 prismatic regressions 5/5 after this diagnostic change.
 - Independent code review found no critical/important production defect; its
   persistence-fixture weakness was corrected to use an admitted rectangular
   base and a shallower blind pocket. Shared old/new boundary concurrency test passes.

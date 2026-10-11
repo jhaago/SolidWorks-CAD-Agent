@@ -130,11 +130,15 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 bodies.Data.Value<int>("bodyCount") != 1)
                 return CadV2RectangleBossVerification.Fail("The part does not contain exactly one observed solid body.");
             var expectedVolume = geometry.VolumeMm3;
+            var bounds = await ObserveAsync(CadCommandNames.GetBoundingBox, jobId, modelId, token).ConfigureAwait(false);
+            if (bounds == null || !bounds.Success || bounds.Error != null || bounds.Data == null)
+                return CadV2RectangleBossVerification.Fail("The part has no valid observed bounding box.");
             if (!ReadFinite(bodies.Data, "volumeMm3", out var actualVolume) ||
                 Math.Abs(actualVolume - expectedVolume) > Math.Max(0.05, expectedVolume * 0.0001))
-                return CadV2RectangleBossVerification.Fail("The observed solid volume differs from the planned prismatic part.");
-            var bounds = await ObserveAsync(CadCommandNames.GetBoundingBox, jobId, modelId, token).ConfigureAwait(false);
-            if (bounds == null || !bounds.Success || bounds.Error != null || !MatchesBounds(bounds.Data, geometry))
+                return CadV2RectangleBossVerification.Fail("The observed solid volume " + actualVolume.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                    " mm3 differs from planned " + expectedVolume.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+                    " mm3; observed bounds " + bounds.Data.ToString(Newtonsoft.Json.Formatting.None) + ".");
+            if (!MatchesBounds(bounds.Data, geometry))
                 return CadV2RectangleBossVerification.Fail("The observed bounds differ from the planned prismatic part: " +
                     (bounds?.Data?.ToString(Newtonsoft.Json.Formatting.None) ?? bounds?.Error?.Code ?? "no result"));
 
