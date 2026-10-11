@@ -172,6 +172,33 @@ namespace SolidWorksCadAgent.IntegrationTests
                     var keys = new[] { "minXmm", "maxXmm", "minYmm", "maxYmm", "minZmm", "maxZmm" };
                     for (int i = 0; i < keys.Length; i++)
                         Assert.AreEqual(bounds[i], observed["bounds"].Value<double>(keys[i]), 0.02, keys[i]);
+                    var nativeCuts = observed["nativeCuts"] as JArray;
+                    Assert.IsNotNull(nativeCuts, "Saved verification must retain independent native cut readback.");
+                    var cutExpectations = CadV2PrismaticGeometry.Analyze(
+                        CadPlanDocumentReader.ReadPersisted(result.Revisions.Single().PlanJson).CandidateV2).Cuts;
+                    Assert.AreEqual(cutExpectations.Count, nativeCuts.Count,
+                        "Saved/reopened SOLIDWORKS cut count must match the normalized plan.");
+                    for (int cutIndex = 0; cutIndex < cutExpectations.Count; cutIndex++)
+                    {
+                        var expectedCut = cutExpectations[cutIndex];
+                        var actualCut = (JObject)nativeCuts[cutIndex];
+                        var profile = (JObject)actualCut["profile"];
+                        Assert.AreEqual(expectedCut.EndCondition, actualCut.Value<string>("endCondition"));
+                        Assert.AreEqual(true, actualCut.Value<bool>("reverseDirection"));
+                        Assert.AreEqual(false, actualCut.Value<bool>("flipSideToCut"));
+                        Assert.AreEqual(false, actualCut.Value<bool>("bothDirections"));
+                        Assert.IsTrue(profile.Value<bool>("parentRelationVerified"));
+                        Assert.IsFalse(string.IsNullOrWhiteSpace(profile.Value<string>("sketchName")));
+                        Assert.AreEqual(expectedCut.LineCount, profile.Value<int>("lineCount"));
+                        Assert.AreEqual(expectedCut.ArcCount, profile.Value<int>("arcCount"));
+                        Assert.AreEqual(expectedCut.MinXmm, profile.Value<double>("minXmm"), 0.02);
+                        Assert.AreEqual(expectedCut.MaxXmm, profile.Value<double>("maxXmm"), 0.02);
+                        Assert.AreEqual(expectedCut.MinYmm, profile.Value<double>("minYmm"), 0.02);
+                        Assert.AreEqual(expectedCut.MaxYmm, profile.Value<double>("maxYmm"), 0.02);
+                        if (expectedCut.DepthMm.HasValue)
+                            Assert.AreEqual(expectedCut.DepthMm.Value, actualCut.Value<double>("depthMm"), 0.02);
+                        else Assert.AreEqual(JTokenType.Null, actualCut["depthMm"].Type);
+                    }
                     var frame = CadStandardPlaneFrame.FromPlaneName(plane);
                     var origin = frame.ToModel(0, 0, 0);
                     var bossDepth = candidate["steps"].Values<JObject>()

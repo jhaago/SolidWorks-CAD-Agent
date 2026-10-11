@@ -55,7 +55,8 @@ namespace SolidWorksCadAgent.UnitTests
             {
                 "AttachSolidWorks", "LaunchSolidWorks", "NewPart", "OpenPart", "SavePart", "CloseDocument",
                 "CreateSketch", "CreateSketchOnFace", "AddLine", "AddArc", "AddRectangle", "AddCircle", "AddSlot", "AddRegularPolygon", "ExitSketch", "Extrude",
-                "CutExtrude", "FilletEdges", "ChamferEdges", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree"
+                "CutExtrude", "FilletEdges", "ChamferEdges", "Rebuild", "GetBoundingBox", "GetBodyCount", "GetRebuildErrors", "GetFeatureTree",
+                "GetPrismaticCutReadback"
             };
 
             var values = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)

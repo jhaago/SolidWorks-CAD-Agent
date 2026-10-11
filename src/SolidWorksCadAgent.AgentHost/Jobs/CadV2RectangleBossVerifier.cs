@@ -141,6 +141,14 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (!MatchesBounds(bounds.Data, geometry))
                 return CadV2RectangleBossVerification.Fail("The observed bounds differ from the planned prismatic part: " +
                     (bounds?.Data?.ToString(Newtonsoft.Json.Formatting.None) ?? bounds?.Error?.Code ?? "no result"));
+            var nativeCuts = await ObserveAsync(CadCommandNames.GetPrismaticCutReadback, jobId, modelId, token).ConfigureAwait(false);
+            var cutArray = nativeCuts?.Data?["cuts"] as JArray;
+            if (nativeCuts == null || !nativeCuts.Success || nativeCuts.Error != null || cutArray == null)
+                return CadV2RectangleBossVerification.Fail("Native cut definitions and parent sketches could not be read back" +
+                    (nativeCuts?.Error == null ? "." : " (" + nativeCuts.Error.Code + "): " + nativeCuts.Error.Message +
+                        (string.IsNullOrWhiteSpace(nativeCuts.Error.Detail) ? string.Empty : " " + nativeCuts.Error.Detail)));
+            if (!CadV2NativeCutReadbackMatcher.Matches(geometry.Cuts, cutArray, out var cutMismatch))
+                return CadV2RectangleBossVerification.Fail(cutMismatch);
 
             var after = await _repository.GetModelAsync(modelId, token).ConfigureAwait(false);
             if (after == null || after.Status != (savedWorkspace == null ? CadModelIdentityStatus.ActiveUnsaved : CadModelIdentityStatus.ActiveSaved) ||
@@ -151,7 +159,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             {
                 ["rebuild"] = rebuild.Data.DeepClone(),
                 ["bodies"] = bodies.Data.DeepClone(),
-                ["bounds"] = bounds.Data.DeepClone()
+                ["bounds"] = bounds.Data.DeepClone(),
+                ["nativeCuts"] = cutArray.DeepClone()
             });
         }
 

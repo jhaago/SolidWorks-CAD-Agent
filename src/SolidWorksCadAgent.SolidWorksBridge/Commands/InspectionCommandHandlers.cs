@@ -109,6 +109,30 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
         }
     }
 
+    public sealed class GetPrismaticCutReadbackCommandHandler : SolidWorksCommandHandlerBase
+    {
+        public GetPrismaticCutReadbackCommandHandler(ISolidWorksSession session) : base(session) { }
+        public override string Name => CadCommandNames.GetPrismaticCutReadback;
+        public override CadError Validate(JObject parameters) => null;
+
+        public override Task<CadCommandResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken)
+        {
+            return InvokeAsync(application =>
+            {
+#if SOLIDWORKS_INTEROP
+                var model = RequireDocument(application) as ModelDoc2;
+                if (model == null)
+                    return Failure("NO_ACTIVE_DOCUMENT", "Inspect", "No active SOLIDWORKS document is available.");
+                try { return Ok(new { cuts = SolidWorksInspector.GetPrismaticCutReadback(model) }); }
+                catch (Exception ex)
+                { return Failure("PRISMATIC_CUT_READBACK_FAILED", "Inspect", "Unable to read native cut definitions and parent profiles.", ex.Message); }
+#else
+                return InteropUnavailable();
+#endif
+            }, cancellationToken);
+        }
+    }
+
     public sealed class GetRebuildErrorsCommandHandler : SolidWorksCommandHandlerBase
     {
         public GetRebuildErrorsCommandHandler(ISolidWorksSession session) : base(session) { }

@@ -431,6 +431,7 @@ namespace SolidWorksCadAgent.UnitTests
             private readonly string _root;
             public int Mutations { get; private set; }
             public double VolumeMm3 { get; set; } = 1000.0;
+            private bool _hasThroughCircleCut;
             public Func<CadCommandEnvelope, Task> BeforeMutation { get; set; }
             public string FailCommand { get; set; }
             public bool SupportsManagedReferences => true;
@@ -445,6 +446,8 @@ namespace SolidWorksCadAgent.UnitTests
                     minXmm = -10.0, maxXmm = 10.0, minYmm = 0.0, maxYmm = 5.0,
                     minZmm = -5.0, maxZmm = 5.0, sizeXmm = 20.0, sizeYmm = 5.0, sizeZmm = 10.0
                 }));
+                if (command.Command == CadCommandNames.GetPrismaticCutReadback)
+                    return Task.FromResult(CadCommandResult.Ok(new { cuts = _hasThroughCircleCut ? ThroughCircleCutReadback() : new JArray() }));
                 if (command.Command == CadCommandNames.CloseDocument) return Task.FromResult(CadCommandResult.Ok(new { closed = true }));
                 if (command.Command == CadCommandNames.OpenPart) return Task.FromResult(CadCommandResult.Ok(new
                 {
@@ -456,6 +459,7 @@ namespace SolidWorksCadAgent.UnitTests
             {
                 Mutations++;
                 var command = request.Command;
+                if (command.Command == CadCommandNames.CutExtrude) _hasThroughCircleCut = true;
                 if (BeforeMutation != null) await BeforeMutation(command);
                 if (command.Command == FailCommand) throw new InvalidOperationException("Fixture native failure.");
                 if (command.Command == CadCommandNames.NewPart) return CadCommandResult.Ok(new
@@ -490,6 +494,20 @@ namespace SolidWorksCadAgent.UnitTests
                 }
                 throw new InvalidOperationException("Unexpected mutation: " + command.Command);
             }
+
+            private static JArray ThroughCircleCutReadback() => new JArray
+            {
+                new JObject
+                {
+                    ["featureName"] = "Cut-Extrude1", ["endCondition"] = "ThroughAll", ["depthMm"] = JValue.CreateNull(),
+                    ["reverseDirection"] = true, ["flipSideToCut"] = false, ["bothDirections"] = false,
+                    ["profile"] = new JObject
+                    {
+                        ["parentRelationVerified"] = true, ["sketchName"] = "Sketch2", ["lineCount"] = 0, ["arcCount"] = 1,
+                        ["minXmm"] = -2.0, ["maxXmm"] = 2.0, ["minYmm"] = -2.0, ["maxYmm"] = 2.0
+                    }
+                }
+            };
         }
     }
 }

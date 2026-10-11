@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 
@@ -21,6 +22,7 @@ namespace SolidWorksCadAgent.Core.Commands
         public string PlaneName { get; private set; }
         public string LastFeatureStepKey { get; private set; }
         public CadPlanV2Step SaveStep { get; private set; }
+        public IReadOnlyList<CadV2CutExpectation> Cuts { get; private set; } = new List<CadV2CutExpectation>();
         public JObject ExpectedBounds() => new JObject
         {
             ["minXmm"] = MinXmm, ["maxXmm"] = MaxXmm,
@@ -120,18 +122,26 @@ namespace SolidWorksCadAgent.Core.Commands
                     }
                     result.VolumeMm3 -= profile.Area * cutDepth;
                     cuts.Add(profile);
+                    result._cutExpectations.Add(new CadV2CutExpectation(feature.StepKey,
+                        feature.Parameters.Value<string>("endCondition"),
+                        feature.Parameters.Value<string>("endCondition") == "Blind" ? (double?)cutDepth : null,
+                        profile.MinX, profile.MaxX, profile.MinY, profile.MaxY, profile.LineCount, profile.ArcCount));
                 }
                 Require(Positive(result.VolumeMm3), "The computed solid volume must be finite and positive.");
                 result.LastFeatureStepKey = feature.StepKey;
             }
             Require(group > 0 && index == end, "The plan contains an incomplete prismatic feature group.");
+            result.Cuts = result._cutExpectations.AsReadOnly();
             return result;
         }
+
+        private readonly List<CadV2CutExpectation> _cutExpectations = new List<CadV2CutExpectation>();
 
         private sealed class Profile
         {
             internal double Area, MinX, MaxX, MinY, MaxY;
             internal bool IsRectangle;
+            internal int LineCount, ArcCount;
         }
 
         private static bool IsProfileCommand(string command) => command == CadCommandNames.AddRectangle ||
@@ -153,7 +163,9 @@ namespace SolidWorksCadAgent.Core.Commands
             return new Profile
             {
                 Area = contour.AreaMm2, MinX = contour.MinXmm, MaxX = contour.MaxXmm,
-                MinY = contour.MinYmm, MaxY = contour.MaxYmm
+                MinY = contour.MinYmm, MaxY = contour.MaxYmm,
+                LineCount = primitives.Count(step => step.Command == CadCommandNames.AddLine),
+                ArcCount = primitives.Count(step => step.Command == CadCommandNames.AddArc)
             };
         }
 
@@ -173,11 +185,13 @@ namespace SolidWorksCadAgent.Core.Commands
                     halfX = width / 2; halfY = height / 2;
                     profile.Area = width * height;
                     profile.IsRectangle = true;
+                    profile.LineCount = 4;
                     break;
                 case CadCommandNames.AddCircle:
                     double radius = Number(p, "diameterMm") / 2;
                     halfX = halfY = radius;
                     profile.Area = Math.PI * radius * radius;
+                    profile.ArcCount = 1;
                     break;
                 case CadCommandNames.AddSlot:
                     double slotWidth = Number(p, "widthMm"), straight = Number(p, "lengthMm") - slotWidth;
@@ -186,12 +200,15 @@ namespace SolidWorksCadAgent.Core.Commands
                     halfX = straight / 2 * Math.Abs(Math.Cos(angle)) + slotRadius;
                     halfY = straight / 2 * Math.Abs(Math.Sin(angle)) + slotRadius;
                     profile.Area = straight * slotWidth + Math.PI * slotRadius * slotRadius;
+                    profile.LineCount = 2;
+                    profile.ArcCount = 2;
                     break;
                 default:
                     int sides = p.Value<int>("sides");
                     double polygonRadius = Number(p, "diameterMm") / 2;
                     double startAngle = Number(p, "angleDegrees") * Math.PI / 180;
                     profile.Area = sides * polygonRadius * polygonRadius * Math.Sin(2 * Math.PI / sides) / 2;
+                    profile.LineCount = sides;
                     profile.MinX = profile.MinY = double.PositiveInfinity;
                     profile.MaxX = profile.MaxY = double.NegativeInfinity;
                     // Evaluate analytical vertices independently of native generated sketch segments.
@@ -226,5 +243,26 @@ namespace SolidWorksCadAgent.Core.Commands
         {
             if (!condition) throw new ArgumentException(reason, "plan");
         }
+    }
+
+    /// <summary>Plan-derived native cut and parent-profile expectations used by independent readback.</summary>
+    public sealed class CadV2CutExpectation
+    {
+        internal CadV2CutExpectation(string stepKey, string endCondition, double? depthMm,
+            double minXmm, double maxXmm, double minYmm, double maxYmm, int lineCount, int arcCount)
+        {
+            StepKey = stepKey; EndCondition = endCondition; DepthMm = depthMm;
+            MinXmm = minXmm; MaxXmm = maxXmm; MinYmm = minYmm; MaxYmm = maxYmm;
+            LineCount = lineCount; ArcCount = arcCount;
+        }
+        public string StepKey { get; }
+        public string EndCondition { get; }
+        public double? DepthMm { get; }
+        public double MinXmm { get; }
+        public double MaxXmm { get; }
+        public double MinYmm { get; }
+        public double MaxYmm { get; }
+        public int LineCount { get; }
+        public int ArcCount { get; }
     }
 }

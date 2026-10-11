@@ -88,6 +88,9 @@ namespace SolidWorksCadAgent.AgentHost.Simulation
                 case CadCommandNames.GetFeatureTree:
                     result = RequirePart(() => CadCommandResult.Ok(new { features = _features.ToArray() }));
                     break;
+                case CadCommandNames.GetPrismaticCutReadback:
+                    result = Failure("NATIVE_CUT_READBACK_UNAVAILABLE_IN_SIMULATION", "Simulation cannot observe SOLIDWORKS feature definitions or parent sketch geometry.");
+                    break;
                 case CadCommandNames.GetRebuildErrors:
                     result = RequirePart(() => CadCommandResult.Ok(new { hasErrors = false, errors = new string[0] }));
                     break;

@@ -714,6 +714,7 @@ namespace SolidWorksCadAgent.UnitTests
                 {
                     if (command.Command == CadCommandNames.GetRebuildErrors) return CadCommandResult.Ok(new { hasErrors = false });
                     if (command.Command == CadCommandNames.GetBodyCount) return CadCommandResult.Ok(new { bodyCount = 1, volumeMm3 = 1000.0 });
+                    if (command.Command == CadCommandNames.GetPrismaticCutReadback) return CadCommandResult.Ok(new { cuts = new JArray() });
                     return CadCommandResult.Ok(new { minXmm = -10.0, maxXmm = 10.0, minYmm = 0.0, maxYmm = 5.0,
                         minZmm = -5.0, maxZmm = 5.0, sizeXmm = 20.0, sizeYmm = 5.0, sizeZmm = 10.0 });
                 });
@@ -721,7 +722,7 @@ namespace SolidWorksCadAgent.UnitTests
                     ready.JobId, ready.RevisionId, ready.Model.ModelId, CancellationToken.None);
                 Assert.IsTrue(check.Passed, check.Reason);
                 CollectionAssert.AreEqual(new[] { CadCommandNames.GetRebuildErrors, CadCommandNames.GetBodyCount,
-                    CadCommandNames.GetBoundingBox }, executor.Commands);
+                    CadCommandNames.GetBoundingBox, CadCommandNames.GetPrismaticCutReadback }, executor.Commands);
                 Assert.IsTrue(executor.AllBoundTo(ready.JobId, ready.Model.ModelId));
             });
         }
@@ -851,7 +852,7 @@ namespace SolidWorksCadAgent.UnitTests
                     Assert.IsTrue(result.Success);
                     Assert.AreEqual(1, executor.SaveCount);
                     Assert.AreEqual(CadCommandNames.GetRebuildErrors, executor.Commands[0]);
-                    Assert.AreEqual(CadCommandNames.SavePart, executor.Commands[3]);
+                    Assert.AreEqual(CadCommandNames.SavePart, executor.Commands[4]);
                     Assert.AreEqual(ready.JobId, executor.SaveRequest.Command.ExecutionId);
                     Assert.AreEqual(ready.Model.ModelId, executor.SaveRequest.Command.ManagedModelId);
                     Assert.AreEqual(false, executor.SaveRequest.Command.Parameters.Value<bool>("allowOverwrite"));
@@ -878,9 +879,9 @@ namespace SolidWorksCadAgent.UnitTests
                     Assert.AreEqual(model.LastSavedSha256, JObject.Parse(passing.ExpectedJson).Value<string>("sha256"));
                     Assert.AreEqual(model.LastSavedSha256, JObject.Parse(passing.ActualJson).Value<string>("sha256"));
                     Assert.IsNotNull(JObject.Parse(passing.ActualJson)["observed"]["bounds"]);
-                    Assert.AreEqual(CadCommandNames.CloseDocument, executor.Commands[7]);
-                    Assert.AreEqual(CadCommandNames.OpenPart, executor.Commands[8]);
-                    Assert.AreEqual(CadCommandNames.GetRebuildErrors, executor.Commands[9]);
+                    Assert.AreEqual(CadCommandNames.CloseDocument, executor.Commands[9]);
+                    Assert.AreEqual(CadCommandNames.OpenPart, executor.Commands[10]);
+                    Assert.AreEqual(CadCommandNames.GetRebuildErrors, executor.Commands[11]);
                     var observations = executor.Commands.Length;
                     File.AppendAllText(model.CanonicalPath, "tampered");
                     var changed = await verifier.VerifySavedAsync(ready.JobId, ready.RevisionId,
@@ -1033,6 +1034,8 @@ namespace SolidWorksCadAgent.UnitTests
                     minXmm = -10.0, maxXmm = 10.0, minYmm = 0.0, maxYmm = 5.0,
                     minZmm = -5.0, maxZmm = 5.0, sizeXmm = 20.0, sizeYmm = 5.0, sizeZmm = 10.0
                 }));
+                if (command.Command == CadCommandNames.GetPrismaticCutReadback)
+                    return Task.FromResult(CadCommandResult.Ok(new { cuts = new JArray() }));
                 if (command.Command == CadCommandNames.CloseDocument)
                     return Task.FromResult(CadCommandResult.Ok(new { documentTitle = "v2-owned.sldprt", closed = true }));
                 if (command.Command == CadCommandNames.OpenPart)

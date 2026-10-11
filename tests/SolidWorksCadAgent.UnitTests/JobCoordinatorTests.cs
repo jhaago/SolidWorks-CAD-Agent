@@ -1178,6 +1178,7 @@ namespace SolidWorksCadAgent.UnitTests
                 if (command == CadCommandNames.GetBodyCount) return CadCommandResult.Ok(new { BodyCount = 1 });
                 if (command == CadCommandNames.GetBoundingBox) return CadCommandResult.Ok(new { SizeXmm = 100.0, SizeYmm = 60.0, SizeZmm = 10.0 });
                 if (command == CadCommandNames.GetRebuildErrors) return CadCommandResult.Ok(new { HasErrors = false });
+                if (command == CadCommandNames.GetPrismaticCutReadback) return CadCommandResult.Ok(new { cuts = new JArray() });
                 return CadCommandResult.Ok(new { Completed = true });
             }
         }

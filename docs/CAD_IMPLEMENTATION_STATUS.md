@@ -57,6 +57,26 @@ Executed evidence:
   physical volume/bounds, clean rebuild, managed save/reopen, native line/arc sketch
   content and persistent sketch-reference resolution. V1 native prismatic
   regressions passed 5/5 (`v1-prismatic-regression.trx`).
+- Native cut-definition readback increment: the Bridge now reports native cut
+  end condition, forward depth, direction flags, direct parent profile sketch,
+  and local line/arc counts and bounds. The Host compares these observations with
+  expectations derived from the normalized persisted V2 plan and fails verification
+  closed on missing or mismatched data. Both pre-save and managed post-save/reopen
+  verification use this readback; simulated execution explicitly refuses the
+  native-only observation. The four-cut asymmetric plate (through-all hole and
+  three blind pockets) passed on SOLIDWORKS 2020 with all cut parameters, profile
+  bounds/topology and persistent sketch references checked after reopen:
+  `v2-cut-readback.trx` (1/1). A line/arc semicircle through-cut also passed native
+  readback and reopen checks: `v2-cut-contour-readback.trx` (1/1). The V1 rotated
+  slot through-cut plus blind hex-pocket save/reopen regression passed 1/1:
+  `v1-prismatic-readback-regression.trx`. Full unit suites passed 676/676 with
+  interop disabled and 676/676 with interop enabled in the implementation run;
+  focused reruns of the four changed unit-test classes passed 82/82 in each mode.
+  Current-session full-suite rerun reported four route/coordinator failures: one
+  expected HTTP 200 but received 409, and three approvals reported an unavailable
+  CAD control lease. The runner then stopped making progress before a suite summary
+  and was stopped; focused readback regressions passed in both modes. Native evidence is scenario-specific and does not establish
+  coverage for all profile types or future cut operations.
 - Multi-boss probe (11 October 2026): exploratory edge-joined rectangular boss
   jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
   measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's
@@ -87,8 +107,10 @@ Production bundle validation passed. ZIP SHA-256:
 The candidate contains the preserved local RemoteHttpServer diagnostic edit.
 No installed applications were replaced and no physical phone acceptance was run.
 Remaining priorities:
-- P1: add independent native sketch/feature parameter readback for internal cut
-  position, depth/direction and profile topology; volume/bounds cannot certify all geometry.
+- P1: compare each native profile segment with plan-derived geometry (line endpoints,
+  arc center/radius/endpoints and rotation). The Bridge returns these details, but
+  the current Host matcher checks entity counts and overall bounds; a changed contour
+  with the same topology and bounds could pass this part of verification.
 - P1: extend beyond the admitted single-loop contour to multiple boss features,
   supported edit operations and additional independently verified topology.
 - P2: migrate retired narrow persistence/boundary tests to the shared APIs, then

@@ -25,6 +25,87 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public void PrismaticAnalysisExposesOrderedCutReadbackExpectations()
+        {
+            var plan = Plan("AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 });
+            Group(plan, "AddCircle", new { centerXmm = -8.0, centerYmm = 12.0, diameterMm = 6.0 },
+                new { endCondition = "ThroughAll" });
+            Group(plan, "AddSlot", new { centerXmm = 17.0, centerYmm = -1.0, lengthMm = 12.0, widthMm = 4.0, angleDegrees = 23.0 },
+                new { endCondition = "Blind", depthMm = 4.0 });
+
+            var cuts = CadV2PrismaticGeometry.Analyze(plan).Cuts;
+            Assert.AreEqual(2, cuts.Count);
+            Assert.AreEqual("feature2", cuts[0].StepKey);
+            Assert.AreEqual("ThroughAll", cuts[0].EndCondition);
+            Assert.IsNull(cuts[0].DepthMm);
+            Assert.AreEqual(-11.0, cuts[0].MinXmm, 1e-9);
+            Assert.AreEqual(-5.0, cuts[0].MaxXmm, 1e-9);
+            Assert.AreEqual(0, cuts[0].LineCount);
+            Assert.AreEqual(1, cuts[0].ArcCount);
+            Assert.AreEqual("Blind", cuts[1].EndCondition);
+            Assert.AreEqual(4.0, cuts[1].DepthMm.Value, 1e-9);
+            Assert.AreEqual(2, cuts[1].LineCount);
+            Assert.AreEqual(2, cuts[1].ArcCount);
+            Assert.IsTrue(cuts[1].MinXmm < 12.0 && cuts[1].MaxXmm > 22.0,
+                "The rotated offset slot expectation must preserve asymmetric local bounds.");
+        }
+
+        [TestMethod]
+        public void NativeCutReadbackMustMatchCountParametersDirectionAndParentProfile()
+        {
+            var plan = Plan("AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 });
+            Group(plan, "AddCircle", new { centerXmm = -8.0, centerYmm = 12.0, diameterMm = 6.0 },
+                new { endCondition = "ThroughAll" });
+            Group(plan, "AddSlot", new { centerXmm = 17.0, centerYmm = -1.0, lengthMm = 12.0, widthMm = 4.0, angleDegrees = 23.0 },
+                new { endCondition = "Blind", depthMm = 4.0 });
+            var expected = CadV2PrismaticGeometry.Analyze(plan).Cuts;
+            double slotHalfX = 4.0 * Math.Cos(23.0 * Math.PI / 180.0) + 2.0;
+            double slotHalfY = 4.0 * Math.Sin(23.0 * Math.PI / 180.0) + 2.0;
+            var observed = new JArray
+            {
+                NativeCut("ThroughAll", null, -11, -5, 9, 15, 0, 1),
+                NativeCut("Blind", 4.0, 17.0 - slotHalfX, 17.0 + slotHalfX,
+                    -1.0 - slotHalfY, -1.0 + slotHalfY, 2, 2)
+            };
+            Assert.IsTrue(CadV2NativeCutReadbackMatcher.Matches(expected, observed, out var reason), reason);
+
+            var changedDepth = (JArray)observed.DeepClone();
+            changedDepth[1]["depthMm"] = 4.5;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, changedDepth, out _));
+            var shiftedSketch = (JArray)observed.DeepClone();
+            shiftedSketch[0]["profile"]["minXmm"] = -10.0;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, shiftedSketch, out _));
+            var wrongTopology = (JArray)observed.DeepClone();
+            wrongTopology[1]["profile"]["lineCount"] = 4;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongTopology, out _));
+            var wrongDirection = (JArray)observed.DeepClone();
+            wrongDirection[0]["reverseDirection"] = false;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongDirection, out _));
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, new JArray(), out _));
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, null, out _));
+        }
+
+        private static JObject NativeCut(string condition, double? depthMm, double minX, double maxX,
+            double minY, double maxY, int lines, int arcs) => new JObject
+        {
+            ["featureName"] = "Cut-Extrude",
+            ["endCondition"] = condition,
+            ["depthMm"] = depthMm.HasValue ? (JToken)new JValue(depthMm.Value) : JValue.CreateNull(),
+            ["reverseDirection"] = true,
+            ["flipSideToCut"] = false,
+            ["bothDirections"] = false,
+            ["profile"] = new JObject
+            {
+                ["parentRelationVerified"] = true,
+                ["sketchName"] = "Sketch",
+                ["lineCount"] = lines,
+                ["arcCount"] = arcs,
+                ["minXmm"] = minX, ["maxXmm"] = maxX,
+                ["minYmm"] = minY, ["maxYmm"] = maxY
+            }
+        };
+
+        [TestMethod]
         public void CircleBossUsesCircularAreaAndOffsetBounds()
         {
             var result = CadV2PrismaticGeometry.Analyze(Plan("AddCircle", new { centerXmm = 3, centerYmm = 4, diameterMm = 8 }));
