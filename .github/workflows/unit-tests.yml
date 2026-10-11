@@ -33,7 +33,16 @@ jobs:
 
       - name: Run unit tests
         shell: pwsh
-        run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --logger "trx;LogFileName=unit-tests.trx"
+        run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --blame --logger "trx;LogFileName=unit-tests.trx"
+
+      - name: Upload unit-test results and aborted-run sequence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-unit-test-results
+          path: tests/SolidWorksCadAgent.UnitTests/TestResults/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Restore integration-test dependencies
         shell: pwsh

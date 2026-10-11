@@ -71,6 +71,16 @@ dotnet test tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.Integra
 
 ## Remaining acceptance
 
+Hosted CI on the documentation-only followup also exposed an inconsistent
+WinForms test-host failure: one runner aborted with `Error creating window
+handle` after 695 passing tests, while another runner on the identical commit
+completed all 698 tests and package validation. A fresh local Debug compile-only
+run with runner/sequence diagnostics passed all 698 tests in 27 seconds and did
+not reproduce it. This is not evidence that a product defect was fixed. CI now
+collects test-run sequence information (`--blame`) and always uploads unit TRX
+and available sequence reports so a future abort retains the unfinished test
+identity. It does not collect process memory dumps.
+
 These results supersede the native-startup blocker in the current-state review
 for the tested session and named V2 cases. They do not establish production
 deployment, cloud planning, physical-phone pairing/photos/input, network
