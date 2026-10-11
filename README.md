@@ -2,9 +2,18 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## Current reviewed source
+
+`feature/current-state-reviewed` combines the latest CAD/backend work through
+`63100d4` with the modern desktop interface. It retains image/design intake,
+explicit completion, persisted history, connection recovery, and V2 plan review.
+See [the current review and verification report](docs/current-state-review-2026-10-11.md)
+for passing checks and the remaining native/device acceptance limits.
+After building, use `Launch CAD Agent.cmd`; its compiled bundle is also validated.
+
 ## CAD architecture and expansion blueprint
 
-The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md) for the repository review, architectural debt, testing hierarchy and future-agent rules, and [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md) for dependencies and the next ten increments. The current tree builds in both interop modes, while face-sketch and finishing work remains unregistered and unverified; the review distinguishes historical native evidence from these drafts.
+The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md), [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md), and the newest dated [implementation status](docs/CAD_IMPLEMENTATION_STATUS.md). Native evidence applies only to its recorded scenarios; current segment-level readback still requires live acceptance.
 
 ## PC V2 development
 

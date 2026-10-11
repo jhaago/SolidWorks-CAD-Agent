@@ -34,3 +34,6 @@ Thumbs.db
 
 # Generated release/test bundles
 artifacts/
+
+# Local build and validation logs
+*.log

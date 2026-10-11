@@ -7,6 +7,8 @@ namespace SolidWorksCadAgent.Desktop.Api
     {
         public string Status { get; set; }
         public int SchemaVersion { get; set; }
+        public string ExecutionMode { get; set; }
+        public string BridgeCapability { get; set; }
     }
 
     public sealed class SolidWorksRuntimeDto
@@ -46,5 +48,24 @@ namespace SolidWorksCadAgent.Desktop.Api
         public JToken Plan { get; set; }
         public int CommandCount { get; set; }
         public JArray Verifications { get; set; }
+        public JArray Commands { get; set; }
+        public JArray Revisions { get; set; }
+        public bool IsSimulated { get; set; }
+        public string OutputPath { get; set; }
+    }
+
+    public sealed class AgentSettingsDto
+    {
+        public string WorkspaceRoot { get; set; }
+        public bool AutoMode { get; set; }
+        public string OpenAiModel { get; set; }
+        public string SolidWorksExecutablePath { get; set; }
+        public string LoggingLevel { get; set; }
+        public string ExecutionMode { get; set; }
+    }
+
+    public sealed class CredentialStatusDto
+    {
+        public bool Configured { get; set; }
     }
 }
