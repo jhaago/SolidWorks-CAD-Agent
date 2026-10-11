@@ -33,6 +33,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             if (!request.Command.ExecutionId.HasValue || request.Command.ExecutionId.Value == Guid.Empty)
                 return new CadError { Code = "MISSING_EXECUTION_ID", Stage = "Validate",
                     Message = "A version-2 native feature requires the Host execution ID." };
+            if (request.Command.OutputEntityId.HasValue)
+                return new CadError { Code = "INVALID_EXECUTION_CONTEXT", Stage = "Validate",
+                    Message = "A feature consumer cannot declare an output entity ID." };
             return null;
         }
 

@@ -1,5 +1,68 @@
 # CAD implementation handoff
 
+## V2 expansion toward V1 capabilities - 11 October 2026
+
+Starting scope was the exact six-step centered rectangle boss. Implemented
+shared ordered persistence/dispatch, general sketch/feature binding, deterministic
+V1-plan adaptation for `V2:` requests, guarded native primitives/cuts, and general
+prismatic save/reopen verification and artifact authorization. No production CAD
+files were edited. Installed Windows applications remain the October 9 build.
+
+| Capability | Current V2 boundary |
+|---|---|
+| Rectangle, circular, rotated slot and regular-polygon bosses | One profile per Top Plane sketch; circle/slot/hexagon native acceptance and original rectangle regression passed |
+| Through holes and blind pockets | Separate exact sketch references, interior disjoint profiles in a rectangular base; circle/slot/rectangle/polygon native cuts passed |
+| Multiple sketches / variable-length plans | Ordered durable attempts and model revisions, independent persistent references; 10-step unit and native multi-cut jobs passed |
+| Lines / arcs | Native guarded mutation available; arbitrary line/arc contours remain review-only |
+| Clarification / approval | `V2:` uses the configured planner and its existing images/clarifications; Host scope context and reference adapter tested; explicit current-revision approval |
+| Save / reopen / artifact delivery | Final new path, staged save, physical volume/bounds, rebuild/body checks and exact file/hash provenance |
+
+Example in the existing desktop or paired-phone CAD input:
+`V2: Create a 120 x 60 x 10 mm rectangular plate on Top Plane with a 10 mm through hole at x=-40 mm, y=0 mm. Save as v2/plate-hole.sldprt.`
+The configured planner may ask for missing details; inspect and approve the plan.
+Provider calls were not made during this development verification. Native fixtures
+use deterministic planning and the real Host/Bridge/SOLIDWORKS execution path.
+
+Executed evidence:
+- Complete Release solution builds with interop disabled and enabled: 0 warnings/errors.
+- Full unit suite: 659 passed in each mode, 0 failed/skipped. Evidence:
+  `v2-expansion-final-disabled-unit.trx`, `v2-expansion-final-native-unit.trx`.
+- Expanded V2 native acceptance: offset circular, rotated slot and rotated hexagon
+  bosses and an 18-step three-cut part passed, including save/reopen, physical
+  volume/bounds, feature tree and resolving every sketch token after reopen.
+  `v2-prismatic-live-first.trx`. Top Plane handedness was independently confirmed.
+- Extended 22-step plate with a through hole and three blind pockets (slot,
+  rectangle, polygon): 1 passed (`v2-prismatic-four-cuts-live.trx`). Retained
+  artifact SHA-256 `8978E2C9E9C6B37C94E7AFBE224FCDC31FF12EC0BB65627E3634613E70846A54`.
+- V1 hidden-body, rotated slot/hexagon and conflicting-open-filename regressions:
+  5 passed (`v2-expansion-v1-regressions.trx`). Original approved V2 rectangle:
+  1 passed (`v2-expansion-rectangle-regression.trx`).
+- Independent code review found no critical/important production defect; its
+  persistence-fixture weakness was corrected to use an admitted rectangular
+  base and a shallower blind pocket. Shared old/new boundary concurrency test passes.
+
+Native runtime: SOLIDWORKS 2020 SP0, revision 28.0.0, installed English origin-plane
+names/template. Retained expanded artifacts and journal databases are in unique
+`C:/SolidWorks-CAD-Agent/Workspace/capability-tests/v2-*` directories. TRX files
+are under the UnitTests/IntegrationTests TestResults folders.
+
+Windows candidate: `artifacts/v2-prismatic-expansion-20261011/SolidWorksCadAgent-Windows-Test-Bundle.zip`.
+Production bundle validation passed. ZIP SHA-256:
+`E20A9E9136BB374323E0D75F46929DCD71B5393F01865DB69B743290AFF5F4BA`.
+The candidate contains the preserved local RemoteHttpServer diagnostic edit.
+No installed applications were replaced and no physical phone acceptance was run.
+Remaining priorities:
+- P1: add independent native sketch/feature parameter readback for internal cut
+  position, depth/direction and profile topology; volume/bounds cannot certify all geometry.
+- P1: close V1 parity gaps incrementally: Front/Right frame acceptance, arbitrary
+  closed line/arc profiles, multiple boss features and supported edit operations.
+- P2: migrate retired narrow persistence/boundary tests to the shared APIs, then
+  remove duplicated compatibility implementations; add driving dimensions/relations.
+- P2: install the candidate and run desktop/paired-phone request, approve, cancel,
+  renewal/reconnect and artifact-download acceptance. No physical Android test
+  or installed-service upgrade was performed during this increment.
+- Existing bundle-regression script restriction remains unresolved; production
+  bundle validation is a separate check and does not erase that limitation.
 ## SOLIDWORKS 2020 native acceptance and save-conflict correction - 10 October 2026
 
 The user authorized live testing and closure of open test documents. Six controlled native cases now pass on SOLIDWORKS 2020 SP0 (revision 28.0.0), using the reviewed Bridge and in-process Host components. Installed Host/Desktop/RemoteAgent binaries were not replaced.

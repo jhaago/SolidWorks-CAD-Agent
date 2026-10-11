@@ -362,3 +362,33 @@ Give each coding session: capability IDs and exact variants; current-code pointe
 A suitable Luna task is “implement the reviewed concentric-relation adapter with these entity IDs, state preconditions, native readback and negative fixtures.” “Add all sketch constraints and make references robust” is not a bounded task. New contract/reference/recovery semantics need architectural review before delegating implementation, regardless of model choice.
 
 Increment 1 simulation preflight reconciliation now includes mode-specific `SavePart`, `OpenPart`, and simulated feature/profile availability. The next dependency-ready roadmap area is increment 2: durable model/entity references and explicit profile selection. Before implementation, review and settle the logical-ID, persistent-token, document/configuration-context, copy/SaveAs-lineage, and invalidation semantics described there; these semantics affect persisted plans and require scenario-specific native acceptance. Do not start broad sketch constraints, patterns, or edit operations until that reference contract has an approved migration path.
+
+## V2 prismatic capability expansion — active 2026-10-10
+
+The next increment replaces the fixed six-step execution assumption with ordered,
+reference-bound mutations using the existing model registry and attempt journal.
+V1 stays available. No schema migration or second native execution architecture.
+
+Implementation and validation sequence:
+1. Extend guarded native V2 dispatch to V1 sketch primitives and fixed-direction
+   origin-plane cuts, reusing the existing SOLIDWORKS 2020 handlers.
+2. Add shared sequential post-NewPart persistence and dispatch, preserving exact
+   persisted-plan hashes, ownership, ordered Applied prerequisites, sketch tokens,
+   atomic model revisions, and non-replayable uncertain outcomes.
+3. Generalize Host binding, runner, save/reopen verification and artifact delivery.
+   Admission requires a supported analytical geometry contract: one Top Plane
+   rectangle/circle/slot/regular-polygon boss; optional disjoint interior cuts in
+   a rectangular base; one profile primitive per sketch; final non-overwriting save.
+   Freeform line/arc contours, additional boss unions, intersecting cuts and other
+   planes remain review-only until topology/frame verification is implemented.
+4. Provide an explicit `V2:` opt-in using the existing planner with a deterministic
+   V1-to-V2 reference adapter. Preserve clarification and explicit revision approval.
+5. Run unit regressions in both interop modes, then live SOLIDWORKS 2020 acceptance
+   for expanded profiles and cut/save/reopen flows. Record actual evidence below.
+
+Verification remains bounded: rebuild, body count, physical volume, bounds and
+saved-byte identity detect important failures but do not certify every internal
+face location or manufacturing tolerance. Native acceptance must inspect the
+new sketch/feature structure; no claim of full V1 parity before that evidence.
+
+Progress: shared pipeline, planner adapter, guarded Bridge and analytical verifier implemented. Both full unit modes pass (659 each); expanded SOLIDWORKS 2020 profiles/cuts, V1 regressions and original V2 rectangle pass. See CAD_IMPLEMENTATION_STATUS.md for final evidence and remaining parity/readback gates.

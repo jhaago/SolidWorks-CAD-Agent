@@ -25,6 +25,29 @@ namespace SolidWorksCadAgent.UnitTests
             "{\"stepKey\":\"boss\",\"command\":\"Extrude\",\"operationVersion\":2,\"parameters\":{\"depthMm\":5},\"inputs\":{\"profileSketch\":{\"kind\":\"Sketch\",\"outputKey\":\"profile\"}}}]}";
 
         [TestMethod]
+        public void RepeatedSketchAndCutBindTheirOwnPersistentProfile()
+        {
+            var candidate = JObject.Parse(ExtrudeCandidate);
+            var steps = (JArray)candidate["steps"];
+            steps.Add(JObject.Parse("{ 'stepKey':'hole-sketch','command':'CreateSketch','operationVersion':1,'parameters':{'plane':'Top Plane'},'outputKey':'hole' }"));
+            steps.Add(JObject.Parse("{ 'stepKey':'circle','command':'AddCircle','operationVersion':1,'parameters':{'centerXmm':0,'centerYmm':0,'diameterMm':4} }"));
+            steps.Add(JObject.Parse("{ 'stepKey':'hole-exit','command':'ExitSketch','operationVersion':1,'parameters':{} }"));
+            steps.Add(JObject.Parse("{ 'stepKey':'cut','command':'CutExtrude','operationVersion':2,'parameters':{'endCondition':'ThroughAll'},'inputs':{'profileSketch':{'kind':'Sketch','outputKey':'hole'}} }"));
+            steps.Add(JObject.Parse("{ 'stepKey':'save','command':'SavePart','operationVersion':1,'parameters':{'path':'hole.sldprt','allowOverwrite':false} }"));
+            var result = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                ExecutionMode.Real, new RegisteredExecutor { SupportsCut = true }, Guid.NewGuid(), Guid.NewGuid());
+            Assert.IsTrue(result.IsReady, string.Join(" ", result.Errors));
+            Assert.AreEqual(10, result.Requests.Count);
+            var first = result.Requests[1].Command.OutputEntityId;
+            var second = result.Requests[5].Command.OutputEntityId;
+            Assert.AreNotEqual(first, second);
+            Assert.AreEqual(second, result.Requests[6].TargetSketchEntityId);
+            Assert.AreEqual(second, result.Requests[7].TargetSketchEntityId);
+            Assert.AreEqual(second, result.Requests[8].ProfileSketchEntityId);
+            Assert.AreEqual(first, result.Requests[4].ProfileSketchEntityId);
+        }
+
+        [TestMethod]
         public void RealExtrudePlanPreflightBindsAllStepsWithoutDispatch()
         {
             var normalized = Normalize(ExtrudeCandidate);
@@ -127,7 +150,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public void FinalSaveScopeRejectsOffsetRectangleAndOtherSketchPlane()
+        public void FinalSaveSupportsOffsetRectangleButRejectsUnverifiedSketchPlane()
         {
             var candidate = JObject.Parse(ExtrudeCandidate);
             ((JArray)candidate["steps"]).Add(JObject.FromObject(new
@@ -139,8 +162,8 @@ namespace SolidWorksCadAgent.UnitTests
             steps[2]["parameters"]["centerXmm"] = 3;
             var offset = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
                 ExecutionMode.Real, new RegisteredExecutor(), Guid.NewGuid(), Guid.NewGuid());
-            Assert.IsFalse(offset.IsReady);
-            Assert.AreEqual(0, offset.Requests.Count);
+            Assert.IsTrue(offset.IsReady, string.Join(" ", offset.Errors));
+            Assert.AreEqual(6, offset.Requests.Count);
             steps[2]["parameters"]["centerXmm"] = 0;
             steps[1]["parameters"]["plane"] = "Front Plane";
             var plane = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
@@ -166,11 +189,12 @@ namespace SolidWorksCadAgent.UnitTests
         {
             public bool SupportsManagedReferences => true;
             public bool SupportsSave { get; set; } = true;
+            public bool SupportsCut { get; set; }
             public bool IsOperationRegistered(string commandName, int operationVersion) =>
                 operationVersion == 1 && (commandName == CadCommandNames.NewPart ||
-                    commandName == CadCommandNames.CreateSketch || commandName == CadCommandNames.AddRectangle ||
+                    commandName == CadCommandNames.CreateSketch || commandName == CadCommandNames.AddRectangle || commandName == CadCommandNames.AddCircle ||
                     commandName == CadCommandNames.ExitSketch || commandName == CadCommandNames.SavePart && SupportsSave) ||
-                operationVersion == 2 && commandName == CadCommandNames.Extrude;
+                operationVersion == 2 && (commandName == CadCommandNames.Extrude || commandName == CadCommandNames.CutExtrude && SupportsCut);
 
             public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken cancellationToken) =>
                 throw new AssertFailedException("Readiness must never execute a command.");

@@ -8,11 +8,20 @@ namespace SolidWorksCadAgent.AgentHost.Planning
 {
     /// <summary>
     /// Constructs one execution-only request from an immutable Host-normalized revision.
-    /// This does not approve or execute the plan; JobCoordinator's v2 gate remains closed.
+    /// Approval and whole-plan admission remain responsibilities of JobCoordinator.
     /// </summary>
     public static class CadPlanV2ExecutionBinder
     {
         public static CadVersionedCommandRequest BindExtrude(
+            string persistedPlanJson, string stepKey, Guid executionId, Guid managedModelId)
+        {
+            var request = BindFeature(persistedPlanJson, stepKey, executionId, managedModelId);
+            if (request.Command.Command != CadCommandNames.Extrude)
+                throw new ArgumentException("The selected step is not an Extrude operation.", nameof(stepKey));
+            return request;
+        }
+
+        public static CadVersionedCommandRequest BindFeature(
             string persistedPlanJson, string stepKey, Guid executionId, Guid managedModelId)
         {
             if (executionId == Guid.Empty || managedModelId == Guid.Empty)
@@ -27,13 +36,13 @@ namespace SolidWorksCadAgent.AgentHost.Planning
 
             var step = parsed.CandidateV2.Steps.SingleOrDefault(item =>
                 string.Equals(item.StepKey, stepKey, StringComparison.Ordinal));
-            if (step == null || step.Command != CadCommandNames.Extrude || step.OperationVersion != 2 ||
+            if (step == null || (step.Command != CadCommandNames.Extrude && step.Command != CadCommandNames.CutExtrude) || step.OperationVersion != 2 ||
                 step.Inputs?.ProfileSketch?.EntityId == null)
-                throw new ArgumentException("The selected step is not a normalized version-2 Extrude operation.", nameof(stepKey));
+                throw new ArgumentException("The selected step is not a normalized version-2 feature operation.", nameof(stepKey));
 
             return new CadVersionedCommandRequest(2, 2, new CadCommandEnvelope
             {
-                Command = CadCommandNames.Extrude,
+                Command = step.Command,
                 Parameters = (JObject)step.Parameters.DeepClone(),
                 ExecutionId = executionId,
                 ManagedModelId = managedModelId

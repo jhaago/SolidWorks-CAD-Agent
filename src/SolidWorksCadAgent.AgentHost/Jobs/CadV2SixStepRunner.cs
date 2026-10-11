@@ -16,7 +16,7 @@ using SolidWorksCadAgent.Core.Workspace;
 
 namespace SolidWorksCadAgent.AgentHost.Jobs
 {
-    /// <summary>Runs only the first approved, owned six-step v2 part through the durable mutation boundaries.</summary>
+    /// <summary>Runs an approved owned prismatic v2 part through ordered durable mutation boundaries.</summary>
     public sealed class CadV2SixStepRunner
     {
         private readonly SqliteJobRepository _repository;
@@ -44,19 +44,15 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var modelId = Guid.NewGuid();
             var readiness = CadPlanV2ExecutionReadiness.Assess(revision.PlanJson, ExecutionMode.Real,
                 _executor, jobId, modelId);
-            if (!readiness.IsReady || readiness.Requests.Count != 6)
-                throw new InvalidOperationException("The current plan is outside the exact six-step native scope: " +
+            if (!readiness.IsReady)
+                throw new InvalidOperationException("The current plan is outside the verified prismatic native scope: " +
                     string.Join(" ", readiness.Errors));
             var parsed = CadPlanDocumentReader.ReadPersisted(revision.PlanJson);
             var steps = parsed.CandidateV2.Steps;
-            var commands = new[] { CadCommandNames.NewPart, CadCommandNames.CreateSketch,
-                CadCommandNames.AddRectangle, CadCommandNames.ExitSketch, CadCommandNames.Extrude,
-                CadCommandNames.SavePart };
-            if (steps.Count != commands.Length || steps.Where((step, index) => step.Command != commands[index]).Any())
-                throw new InvalidOperationException("Only the exact six-step rectangle-boss plan can execute.");
-
+            var geometry = CadV2PrismaticGeometry.Analyze(parsed.CandidateV2);
+            if (geometry.SaveStep == null) throw new InvalidOperationException("A final non-overwriting save is required.");
             // Resolve both owned outputs before NewPart. The Save boundary repeats this check immediately before dispatch.
-            var path = _workspace.ResolveForWrite(steps[5].Parameters.Value<string>("path"), false);
+            var path = _workspace.ResolveForWrite(geometry.SaveStep.Parameters.Value<string>("path"), false);
             _workspace.ResolveForWrite(CadV2SavePath.StageFor(path, modelId), false);
             var versioned = _executor as IVersionedCadCommandExecutor;
             if (versioned == null) throw new InvalidOperationException("Versioned native dispatch is unavailable.");
@@ -68,7 +64,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 ConfigurationKey = "Pending", RegistryVersion = 1, CreatedUtc = now, UpdatedUtc = now
             };
 
-            for (var index = 0; index < commands.Length; index++)
+            for (var index = 0; index < steps.Count; index++)
             {
                 token.ThrowIfCancellationRequested();
                 var current = await _repository.GetSnapshotAsync(jobId, token).ConfigureAwait(false);
@@ -79,29 +75,16 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                     HashPlan(current.Revisions.Last().PlanJson), StringComparison.Ordinal))
                     throw new InvalidOperationException("The approved version-2 plan changed before the next native step.");
                 var step = steps[index];
-                CadV2MutationAttemptRecord attempt;
-                switch (index)
-                {
-                    case 0: attempt = await _repository.PrepareV2NewPartAttemptAsync(jobId, revisionId, step.StepKey, model, token).ConfigureAwait(false); break;
-                    case 1: attempt = await _repository.PrepareV2SketchAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false); break;
-                    case 2: attempt = await _repository.PrepareV2RectangleAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false); break;
-                    case 3: attempt = await _repository.PrepareV2ExitSketchAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false); break;
-                    case 4: attempt = await _repository.PrepareV2BossAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false); break;
-                    default: attempt = await _repository.PrepareV2SaveAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false); break;
-                }
+                var attempt = index == 0
+                    ? await _repository.PrepareV2NewPartAttemptAsync(jobId, revisionId, step.StepKey, model, token).ConfigureAwait(false)
+                    : await _repository.PrepareV2SequentialAttemptAsync(jobId, revisionId, step.StepKey, modelId, token).ConfigureAwait(false);
                 var started = DateTime.UtcNow;
                 CadCommandResult result;
                 try
                 {
-                    switch (index)
-                    {
-                        case 0: result = await new CadV2NewPartDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                        case 1: result = await new CadV2CreateSketchDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                        case 2: result = await new CadV2RectangleDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                        case 3: result = await new CadV2ExitSketchDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                        case 4: result = await new CadV2BossDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                        default: result = await new CadV2SaveDispatchBoundary(_repository, versioned, _workspace).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false); break;
-                    }
+                    result = index == 0
+                        ? await new CadV2NewPartDispatchBoundary(_repository, versioned).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false)
+                        : await new CadV2SequentialDispatchBoundary(_repository, _executor, _workspace).DispatchAndCommitAsync(jobId, revisionId, step.StepKey, attempt.Id, token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

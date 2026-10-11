@@ -32,6 +32,116 @@ namespace SolidWorksCadAgent.UnitTests
             "{\"stepKey\":\"save\",\"command\":\"SavePart\",\"operationVersion\":1,\"parameters\":{\"path\":\"v2-owned.sldprt\",\"allowOverwrite\":false}}]}";
 
         [TestMethod]
+        public async Task LegacyAndSequentialBoundariesCannotDispatchSamePreparedAttemptConcurrently()
+        {
+            await WithJobAsync(async (root, repository, jobId, revisionId) =>
+            {
+                var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var executor = new RecordingExecutor(repository, root)
+                {
+                    BeforeMutation = async command =>
+                    {
+                        if (command.Command != CadCommandNames.AddRectangle) return;
+                        entered.TrySetResult(true);
+                        await release.Task;
+                    }
+                };
+                var running = new CadV2SixStepRunner(repository, executor, new WorkspacePolicy(root))
+                    .RunAsync(jobId, revisionId, CancellationToken.None);
+                await entered.Task;
+                try
+                {
+                    var attempt = await repository.FindV2MutationAttemptAsync(jobId, revisionId, "rectangle", CancellationToken.None);
+                    var rejected = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                        new CadV2RectangleDispatchBoundary(repository, executor)
+                            .DispatchAndCommitAsync(jobId, revisionId, "rectangle", attempt.Id, CancellationToken.None));
+                    StringAssert.Contains(rejected.Message, "replay is blocked");
+                    Assert.AreEqual(3, executor.Mutations, "The competing entry point must never enter the executor.");
+                }
+                finally { release.TrySetResult(true); }
+                Assert.IsTrue(await running);
+                Assert.AreEqual(6, executor.Mutations);
+            });
+        }
+        [TestMethod]
+        public async Task ExplicitV2PrefixAdaptsLegacyPlannerWithoutLosingClarificationOrApproval()
+        {
+            await WithJobAsync(async (root, repository, _, __) =>
+            {
+                var planner = new LegacyCandidatePlanner { NeedsClarification = true };
+                var executor = new RecordingExecutor(repository, root);
+                var coordinator = new JobCoordinator(repository, planner, executor,
+                    new AgentSettings { WorkspaceRoot = root, ExecutionMode = ExecutionMode.Real });
+                var planned = await coordinator.CreateAndPlanAsync("V2: make the plate", CancellationToken.None);
+                Assert.AreEqual("make the plate", planner.LastPrompt);
+                StringAssert.Contains(planner.ExecutionContext, "Top Plane");
+                StringAssert.Contains(planner.ExecutionContext, "Do not approximate");
+                Assert.AreEqual(JobState.AwaitingClarification, planned.Job.State);
+                Assert.AreEqual(2, CadPlanDocumentReader.ReadPersisted(planned.Revisions.Single().PlanJson).Version);
+                Assert.IsTrue(planned.Job.RequiresExplicitApproval);
+                planner.NeedsClarification = false;
+                var clarified = await coordinator.RequestChangesAsync(planned.Job.Id, planned.Revisions.Single().Id,
+                    "Use a depth of 5 mm", CancellationToken.None);
+                Assert.AreEqual(JobState.AwaitingApproval, clarified.Job.State);
+                Assert.AreEqual(2, CadPlanDocumentReader.ReadPersisted(clarified.Revisions.Last().PlanJson).Version);
+                Assert.AreEqual("Use a depth of 5 mm", planner.LastClarification);
+                Assert.AreEqual(0, executor.Mutations);
+            });
+        }
+
+        private sealed class LegacyCandidatePlanner : ICadPlanningProvider
+        {
+            public bool NeedsClarification { get; set; }
+            public string LastPrompt { get; private set; }
+            public string LastClarification { get; private set; }
+            public string ExecutionContext { get; private set; }
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
+            {
+                LastPrompt = request.Prompt;
+                ExecutionContext = request.Clarifications.FirstOrDefault();
+                LastClarification = request.Clarifications.LastOrDefault();
+                var steps = (JArray)JObject.Parse(Candidate)["steps"];
+                return Task.FromResult(new CadPlanningResult
+                {
+                    Summary = "A plate", Assumptions = new System.Collections.Generic.List<string> { "Top plane" },
+                    Ambiguities = NeedsClarification ? new System.Collections.Generic.List<string> { "Confirm depth" } : new System.Collections.Generic.List<string>(),
+                    ProposedCommands = steps.Select(step => new CadCommandEnvelope
+                    { Command = step.Value<string>("command"), Parameters = (JObject)step["parameters"].DeepClone() }).ToList()
+                });
+            }
+        }
+        [TestMethod]
+        public async Task CoordinatorExecutesTenStepHoleWithDistinctSketchReferencesAndSavedEvidence()
+        {
+            await WithJobAsync(async (root, repository, _, __) =>
+            {
+                var candidate = JObject.Parse(Candidate);
+                var steps = (JArray)candidate["steps"];
+                var save = steps.Last;
+                save.Remove();
+                steps.Add(JObject.Parse("{ 'stepKey':'hole-sketch','command':'CreateSketch','operationVersion':1,'parameters':{'plane':'Top Plane'},'outputKey':'hole' }"));
+                steps.Add(JObject.Parse("{ 'stepKey':'circle','command':'AddCircle','operationVersion':1,'parameters':{'centerXmm':0,'centerYmm':0,'diameterMm':4} }"));
+                steps.Add(JObject.Parse("{ 'stepKey':'hole-exit','command':'ExitSketch','operationVersion':1,'parameters':{} }"));
+                steps.Add(JObject.Parse("{ 'stepKey':'cut','command':'CutExtrude','operationVersion':2,'parameters':{'endCondition':'ThroughAll'},'inputs':{'profileSketch':{'kind':'Sketch','outputKey':'hole'}} }"));
+                steps.Add(save);
+                var executor = new RecordingExecutor(repository, root) { VolumeMm3 = 937.1681469282041 };
+                var coordinator = new JobCoordinator(repository, new FixedVersionedPlanner(candidate.ToString()), executor,
+                    new AgentSettings { WorkspaceRoot = root, ExecutionMode = ExecutionMode.Real },
+                    () => CadNativeControlLease.TryAcquire(Path.Combine(root, "native.lock")));
+                var planned = await coordinator.CreateAndPlanAsync("Create plate with a 4 mm through hole", CancellationToken.None);
+                Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State, planned.Job.AmbiguityMessage);
+                Assert.AreEqual(0, executor.Mutations);
+                var completed = await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
+                Assert.AreEqual(JobState.ReadyForReview, completed.Job.State);
+                Assert.AreEqual(10, completed.Commands.Count);
+                Assert.IsTrue(completed.Verifications.Last().Passed);
+                Assert.AreEqual(937.1681469282041, JObject.Parse(completed.Verifications.Last().ExpectedJson).Value<double>("volumeMm3"), 0.000001);
+                Assert.IsTrue(File.Exists(completed.Job.OutputPath));
+            });
+        }
+
+        [TestMethod]
         public async Task RunnerCommitsSixOrderedStepsAndSavedVerification()
         {
             await WithJobAsync(async (root, repository, jobId, revisionId) =>
@@ -320,6 +430,8 @@ namespace SolidWorksCadAgent.UnitTests
             private readonly SqliteJobRepository _repository;
             private readonly string _root;
             public int Mutations { get; private set; }
+            public double VolumeMm3 { get; set; } = 1000.0;
+            public Func<CadCommandEnvelope, Task> BeforeMutation { get; set; }
             public string FailCommand { get; set; }
             public bool SupportsManagedReferences => true;
             public bool IsOperationRegistered(string name, int version) => true;
@@ -327,7 +439,7 @@ namespace SolidWorksCadAgent.UnitTests
             public Task<CadCommandResult> ExecuteAsync(CadCommandEnvelope command, CancellationToken token)
             {
                 if (command.Command == CadCommandNames.GetRebuildErrors) return Task.FromResult(CadCommandResult.Ok(new { hasErrors = false }));
-                if (command.Command == CadCommandNames.GetBodyCount) return Task.FromResult(CadCommandResult.Ok(new { bodyCount = 1, volumeMm3 = 1000.0 }));
+                if (command.Command == CadCommandNames.GetBodyCount) return Task.FromResult(CadCommandResult.Ok(new { bodyCount = 1, volumeMm3 = VolumeMm3 }));
                 if (command.Command == CadCommandNames.GetBoundingBox) return Task.FromResult(CadCommandResult.Ok(new
                 {
                     minXmm = -10.0, maxXmm = 10.0, minYmm = 0.0, maxYmm = 5.0,
@@ -344,6 +456,7 @@ namespace SolidWorksCadAgent.UnitTests
             {
                 Mutations++;
                 var command = request.Command;
+                if (BeforeMutation != null) await BeforeMutation(command);
                 if (command.Command == FailCommand) throw new InvalidOperationException("Fixture native failure.");
                 if (command.Command == CadCommandNames.NewPart) return CadCommandResult.Ok(new
                 {
@@ -361,6 +474,10 @@ namespace SolidWorksCadAgent.UnitTests
                 }
                 if (command.Command == CadCommandNames.AddRectangle)
                     return CadCommandResult.Ok(new { centerXmm = 0.0, centerYmm = 0.0, widthMm = 20.0, heightMm = 10.0 });
+                if (command.Command == CadCommandNames.AddCircle)
+                    return CadCommandResult.Ok(new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 4.0 });
+                if (command.Command == CadCommandNames.CutExtrude)
+                    return CadCommandResult.Ok(new { endCondition = "ThroughAll", featureName = "Cut-Extrude1" });
                 if (command.Command == CadCommandNames.ExitSketch) return CadCommandResult.Ok(new { exited = true });
                 if (command.Command == CadCommandNames.Extrude) return CadCommandResult.Ok(new { depthMm = 5.0, featureName = "Boss-Extrude1" });
                 if (command.Command == CadCommandNames.SavePart)

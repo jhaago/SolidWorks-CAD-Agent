@@ -17,7 +17,7 @@ using SolidWorksCadAgent.Core.Workspace;
 namespace SolidWorksCadAgent.AgentHost.Jobs
 {
     /// <summary>
-    /// Observes only the first Top Plane centre-rectangle boss after its exact Host commit,
+    /// Observes supported Top Plane prismatic geometry after its exact Host commit,
     /// either before save or after managed reopen. The result is not approval or a durable record.
     /// </summary>
     public sealed class CadV2RectangleBossVerifier
@@ -56,29 +56,31 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (revision == null || revision.Id != revisionId || revision.JobId != jobId)
                 throw new InvalidOperationException("Verification requires the current immutable job revision.");
             var parsed = CadPlanDocumentReader.ReadPersisted(revision.PlanJson);
-            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null ||
-                parsed.CandidateV2.Steps.Count < 5 || parsed.CandidateV2.Steps.Count > 6)
-                throw new InvalidOperationException("Only the normalized narrow rectangle-boss plan can be verified.");
+            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null)
+                throw new InvalidOperationException("Only a normalized v2 prismatic plan can be verified.");
+            CadV2PrismaticGeometry geometry;
+            try { geometry = CadV2PrismaticGeometry.Analyze(parsed.CandidateV2); }
+            catch (ArgumentException ex) { throw new InvalidOperationException("The plan is outside prismatic verification scope.", ex); }
             var steps = parsed.CandidateV2.Steps;
-            var sketch = steps[1]; var rectangle = steps[2]; var boss = steps[4];
-            if (steps[0].Command != CadCommandNames.NewPart || sketch.Command != CadCommandNames.CreateSketch ||
-                sketch.Parameters.Value<string>("plane") != "Top Plane" || !sketch.OutputEntityId.HasValue ||
-                rectangle.Command != CadCommandNames.AddRectangle || steps[3].Command != CadCommandNames.ExitSketch ||
-                boss.Command != CadCommandNames.Extrude || boss.OperationVersion != 2 ||
-                boss.Inputs?.ProfileSketch?.EntityId != sketch.OutputEntityId ||
-                steps.Count == 6 && steps[5].Command != CadCommandNames.SavePart)
-                throw new InvalidOperationException("The plan is outside the first Top Plane rectangle-boss verification scope.");
-            var width = rectangle.Parameters.Value<double>("widthMm");
-            var height = rectangle.Parameters.Value<double>("heightMm");
-            var depth = boss.Parameters.Value<double>("depthMm");
-
-            var attempt = await _repository.FindV2MutationAttemptAsync(jobId, revisionId, boss.StepKey, token).ConfigureAwait(false);
+            var planHash = HashPlan(revision.PlanJson);
+            var attempt = await _repository.FindV2MutationAttemptAsync(jobId, revisionId, geometry.LastFeatureStepKey, token).ConfigureAwait(false);
             var model = await _repository.GetModelAsync(modelId, token).ConfigureAwait(false);
             if (attempt == null || attempt.Status != CadV2MutationAttemptStatus.Applied || attempt.ModelId != modelId ||
-                attempt.OutputEntityId.HasValue || attempt.PlanSha256 != HashPlan(revision.PlanJson) ||
+                attempt.OutputEntityId.HasValue || attempt.PlanSha256 != planHash ||
                 model == null || model.DocumentKind != "Part" ||
                 await _repository.GetV2ModelOwnerAsync(modelId, token).ConfigureAwait(false) != jobId)
-                throw new InvalidOperationException("The owned part is not at its Applied boss revision.");
+                throw new InvalidOperationException("The owned part is not at its Applied final feature revision.");
+
+            // Geometry observation cannot substitute for committed provenance of earlier mutations.
+            foreach (var step in steps)
+            {
+                if (step == geometry.SaveStep && savedWorkspace == null) break;
+                var prior = await _repository.FindV2MutationAttemptAsync(jobId, revisionId, step.StepKey, token).ConfigureAwait(false);
+                if (prior == null || prior.Status != CadV2MutationAttemptStatus.Applied || prior.JobId != jobId ||
+                    prior.RevisionId != revisionId || prior.ModelId != modelId || prior.PlanSha256 != planHash ||
+                    prior.OutputEntityId != step.OutputEntityId)
+                    throw new InvalidOperationException("Every planned mutation must have matching Applied provenance before verification.");
+            }
 
             Guid expectedRevision;
             if (savedWorkspace == null)
@@ -86,21 +88,21 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 if (model.Status != CadModelIdentityStatus.ActiveUnsaved ||
                     model.CurrentModelRevisionId != attempt.ProspectiveModelRevisionId ||
                     !string.IsNullOrWhiteSpace(model.CanonicalPath))
-                    throw new InvalidOperationException("The owned unsaved part is not at its Applied boss revision.");
+                    throw new InvalidOperationException("The owned unsaved part is not at its Applied final feature revision.");
                 expectedRevision = attempt.ProspectiveModelRevisionId;
             }
             else
             {
-                if (steps.Count != 6 || model.Status != CadModelIdentityStatus.ActiveSaved ||
+                if (geometry.SaveStep == null || model.Status != CadModelIdentityStatus.ActiveSaved ||
                     string.IsNullOrWhiteSpace(model.CanonicalPath) || string.IsNullOrWhiteSpace(model.LastSavedSha256))
-                    throw new InvalidOperationException("An exact saved six-step owned part is required.");
-                var save = await _repository.FindV2MutationAttemptAsync(jobId, revisionId, steps[5].StepKey, token).ConfigureAwait(false);
+                    throw new InvalidOperationException("An exact saved owned prismatic part is required.");
+                var save = await _repository.FindV2MutationAttemptAsync(jobId, revisionId, geometry.SaveStep.StepKey, token).ConfigureAwait(false);
                 if (save == null || save.Status != CadV2MutationAttemptStatus.Applied || save.ModelId != modelId ||
                     save.PlanSha256 != attempt.PlanSha256 || save.OutputEntityId.HasValue ||
                     model.CurrentModelRevisionId != save.ProspectiveModelRevisionId)
                     throw new InvalidOperationException("The final save has no matching Applied attempt and state revision.");
                 string path;
-                try { path = savedWorkspace.ResolveForRead(steps[5].Parameters.Value<string>("path")); }
+                try { path = savedWorkspace.ResolveForRead(geometry.SaveStep.Parameters.Value<string>("path")); }
                 catch (Exception ex) when (ex is WorkspacePolicyException || ex is IOException || ex is UnauthorizedAccessException)
                 { return CadV2RectangleBossVerification.Fail("The saved artifact is unavailable inside the approved workspace."); }
                 if (!string.Equals(path, model.CanonicalPath, StringComparison.OrdinalIgnoreCase))
@@ -127,13 +129,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (bodies == null || !bodies.Success || bodies.Error != null || bodies.Data?["bodyCount"]?.Type != JTokenType.Integer ||
                 bodies.Data.Value<int>("bodyCount") != 1)
                 return CadV2RectangleBossVerification.Fail("The part does not contain exactly one observed solid body.");
-            var expectedVolume = width * height * depth;
+            var expectedVolume = geometry.VolumeMm3;
             if (!ReadFinite(bodies.Data, "volumeMm3", out var actualVolume) ||
                 Math.Abs(actualVolume - expectedVolume) > Math.Max(0.05, expectedVolume * 0.0001))
-                return CadV2RectangleBossVerification.Fail("The observed solid volume differs from the planned rectangular boss.");
+                return CadV2RectangleBossVerification.Fail("The observed solid volume differs from the planned prismatic part.");
             var bounds = await ObserveAsync(CadCommandNames.GetBoundingBox, jobId, modelId, token).ConfigureAwait(false);
-            if (bounds == null || !bounds.Success || bounds.Error != null || !MatchesBounds(bounds.Data, width, height, depth))
-                return CadV2RectangleBossVerification.Fail("The observed bounds differ from the planned centred rectangle boss: " +
+            if (bounds == null || !bounds.Success || bounds.Error != null || !MatchesBounds(bounds.Data, geometry))
+                return CadV2RectangleBossVerification.Fail("The observed bounds differ from the planned prismatic part: " +
                     (bounds?.Data?.ToString(Newtonsoft.Json.Formatting.None) ?? bounds?.Error?.Code ?? "no result"));
 
             var after = await _repository.GetModelAsync(modelId, token).ConfigureAwait(false);
@@ -155,21 +157,18 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 Command = command, Parameters = new JObject(), ExecutionId = jobId, ManagedModelId = modelId
             }, token);
 
-        private static bool MatchesBounds(JObject data, double width, double height, double depth)
+        private static bool MatchesBounds(JObject data, CadV2PrismaticGeometry geometry)
         {
             if (data == null) return false;
+            foreach (var expected in geometry.ExpectedBounds().Properties())
+                if (!ReadFinite(data, expected.Name, out var actual) || !Close(actual, expected.Value.Value<double>()))
+                    return false;
             if (!ReadFinite(data, "minXmm", out var minX) || !ReadFinite(data, "maxXmm", out var maxX) ||
                 !ReadFinite(data, "minYmm", out var minY) || !ReadFinite(data, "maxYmm", out var maxY) ||
                 !ReadFinite(data, "minZmm", out var minZ) || !ReadFinite(data, "maxZmm", out var maxZ) ||
                 !ReadFinite(data, "sizeXmm", out var sizeX) || !ReadFinite(data, "sizeYmm", out var sizeY) ||
                 !ReadFinite(data, "sizeZmm", out var sizeZ)) return false;
-            // SOLIDWORKS Top Plane sketch X maps to model X; sketch Y maps to model Z;
-            // the positive sketch normal for this supported part workflow maps to model +Y.
-            return Close(sizeX, width) && Close(sizeY, depth) && Close(sizeZ, height) &&
-                Close(minX, -width / 2.0) && Close(maxX, width / 2.0) &&
-                Close(minY, 0) && Close(maxY, depth) &&
-                Close(minZ, -height / 2.0) && Close(maxZ, height / 2.0) &&
-                Close(maxX - minX, sizeX) && Close(maxY - minY, sizeY) && Close(maxZ - minZ, sizeZ) &&
+            return Close(maxX - minX, sizeX) && Close(maxY - minY, sizeY) && Close(maxZ - minZ, sizeZ) &&
                 sizeX > 0 && sizeY > 0 && sizeZ > 0;
         }
 

@@ -27,7 +27,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         // Entries also fence ambiguous dispatches whose durable outcome could not be recorded.
         // Those entries intentionally survive for this process's lifetime; startup recovery
         // must close unresolved Prepared attempts before dispatch in a new Host process.
-        private static readonly ConcurrentDictionary<Guid, byte> GuardedAttempts = new ConcurrentDictionary<Guid, byte>();
+        private static readonly ConcurrentDictionary<Guid, byte> GuardedAttempts = CadV2DispatchFence.Attempts;
 
         public CadV2NewPartDispatchBoundary(
             SqliteJobRepository repository,

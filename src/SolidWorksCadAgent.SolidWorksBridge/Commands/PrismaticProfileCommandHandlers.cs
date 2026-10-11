@@ -46,9 +46,17 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 #if SOLIDWORKS_INTEROP
             var model = RequireDocument(application) as ModelDoc2;
             if (model == null) return Failure("NO_ACTIVE_DOCUMENT", "Execute", "An owned SOLIDWORKS document is required.");
+            return CreateOnActiveSketch(model, parameters, Primitives(parameters), token);
+#else
+            return InteropUnavailable();
+#endif
+        }, token);
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateOnActiveSketch(ModelDoc2 model, JObject parameters,
+            IReadOnlyList<CadCommandEnvelope> primitives, CancellationToken token)
+        {
             var manager = model.SketchManager;
             if (manager.ActiveSketch == null) return Failure("NO_ACTIVE_SKETCH", "Execute", "An owned sketch must be active before adding a profile.");
-            var primitives = Primitives(parameters);
             var previous = manager.AddToDB;
             try
             {
@@ -75,10 +83,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 return Ok(new { created = true, segmentCount = primitives.Count, geometry = parameters.DeepClone() });
             }
             finally { manager.AddToDB = previous; }
-#else
-            return InteropUnavailable();
+        }
 #endif
-        }, token);
         private static double Mm(JObject p, string name) => UnitConverter.MillimetresToMetres((double)p[name]);
     }
 }

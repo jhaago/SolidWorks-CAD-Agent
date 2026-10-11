@@ -162,15 +162,22 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             {
                 var request = new CadPlanningRequest
                 {
-                    Prompt = job.Prompt,
+                    Prompt = CadV2LegacyPlanAdapter.PlanningPrompt(job.Prompt),
                     Image = await _repository.GetInputImageAsync(job.Id, cancellationToken).ConfigureAwait(false)
                 };
+                if (CadV2LegacyPlanAdapter.IsRequest(job.Prompt))
+                    request.Clarifications = new[] { CadV2LegacyPlanAdapter.PlanningContext }.Concat(request.Clarifications).ToList();
                 if (CadV2RectangleBossPrompt.IsRequest(job.Prompt))
                     version2Plan = NormalizeVersion2Candidate(CadV2RectangleBossPrompt.BuildCandidate(job.Prompt));
                 else if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
                     version2Plan = NormalizeVersion2Candidate(await versionedProvider.PlanDocumentAsync(request, cancellationToken).ConfigureAwait(false));
                 else
+                {
                     plan = await _planningProvider.PlanAsync(request, cancellationToken).ConfigureAwait(false);
+                    if (CadV2LegacyPlanAdapter.IsRequest(job.Prompt) &&
+                        plan?.ProposedCommands?.Count > 0)
+                        version2Plan = NormalizeVersion2Candidate(CadV2LegacyPlanAdapter.BuildCandidate(plan));
+                }
             }
             catch
             {
@@ -275,12 +282,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                         "This version-2 candidate was not admitted to the narrow executable scope.");
                 var ready = CadPlanV2ExecutionReadiness.Assess(revision.PlanJson, _executionMode,
                     _executor, jobId, Guid.NewGuid());
-                if (!ready.IsReady || ready.Requests.Count != 6)
+                if (!ready.IsReady || parsedPlan.CandidateV2.Steps.Last().Command != CadCommandNames.SavePart)
                     throw new JobCoordinatorException("INVALID_PLAN", "The version-2 plan no longer passes native preflight: " + string.Join(" ", ready.Errors));
                 try
                 {
                     new WorkspacePolicy(_settings.WorkspaceRoot).ResolveForWrite(
-                        parsedPlan.CandidateV2.Steps[5].Parameters.Value<string>("path"), false);
+                        parsedPlan.CandidateV2.Steps.Last().Parameters.Value<string>("path"), false);
                 }
                 catch (WorkspacePolicyException ex)
                 { throw new JobCoordinatorException("INVALID_PLAN", "The version-2 output path is unavailable: " + ex.Message); }
@@ -358,7 +365,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             if (CadPlanDocumentReader.ReadPersisted(currentRevision.PlanJson).Version == 2 &&
                 WasV2Admitted(currentRevision))
                 throw new JobCoordinatorException("V2_CHANGE_UNSUPPORTED",
-                    "This narrow version-2 part cannot be revised in place. Submit a new explicit rectangle-boss request with a new output filename.");
+                    "This narrow version-2 part cannot be revised in place. Submit a new V2 request with a new output filename.");
             if (snapshot.Job.State != JobState.AwaitingApproval && snapshot.Job.State != JobState.AwaitingClarification && snapshot.Job.State != JobState.ReadyForReview)
                 throw new JobCoordinatorException("INVALID_JOB_STATE", "Changes require a pending plan or a result ready for review.");
 
@@ -398,14 +405,21 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             {
                 var request = new CadPlanningRequest
                 {
-                    Prompt = snapshot.Job.Prompt,
+                    Prompt = CadV2LegacyPlanAdapter.PlanningPrompt(snapshot.Job.Prompt),
                     Clarifications = clarifications,
                     Image = await _repository.GetInputImageAsync(jobId, cancellationToken).ConfigureAwait(false)
                 };
+                if (CadV2LegacyPlanAdapter.IsRequest(snapshot.Job.Prompt))
+                    request.Clarifications = new[] { CadV2LegacyPlanAdapter.PlanningContext }.Concat(request.Clarifications).ToList();
                 if (_planningProvider is IVersionedCadPlanningProvider versionedProvider)
                     version2Plan = NormalizeVersion2Candidate(await versionedProvider.PlanDocumentAsync(request, cancellationToken).ConfigureAwait(false));
                 else
+                {
                     plan = await _planningProvider.PlanAsync(request, cancellationToken).ConfigureAwait(false);
+                    if (CadV2LegacyPlanAdapter.IsRequest(snapshot.Job.Prompt) &&
+                        plan?.ProposedCommands?.Count > 0)
+                        version2Plan = NormalizeVersion2Candidate(CadV2LegacyPlanAdapter.BuildCandidate(plan));
+                }
             }
             catch
             {
@@ -835,13 +849,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var planJson = JsonConvert.SerializeObject(plan);
             var readiness = CadPlanV2ExecutionReadiness.Assess(planJson, _executionMode,
                 _executor, job.Id, Guid.NewGuid());
-            var admitted = plan.Ambiguities.Count == 0 && readiness.IsReady && readiness.Requests.Count == 6;
+            var admitted = plan.Ambiguities.Count == 0 && readiness.IsReady && plan.Steps.Last().Command == CadCommandNames.SavePart;
             if (admitted)
             {
                 try
                 {
                     new WorkspacePolicy(_settings.WorkspaceRoot).ResolveForWrite(
-                        plan.Steps[5].Parameters.Value<string>("path"), false);
+                        plan.Steps.Last().Parameters.Value<string>("path"), false);
                 }
                 catch (WorkspacePolicyException ex)
                 { plan.Ambiguities.Add("The version-2 output path is unavailable: " + ex.Message); admitted = false; }

@@ -17,9 +17,10 @@ using SolidWorksCadAgent.Core.Workspace;
 
 namespace SolidWorksCadAgent.AgentHost.Jobs
 {
-    /// <summary>Records one post-reopen check for the exact saved v2 rectangle-boss artifact.</summary>
+    /// <summary>Records one post-reopen check for the exact saved v2 prismatic artifact.</summary>
     public sealed class CadV2SavedVerificationRecorder
     {
+        // Historical persisted evidence key, retained for existing artifact authorization compatibility.
         public const string CheckName = "V2SavedRectangleBoss";
         private readonly SqliteJobRepository _repository;
         private readonly CadV2RectangleBossVerifier _verifier;
@@ -45,15 +46,19 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 model.Status != CadModelIdentityStatus.ActiveSaved)
                 throw new InvalidOperationException("The saved verification context changed before evidence could be recorded.");
             var parsed = CadPlanDocumentReader.ReadPersisted(revision.PlanJson);
-            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2?.Steps.Count != 6)
-                throw new InvalidOperationException("The saved verification requires the current six-step v2 plan.");
+            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null)
+                throw new InvalidOperationException("The saved verification requires the current normalized v2 plan.");
+            CadV2PrismaticGeometry geometry;
+            try { geometry = CadV2PrismaticGeometry.Analyze(parsed.CandidateV2); }
+            catch (ArgumentException ex) { throw new InvalidOperationException("The plan is outside prismatic verification scope.", ex); }
+            if (geometry.SaveStep == null) throw new InvalidOperationException("The prismatic plan has no final SavePart.");
 
             string plannedPath = null;
             string beforeOpenHash = null;
             string preflightFailure = null;
             try
             {
-                plannedPath = _workspace.ResolveForRead(parsed.CandidateV2.Steps[5].Parameters.Value<string>("path"));
+                plannedPath = _workspace.ResolveForRead(geometry.SaveStep.Parameters.Value<string>("path"));
                 if (!string.Equals(plannedPath, model.CanonicalPath, StringComparison.OrdinalIgnoreCase))
                     preflightFailure = "The registered saved path differs from the approved plan.";
                 else
@@ -106,7 +111,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             string currentHash = null;
             try
             {
-                var path = _workspace.ResolveForRead(parsed.CandidateV2.Steps[5].Parameters.Value<string>("path"));
+                var path = _workspace.ResolveForRead(geometry.SaveStep.Parameters.Value<string>("path"));
                 if (string.Equals(path, model.CanonicalPath, StringComparison.OrdinalIgnoreCase))
                 {
                     currentHash = HashFile(path);
@@ -122,15 +127,17 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 ["modelRevisionId"] = model.CurrentModelRevisionId.ToString("D"),
                 ["path"] = model.CanonicalPath,
                 ["sha256"] = model.LastSavedSha256,
-                ["widthMm"] = parsed.CandidateV2.Steps[2].Parameters.Value<double>("widthMm"),
-                ["heightMm"] = parsed.CandidateV2.Steps[2].Parameters.Value<double>("heightMm"),
-                ["depthMm"] = parsed.CandidateV2.Steps[4].Parameters.Value<double>("depthMm"),
-                ["volumeMm3"] = parsed.CandidateV2.Steps[2].Parameters.Value<double>("widthMm") *
-                    parsed.CandidateV2.Steps[2].Parameters.Value<double>("heightMm") *
-                    parsed.CandidateV2.Steps[4].Parameters.Value<double>("depthMm"),
+                ["depthMm"] = geometry.DepthMm,
+                ["volumeMm3"] = geometry.VolumeMm3,
+                ["bounds"] = geometry.ExpectedBounds(),
                 ["bodyCount"] = 1,
                 ["hasRebuildErrors"] = false
             };
+            if (parsed.CandidateV2.Steps[2].Command == CadCommandNames.AddRectangle)
+            {
+                expected["widthMm"] = parsed.CandidateV2.Steps[2].Parameters["widthMm"].DeepClone();
+                expected["heightMm"] = parsed.CandidateV2.Steps[2].Parameters["heightMm"].DeepClone();
+            }
             var actual = new JObject
             {
                 ["sha256"] = currentHash == null ? JValue.CreateNull() : new JValue(currentHash),

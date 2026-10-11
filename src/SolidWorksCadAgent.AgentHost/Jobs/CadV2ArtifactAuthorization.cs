@@ -12,7 +12,7 @@ using SolidWorksCadAgent.Core.Workspace;
 
 namespace SolidWorksCadAgent.AgentHost.Jobs
 {
-    /// <summary>Fail-closed delivery check for the first saved v2 rectangle-boss artifact.</summary>
+    /// <summary>Fail-closed delivery check for a saved v2 prismatic artifact.</summary>
     public static class CadV2ArtifactAuthorization
     {
         public static bool MatchesBytes(byte[] bytes, string expectedSha256)
@@ -42,14 +42,14 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 return false;
 
             var parsed = CadPlanDocumentReader.ReadPersisted(revision.PlanJson);
-            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2?.Steps.Count != 6 ||
-                parsed.CandidateV2.Steps[5].Command != CadCommandNames.SavePart ||
-                saveAttempt.StepKey != parsed.CandidateV2.Steps[5].StepKey)
+            if (!parsed.IsValid || parsed.Version != 2 || parsed.CandidateV2 == null)
                 return false;
 
             try
             {
-                var plannedPath = workspace.ResolveForRead(parsed.CandidateV2.Steps[5].Parameters.Value<string>("path"));
+                var geometry = CadV2PrismaticGeometry.Analyze(parsed.CandidateV2);
+                if (geometry.SaveStep == null || saveAttempt.StepKey != geometry.SaveStep.StepKey) return false;
+                var plannedPath = workspace.ResolveForRead(geometry.SaveStep.Parameters.Value<string>("path"));
                 var recordedPath = workspace.ResolveForRead(JObject.Parse(save.ResultJson).Value<string>("path"));
                 if (!string.Equals(plannedPath, canonicalPath, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(recordedPath, canonicalPath, StringComparison.OrdinalIgnoreCase) ||

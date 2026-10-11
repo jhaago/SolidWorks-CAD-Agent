@@ -105,7 +105,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new GetRebuildErrorsCommandHandler(_commandSession)
             }, new IVersionedCadCommandHandler[]
             {
-                new VersionTwoExtrudeCommandHandler(this)
+                new VersionTwoExtrudeCommandHandler(this),
+                new VersionTwoCutCommandHandler(this)
             });
         }
 
@@ -148,6 +149,10 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             finally { _commandGate.Release(); }
         }
 
+        private static bool IsSketchPrimitive(string command) =>
+            command == CadCommandNames.AddRectangle || command == CadCommandNames.AddCircle ||
+            command == CadCommandNames.AddSlot || command == CadCommandNames.AddRegularPolygon ||
+            command == CadCommandNames.AddLine || command == CadCommandNames.AddArc;
         public async Task<CadCommandResult> ExecuteVersionedAsync(
             CadVersionedCommandRequest request,
             CancellationToken cancellationToken)
@@ -161,16 +166,16 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             var legacyCommand = request?.Command?.Command;
             var versionOneFeature = legacyCommand == CadCommandNames.Extrude || legacyCommand == CadCommandNames.CutExtrude;
             if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
-                legacyCommand == CadCommandNames.AddRectangle)
+                IsSketchPrimitive(legacyCommand))
             {
                 if (!request.TargetSketchEntityId.HasValue || request.TargetSketchEntityId.Value == Guid.Empty)
-                    return IdentityFailure("MISSING_SKETCH_REFERENCE", "A version-2 rectangle requires the Host-bound active sketch ID.");
+                    return IdentityFailure("MISSING_SKETCH_REFERENCE", "A version-2 sketch primitive requires the Host-bound active sketch ID.");
                 if (!request.Command.ManagedModelId.HasValue || request.Command.ManagedModelId.Value == Guid.Empty)
-                    return IdentityFailure("MISSING_MODEL_REFERENCE", "A version-2 rectangle requires the Host-managed model ID.");
+                    return IdentityFailure("MISSING_MODEL_REFERENCE", "A version-2 sketch primitive requires the Host-managed model ID.");
                 if (!request.Command.ExecutionId.HasValue || request.Command.ExecutionId.Value == Guid.Empty)
-                    return IdentityFailure("MISSING_EXECUTION_ID", "A version-2 rectangle requires the Host execution ID.");
+                    return IdentityFailure("MISSING_EXECUTION_ID", "A version-2 sketch primitive requires the Host execution ID.");
                 if (request.ProfileSketchEntityId.HasValue || request.Command.OutputEntityId.HasValue)
-                    return IdentityFailure("INVALID_EXECUTION_CONTEXT", "A rectangle cannot bind a profile or output entity ID.");
+                    return IdentityFailure("INVALID_EXECUTION_CONTEXT", "A sketch primitive cannot bind a profile or output entity ID.");
                 var parameterError = CadPlanningCommandContract.Validate(request.Command);
                 if (parameterError != null)
                     return IdentityFailure("INVALID_PARAMETERS", parameterError);
@@ -180,9 +185,24 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                     native =>
                     {
 #if SOLIDWORKS_INTEROP
-                        return AddRectangleCommandHandler.CreateOnActiveSketch((ModelDoc2)native,
-                            parameters.Value<double>("centerXmm"), parameters.Value<double>("centerYmm"),
-                            parameters.Value<double>("widthMm"), parameters.Value<double>("heightMm"));
+                        var model = (ModelDoc2)native;
+                        switch (legacyCommand)
+                        {
+                            case CadCommandNames.AddRectangle:
+                                return AddRectangleCommandHandler.CreateOnActiveSketch(model,
+                                    parameters.Value<double>("centerXmm"), parameters.Value<double>("centerYmm"),
+                                    parameters.Value<double>("widthMm"), parameters.Value<double>("heightMm"));
+                            case CadCommandNames.AddCircle:
+                                return AddCircleCommandHandler.CreateOnActiveSketch(model,
+                                    parameters.Value<double>("centerXmm"), parameters.Value<double>("centerYmm"), parameters.Value<double>("diameterMm"));
+                            case CadCommandNames.AddLine: return AddLineCommandHandler.CreateOnActiveSketch(model, parameters);
+                            case CadCommandNames.AddArc: return AddArcCommandHandler.CreateOnActiveSketch(model, parameters);
+                            case CadCommandNames.AddSlot:
+                                return PrismaticProfileCommandHandlerBase.CreateOnActiveSketch(model, parameters, PrismaticProfileGeometry.Slot(parameters), cancellationToken);
+                            case CadCommandNames.AddRegularPolygon:
+                                return PrismaticProfileCommandHandlerBase.CreateOnActiveSketch(model, parameters, PrismaticProfileGeometry.RegularPolygon(parameters), cancellationToken);
+                            default: return IdentityFailure("UNSUPPORTED_COMMAND", "Unsupported sketch primitive.");
+                        }
 #else
                         return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "This build has no SOLIDWORKS interop libraries.");
 #endif

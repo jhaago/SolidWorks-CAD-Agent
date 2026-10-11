@@ -15,6 +15,11 @@ namespace SolidWorksCadAgent.AgentHost.Planning
     /// </summary>
     public static class CadPlanV2ExecutionReadiness
     {
+        internal static bool IsSketchPrimitive(string command) =>
+            command == CadCommandNames.AddRectangle || command == CadCommandNames.AddCircle ||
+            command == CadCommandNames.AddSlot || command == CadCommandNames.AddRegularPolygon ||
+            command == CadCommandNames.AddLine || command == CadCommandNames.AddArc;
+
         public static CadPlanV2ExecutionReadinessResult Assess(
             string persistedPlanJson, ExecutionMode mode, ICadCommandExecutor executor,
             Guid executionId, Guid managedModelId)
@@ -39,99 +44,51 @@ namespace SolidWorksCadAgent.AgentHost.Planning
 
             var requests = new List<CadVersionedCommandRequest>();
             var steps = parsed.CandidateV2.Steps;
+            Guid? activeSketch = null;
             for (var index = 0; index < steps.Count; index++)
             {
                 var step = steps[index];
                 var version = step.OperationVersion.Value;
-                if (step.Command == CadCommandNames.SavePart)
-                {
-                    if (index != 5 || steps.Count != 6 || version != 1 ||
-                        steps[0].Command != CadCommandNames.NewPart ||
-                        steps[1].Command != CadCommandNames.CreateSketch ||
-                        steps[2].Command != CadCommandNames.AddRectangle ||
-                        steps[3].Command != CadCommandNames.ExitSketch ||
-                        steps[4].Command != CadCommandNames.Extrude ||
-                        steps[4].OperationVersion != 2 ||
-                        steps[1].Parameters?.Value<string>("plane") != "Top Plane" ||
-                        steps[2].Parameters?.Value<double>("centerXmm") != 0.0 ||
-                        steps[2].Parameters?.Value<double>("centerYmm") != 0.0 ||
-                        string.IsNullOrWhiteSpace(step.Parameters?.Value<string>("path")) ||
-                        step.Parameters.Value<bool?>("allowOverwrite") != false)
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": SavePart preview supports only the final non-overwriting save of the first rectangle-boss plan.");
-                        continue;
-                    }
-                    if (!availability.IsOperationRegistered(step.Command, version))
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": No handler is registered for SavePart operation version 1.");
-                        continue;
-                    }
-                    requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
-                    {
-                        Command = step.Command, Parameters = (JObject)step.Parameters.DeepClone(),
-                        ExecutionId = executionId, ManagedModelId = managedModelId
-                    }));
-                    continue;
-                }
                 if (!availability.IsOperationRegistered(step.Command, version))
                 {
                     errors.Add("STEP_" + step.StepKey + ": No handler is registered for " + step.Command +
                         " operation version " + version + ".");
                     continue;
                 }
-
-                if (version == 2 && step.Command == CadCommandNames.Extrude)
+                if (step.Command == CadCommandNames.SavePart &&
+                    (index != steps.Count - 1 || step.Parameters.Value<bool?>("allowOverwrite") != false))
                 {
-                    try
-                    {
-                        requests.Add(CadPlanV2ExecutionBinder.BindExtrude(
-                            persistedPlanJson, step.StepKey, executionId, managedModelId));
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": Host reference binding failed: " + ex.Message);
-                    }
+                    errors.Add("STEP_" + step.StepKey + ": SavePart must be final and explicitly non-overwriting.");
                     continue;
                 }
-
+                if (version == 2 && (step.Command == CadCommandNames.Extrude || step.Command == CadCommandNames.CutExtrude))
+                {
+                    try { requests.Add(CadPlanV2ExecutionBinder.BindFeature(persistedPlanJson, step.StepKey, executionId, managedModelId)); }
+                    catch (ArgumentException ex) { errors.Add("STEP_" + step.StepKey + ": " + ex.Message); }
+                    continue;
+                }
                 if (version != 1)
                 {
-                    errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command +
-                        " operation version " + version + ".");
+                    errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command + ".");
                     continue;
                 }
-
-                Guid? targetSketchId = null;
-                if (step.Command == CadCommandNames.AddRectangle)
+                if (step.Command == CadCommandNames.CreateSketch) activeSketch = step.OutputEntityId;
+                var targetsSketch = IsSketchPrimitive(step.Command) || step.Command == CadCommandNames.ExitSketch;
+                if (targetsSketch && !activeSketch.HasValue)
                 {
-                    if (index != 2 || steps[1].Command != CadCommandNames.CreateSketch ||
-                        !steps[1].OutputEntityId.HasValue)
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": The Host can bind only a third-step rectangle to the preceding sketch.");
-                        continue;
-                    }
-                    targetSketchId = steps[1].OutputEntityId;
-                }
-                if (step.Command == CadCommandNames.ExitSketch)
-                {
-                    if (index != 3 || steps[1].Command != CadCommandNames.CreateSketch ||
-                        !steps[1].OutputEntityId.HasValue || steps[2].Command != CadCommandNames.AddRectangle)
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": The Host can bind only a fourth-step ExitSketch to the rectangle's sketch.");
-                        continue;
-                    }
-                    targetSketchId = steps[1].OutputEntityId;
+                    errors.Add("STEP_" + step.StepKey + ": No open managed sketch is available.");
+                    continue;
                 }
                 requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
                 {
-                    Command = step.Command,
-                    Parameters = (JObject)step.Parameters.DeepClone(),
-                    ExecutionId = executionId,
-                    ManagedModelId = managedModelId,
+                    Command = step.Command, Parameters = (JObject)step.Parameters.DeepClone(),
+                    ExecutionId = executionId, ManagedModelId = managedModelId,
                     OutputEntityId = step.Command == CadCommandNames.CreateSketch ? step.OutputEntityId : null
-                }, targetSketchEntityId: targetSketchId));
+                }, targetSketchEntityId: targetsSketch ? activeSketch : null));
+                if (step.Command == CadCommandNames.ExitSketch) activeSketch = null;
             }
-
+            try { CadV2PrismaticGeometry.Analyze(parsed.CandidateV2); }
+            catch (ArgumentException ex) { errors.Add("UNSUPPORTED_GEOMETRY: " + ex.Message); }
             return errors.Count == 0
                 ? CadPlanV2ExecutionReadinessResult.Ready(requests)
                 : CadPlanV2ExecutionReadinessResult.Fail(errors);

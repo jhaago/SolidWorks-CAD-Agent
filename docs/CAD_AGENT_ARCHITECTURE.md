@@ -1,5 +1,40 @@
 # SolidWorks CAD Agent architecture
 
+## V2 prismatic execution expansion - 11 October 2026
+
+This section supersedes the earlier exact-six-step scope. The Host now executes
+ordered normalized V2 plans using the existing registry and mutation journal.
+NewPart retains its identity-creation boundary; every later step uses a shared
+sequential persistence/dispatch boundary. Each dispatch checks all preceding
+Applied attempts, exact stored JSON hash, owning job/first revision, immediate
+model revision and each sketch's own native-reference creation revision. Old
+narrow boundaries and the new boundary share a process-wide attempt fence.
+No schema migration, replay of uncertain native outcomes or second COM scheduler
+is introduced. Existing narrow APIs remain compatibility entry points; migrate
+those tests and remove their duplicated transaction implementations incrementally.
+
+`V2:` opts the existing text/vision planner into a bounded execution context.
+A deterministic adapter assigns plan-local sketch keys and binds each feature to
+its producer; only the Host assigns execution/entity IDs. Clarification and
+explicit revision approval remain required. The old `V2 rectangle boss:` syntax
+continues to construct its deterministic candidate without a provider call.
+
+Admission supports one Top Plane rectangle/circle/slot/regular-polygon boss,
+followed by zero or more strictly interior disjoint cuts in a rectangular base.
+One profile primitive is allowed per sketch. Blind cuts must be shallower than
+the boss; ThroughAll cuts omit depth. SavePart is final and non-overwriting.
+Native guarded dispatch also covers line/arc mutations, but arbitrary contours
+are not admitted without topology verification. Other origin planes, multiple
+boss unions, overlapping cuts, face sketches and in-place edits remain gated.
+
+Expected geometry derives from independent analytical area/extents formulas.
+Before save and after managed reopen, the Host verifies clean rebuild, one solid,
+finite volume and bounds, model revision and exact saved-byte hash. Live 2020
+acceptance established Top Plane sketch X -> model X, sketch Y -> model -Z and
+positive extrusion -> model +Y. The historical verifier/runner names and saved
+check key are retained for compatibility. Volume/bounds are bounded checks;
+they do not certify internal face placement, driving dimensions or manufacturing
+tolerances. See the handoff for actual tests and remaining acceptance gates.
 ## Engineering review and corrections — 10 October 2026
 
 This section supersedes the October 6 current-state assertions below; the earlier assessment remains useful architectural history. Exact fresh build/test evidence is in [the implementation handoff](CAD_IMPLEMENTATION_STATUS.md).

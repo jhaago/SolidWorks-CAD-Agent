@@ -25,7 +25,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
     {
         private readonly SqliteJobRepository _repository;
         private readonly IVersionedCadCommandExecutor _executor;
-        private static readonly ConcurrentDictionary<Guid, byte> GuardedAttempts = new ConcurrentDictionary<Guid, byte>();
+        private static readonly ConcurrentDictionary<Guid, byte> GuardedAttempts = CadV2DispatchFence.Attempts;
 
         public CadV2BossDispatchBoundary(SqliteJobRepository repository, IVersionedCadCommandExecutor executor)
         {

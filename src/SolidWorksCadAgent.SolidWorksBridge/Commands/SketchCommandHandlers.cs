@@ -257,6 +257,15 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
 
+                return CreateOnActiveSketch(model, centerXmm, centerYmm, diameterMm);
+#else
+                return InteropUnavailable();
+#endif
+            }, cancellationToken);
+        }
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateOnActiveSketch(ModelDoc2 model, double centerXmm, double centerYmm, double diameterMm)
+        {
                 var sketchManager = model.SketchManager;
                 if (sketchManager.ActiveSketch == null)
                     return Failure("NO_ACTIVE_SKETCH", "Execute", "A sketch must be active before adding a circle.");
@@ -270,11 +279,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("CIRCLE_CREATION_FAILED", "Execute", "SOLIDWORKS did not create the circle.");
 
                 return Ok(new { centerXmm, centerYmm, diameterMm });
-#else
-                return InteropUnavailable();
-#endif
-            }, cancellationToken);
         }
+#endif
     }
 
     public sealed class ExitSketchCommandHandler : SolidWorksCommandHandlerBase

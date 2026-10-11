@@ -13,6 +13,48 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class SolidWorksBridgeCommandValidationTests
     {
+        [DataTestMethod]
+        [DataRow("AddCircle", "{centerXmm:0,centerYmm:0,diameterMm:10}")]
+        [DataRow("AddSlot", "{centerXmm:0,centerYmm:0,lengthMm:20,widthMm:8,angleDegrees:30}")]
+        [DataRow("AddRegularPolygon", "{centerXmm:0,centerYmm:0,sides:6,diameterMm:10,angleDegrees:0}")]
+        [DataRow("AddLine", "{startXmm:0,startYmm:0,endXmm:10,endYmm:0}")]
+        [DataRow("AddArc", "{centerXmm:0,centerYmm:0,startXmm:10,startYmm:0,endXmm:0,endYmm:10,clockwise:false}")]
+        public async Task VersionTwoSketchPrimitiveNeverFallsBackWithoutTarget(string name, string parameters)
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var command = new CadCommandEnvelope { Command = name, Parameters = JObject.Parse(parameters),
+                    ExecutionId = Guid.NewGuid(), ManagedModelId = Guid.NewGuid() };
+                var missing = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1, command), CancellationToken.None);
+                Assert.AreEqual("MISSING_SKETCH_REFERENCE", missing.Error?.Code);
+                var bound = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1, command,
+                    targetSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", bound.Error?.Code);
+                command.OutputEntityId = Guid.NewGuid();
+                var malformed = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 1, command,
+                    targetSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.AreEqual("INVALID_EXECUTION_CONTEXT", malformed.Error?.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow("Extrude", "{depthMm:5}")]
+        [DataRow("CutExtrude", "{endCondition:'ThroughAll'}")]
+        public async Task VersionTwoFeatureRejectsOutputIdentityBeforeNativeDispatch(string name, string parameters)
+        {
+            var session = new RecordingSession();
+            using (var bridge = new SolidWorksBridgeFacade(session))
+            {
+                var command = new CadCommandEnvelope { Command = name, Parameters = JObject.Parse(parameters),
+                    ExecutionId = Guid.NewGuid(), ManagedModelId = Guid.NewGuid(), OutputEntityId = Guid.NewGuid() };
+                var result = await bridge.ExecuteVersionedAsync(new CadVersionedCommandRequest(2, 2, command,
+                    profileSketchEntityId: Guid.NewGuid()), CancellationToken.None);
+                Assert.AreEqual("INVALID_EXECUTION_CONTEXT", result.Error?.Code);
+                Assert.AreEqual(0, session.ApplicationInvocationCount);
+            }
+        }
         [TestMethod]
         public async Task Rectangle_NonPositiveWidth_IsRejectedBeforeCom()
         {
@@ -308,7 +350,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public async Task VersionTwoCut_RemainsUnregisteredAndCannotUseLegacyHandler()
+        public async Task VersionTwoCut_RequiresManagedReferenceStoreAndCannotUseLegacyHandler()
         {
             var session = new RecordingSession();
             using (var bridge = new SolidWorksBridgeFacade(session))
@@ -317,12 +359,12 @@ namespace SolidWorksCadAgent.UnitTests
                     new CadCommandEnvelope
                     {
                         Command = CadCommandNames.CutExtrude,
-                        Parameters = JObject.FromObject(parameters), ManagedModelId = Guid.NewGuid()
+                        Parameters = JObject.FromObject(parameters), ManagedModelId = Guid.NewGuid(), ExecutionId = Guid.NewGuid()
                     }, Guid.NewGuid());
 
                 var valid = await bridge.ExecuteVersionedAsync(Request(new { endCondition = "ThroughAll" }), CancellationToken.None);
                 Assert.IsFalse(valid.Success);
-                Assert.AreEqual("UNSUPPORTED_OPERATION_VERSION", valid.Error.Code);
+                Assert.AreEqual("MODEL_REFERENCE_STORE_UNAVAILABLE", valid.Error.Code);
                 Assert.AreEqual(0, session.ApplicationInvocationCount);
             }
         }
