@@ -208,9 +208,12 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 var halfWidth = UnitConverter.MillimetresToMetres(widthMm) / 2.0;
                 var halfHeight = UnitConverter.MillimetresToMetres(heightMm) / 2.0;
 
-                var segments = sketchManager.CreateCenterRectangle(
-                    centerX,
-                    centerY,
+                // CreateCenterRectangle can snap the center to the origin/grid while
+                // leaving the supplied corner unchanged. Use explicit opposite
+                // corners so the native profile always matches the requested size.
+                var segments = sketchManager.CreateCornerRectangle(
+                    centerX - halfWidth,
+                    centerY - halfHeight,
                     0.0,
                     centerX + halfWidth,
                     centerY + halfHeight,

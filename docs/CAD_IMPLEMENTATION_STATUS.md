@@ -61,9 +61,17 @@ Executed evidence:
   jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
   measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's
   pre-save verifier blocked all three before save; the plans remain unsupported.
-  Verification diagnostics now include observed volume and bounds to aid a future
-  native sketch/feature investigation. Existing single-boss V2 suite still passed
-  9/9 and V1 prismatic regressions 5/5 after this diagnostic change.
+  A disposable sketch-level probe isolated the defect to the first rectangle:
+  `CreateCenterRectangle` snapped its center from (1,2) mm to the origin but kept
+  the opposite corner, producing [-11,11] × [-7,7] and 1,540 mm³ for that boss.
+  `AddRectangleCommandHandler` now constructs the same requested center/size from
+  explicit min/max corners with `CreateCornerRectangle`. The native regression
+  checks four-edge bounds after each boss and confirms one body at 2,000 mm³.
+  The probe passes 1/1 on SOLIDWORKS 2020. Production V2 multi-boss admission
+  remains closed. Verification diagnostics continue to include observed volume
+  and bounds. The V2 end-to-end native rerun was blocked by the unavailable CAD
+  control lease; the V1 suite could not restore an original document because no
+  document was open at suite start.
 - Independent code review found no critical/important production defect; its
   persistence-fixture weakness was corrected to use an admitted rectangular
   base and a shallower blind pocket. Shared old/new boundary concurrency test passes.

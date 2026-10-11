@@ -750,7 +750,9 @@ namespace SolidWorksCadAgent.UnitTests
                     ready.JobId, ready.RevisionId, ready.Model.ModelId, CancellationToken.None);
                 Assert.IsFalse(failed.Passed);
                 Assert.IsTrue(failed.Reason.Contains("volume"));
-                Assert.AreEqual(2, hollow.Commands.Length, "Wrong volume must stop before bounds inspection.");
+                Assert.IsTrue(failed.Reason.Contains("observed bounds"), "A volume mismatch should retain the available bounds for diagnosis.");
+                CollectionAssert.AreEqual(new[] { CadCommandNames.GetRebuildErrors, CadCommandNames.GetBodyCount,
+                    CadCommandNames.GetBoundingBox }, hollow.Commands);
                 var rebuild = new RecordingInspectionExecutor(_ => CadCommandResult.Ok(new { hasErrors = true }));
                 failed = await new CadV2RectangleBossVerifier(repository, rebuild).VerifyAsync(
                     ready.JobId, ready.RevisionId, ready.Model.ModelId, CancellationToken.None);
