@@ -138,6 +138,27 @@ Remaining priorities:
   or installed-service upgrade was performed during this increment.
 - Existing bundle-regression script restriction remains unresolved; production
   bundle validation is a separate check and does not erase that limitation.
+
+## SOLIDWORKS launch failure diagnostics - 11 October 2026
+
+`SolidWorksSession.LaunchAsync` now observes the process it starts while waiting
+for COM registration and startup readiness. If that process exits first, the
+launch result reports its exit code immediately; it does not terminate or retry
+the process. This improves diagnostics for startup crashes but does not repair
+SOLIDWORKS startup.
+
+Verification:
+- Focused launch-helper tests passed 9/9 with interop disabled.
+- Full unit suites passed 677/678 with interop disabled and enabled. The sole
+  failure in each mode remains
+  `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames`,
+  where this environment throws `PlatformNotSupportedException` constructing
+  `HttpListener`.
+- SOLIDWORKS was not launched again. Available WER history contains older
+  SOLIDWORKS-related records, including a September 22 crash involving
+  `NETAPI32.dll`; those records do not establish the cause of the October 10
+  breakpoint exception. Native segment-matcher acceptance remains unverified.
+
 ## SOLIDWORKS 2020 native acceptance and save-conflict correction - 10 October 2026
 
 The user authorized live testing and closure of open test documents. Six controlled native cases now pass on SOLIDWORKS 2020 SP0 (revision 28.0.0), using the reviewed Bridge and in-process Host components. Installed Host/Desktop/RemoteAgent binaries were not replaced.

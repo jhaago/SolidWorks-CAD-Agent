@@ -40,6 +40,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             ThrowIfDisposed();
 #if SOLIDWORKS_INTEROP
             await _launchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Process launchedProcess = null;
             try
             {
                 ThrowIfDisposed();
@@ -49,12 +50,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                     () =>
                     {
                         var path = SolidWorksNormalLaunch.ResolveExecutable(_executablePath);
-                        using (var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, Arguments = "" }))
-                        {
-                            if (process == null) throw new InvalidOperationException("SOLIDWORKS process could not be started.");
-                        }
+                        launchedProcess = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, Arguments = "" });
+                        if (launchedProcess == null) throw new InvalidOperationException("SOLIDWORKS process could not be started.");
                     },
-                    token => Task.Delay(500, token), 120, cancellationToken).ConfigureAwait(false);
+                    token => Task.Delay(500, token), 120, cancellationToken,
+                    launchProcessExitCode: () => launchedProcess != null && launchedProcess.HasExited
+                        ? (int?)launchedProcess.ExitCode
+                        : null).ConfigureAwait(false);
                 return result.IsConnected
                     ? await _dispatcher.InvokeAsync(EnsureVisibleAndBuildStatus, cancellationToken).ConfigureAwait(false)
                     : result;
@@ -64,7 +66,11 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
             {
                 return await _dispatcher.InvokeAsync(() => BuildDisconnectedStatus("Unable to launch SOLIDWORKS: " + ex.Message), cancellationToken).ConfigureAwait(false);
             }
-            finally { _launchGate.Release(); }
+            finally
+            {
+                launchedProcess?.Dispose();
+                _launchGate.Release();
+            }
 #else
             return await _dispatcher.InvokeAsync(LaunchCore, cancellationToken).ConfigureAwait(false);
 #endif
