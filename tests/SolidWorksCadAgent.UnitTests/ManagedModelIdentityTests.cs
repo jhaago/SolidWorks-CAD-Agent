@@ -14,6 +14,7 @@ using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Commands;
+using SolidWorksCadAgent.Core.Remote;
 
 namespace SolidWorksCadAgent.UnitTests
 {
@@ -57,7 +58,8 @@ namespace SolidWorksCadAgent.UnitTests
                     await repository.InitializeAsync();
                     var executor = new IdentityProbeExecutor(repository, workspace);
                     var coordinator = new JobCoordinator(repository, new FixedProvider(CompletePartPlan(true)), executor,
-                        new AgentSettings { WorkspaceRoot = workspace, AutoMode = false, ExecutionMode = ExecutionMode.Real });
+                        new AgentSettings { WorkspaceRoot = workspace, AutoMode = false, ExecutionMode = ExecutionMode.Real },
+                        TestLeaseFactory(workspace));
 
                     var planned = await coordinator.CreateAndPlanAsync("Create and save a managed test part", CancellationToken.None);
                     Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
@@ -131,7 +133,8 @@ namespace SolidWorksCadAgent.UnitTests
                     await repository.InitializeAsync();
                     var executor = new IdentityProbeExecutor(repository, workspace, CadCommandNames.CreateSketch);
                     var coordinator = new JobCoordinator(repository, new FixedProvider(CompletePartPlan(false)), executor,
-                        new AgentSettings { WorkspaceRoot = workspace, AutoMode = false, ExecutionMode = ExecutionMode.Real });
+                        new AgentSettings { WorkspaceRoot = workspace, AutoMode = false, ExecutionMode = ExecutionMode.Real },
+                        TestLeaseFactory(workspace));
 
                     var planned = await coordinator.CreateAndPlanAsync("Create a managed test part", CancellationToken.None);
                     var failed = await coordinator.ApproveAndExecuteAsync(planned.Job.Id, planned.Revisions.Single().Id, CancellationToken.None);
@@ -169,6 +172,12 @@ namespace SolidWorksCadAgent.UnitTests
         };
 
         private static string TempDatabasePath() => Path.Combine(Path.GetTempPath(), "SolidWorks-ManagedIdentity-" + Guid.NewGuid().ToString("N") + ".db");
+
+        private static Func<CadNativeControlLease> TestLeaseFactory(string workspace)
+        {
+            var path = Path.Combine(workspace, "cad-native-control.lock");
+            return () => CadNativeControlLease.TryAcquire(path);
+        }
 
         private static long CountRows(string databasePath, string table)
         {

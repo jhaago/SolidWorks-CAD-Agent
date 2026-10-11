@@ -85,13 +85,17 @@ Executed evidence:
   only its unique `jobs.sqlite` test metadata under the capability-test workspace;
   no model was created. The four-cut case was not retried. The exact segment
   matcher therefore still needs live 2020 acceptance after startup/COM recovery.
-  The current full interop-disabled unit run recorded 351 passed and 4 failed
-  (one route expected 200 but received 409; three coordinator approvals reported
-  an unavailable CAD control lease), then the test host was aborted after its
-  2-minute hang detector expired while running
-  `ApproveAndExecuteAsync_TwoJobs_NeverExecuteCadCommandsConcurrently`. The four
-  readback-focused test classes passed in both interop modes; no current full
-  interop-enabled suite result is available.
+  Full unit runs now complete in both compile modes: 676/677 passed with interop
+  disabled and 676/677 with interop enabled, with no skips. The single failure in
+  each run is `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames`;
+  this environment throws `PlatformNotSupportedException` from `HttpListener`.
+  Earlier route/coordinator failures and a stalled concurrency test came from unit
+  fixtures acquiring the machine-wide CAD lease. The affected fake-executor tests
+  now use isolated per-test lease paths, while the route-only fake executor is
+  explicitly configured for Simulation. No production lease behavior changed.
+  TRX evidence: `segment-readback-full-disabled-final.trx` and
+  `segment-readback-full-native-enabled-final2.trx`. The focused readback groups
+  also passed 83/83 in each mode.
 - Multi-boss probe (11 October 2026): exploratory edge-joined rectangular boss
   jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
   measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's

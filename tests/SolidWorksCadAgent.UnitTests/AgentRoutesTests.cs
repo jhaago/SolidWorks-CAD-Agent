@@ -502,7 +502,7 @@ namespace SolidWorksCadAgent.UnitTests
                 _repository,
                 new DeterministicCadPlanningProvider(),
                 executor,
-                new AgentSettings { AutoMode = false });
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Simulation });
             var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
 
             var create = await routes.HandleAsync(

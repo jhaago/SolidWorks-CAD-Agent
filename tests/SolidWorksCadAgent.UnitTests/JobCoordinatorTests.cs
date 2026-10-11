@@ -149,7 +149,8 @@ namespace SolidWorksCadAgent.UnitTests
             var executor = new RecordingSuccessfulExecutor();
             var plan = Plan(Command(CadCommandNames.OpenPart, new { path = "phone-tests/Existing.sldprt" }));
             var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
-                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = Path.GetTempPath() });
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = Path.GetTempPath() },
+                CreateTestLeaseFactory());
 
             var planned = await coordinator.CreateAndPlanAsync("Open the existing part", CancellationToken.None);
 
@@ -729,7 +730,8 @@ namespace SolidWorksCadAgent.UnitTests
                 }
             };
             var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(plan), executor,
-                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace },
+                CreateTestLeaseFactory());
 
             var planned = await coordinator.CreateAndPlanAsync("Create a circular boss", CancellationToken.None);
             Assert.AreEqual(JobState.AwaitingApproval, planned.Job.State);
@@ -861,7 +863,8 @@ namespace SolidWorksCadAgent.UnitTests
                 _repository,
                 new DeterministicCadPlanningProvider(),
                 executor,
-                new AgentSettings { AutoMode = false });
+                new AgentSettings { AutoMode = false },
+                CreateTestLeaseFactory());
             var first = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
             var second = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
 
@@ -881,7 +884,14 @@ namespace SolidWorksCadAgent.UnitTests
                 _repository,
                 new DeterministicCadPlanningProvider(),
                 executor,
-                new AgentSettings { AutoMode = autoMode });
+                new AgentSettings { AutoMode = autoMode },
+                CreateTestLeaseFactory());
+        }
+
+        private Func<CadNativeControlLease> CreateTestLeaseFactory()
+        {
+            var path = Path.Combine(_workspace, "cad-native-control.lock");
+            return () => CadNativeControlLease.TryAcquire(path);
         }
 
         private static void TryDelete(string path)
@@ -903,7 +913,8 @@ namespace SolidWorksCadAgent.UnitTests
             savedPlan.ProposedCommands.Add(new CadCommandEnvelope { Command = CadCommandNames.SavePart,
                 Parameters = JObject.FromObject(new { path = "phone-tests/Plate.sldprt", allowOverwrite = false }) });
             var coordinator = new JobCoordinator(_repository, new FixedPlanningProvider(savedPlan), executor,
-                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace });
+                new AgentSettings { ExecutionMode = ExecutionMode.Real, WorkspaceRoot = _workspace },
+                CreateTestLeaseFactory());
             var first = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None);
             var built = await coordinator.ApproveAndExecuteAsync(first.Job.Id, first.Revisions.Single().Id, CancellationToken.None);
             var count = executor.CallCount;
