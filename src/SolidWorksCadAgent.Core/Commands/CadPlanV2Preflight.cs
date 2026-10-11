@@ -138,7 +138,7 @@ namespace SolidWorksCadAgent.Core.Commands
                         activeSketchKey = step.OutputKey;
                     }
                 }
-                else if (IsProfilePrimitive(step.Command))
+                else if (IsProfilePrimitive(step.Command) || step.Command == CadCommandNames.AddLine || step.Command == CadCommandNames.AddArc)
                 {
                     if (activeSketchKey == null)
                         errors.Add("STEP_" + index + ": Profile geometry requires an open sketch step.");

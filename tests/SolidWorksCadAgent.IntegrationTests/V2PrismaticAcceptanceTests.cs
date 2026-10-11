@@ -60,6 +60,36 @@ namespace SolidWorksCadAgent.IntegrationTests
                 new[] { -halfX, halfX, 0.0, 5.0, -8.0, 8.0 }, 1);
         }
 
+        [TestMethod, Timeout(240000)]
+        public Task FrontPlaneSemicircleBoss_ApprovedJobVerifiesNativeContourAfterReopen()
+        {
+            var plan = NewPlan();
+            ContourGroup(plan, new[]
+            {
+                Step("line1", "AddLine", new { startXmm = 17.0, startYmm = 11.0, endXmm = -3.0, endYmm = 11.0 }),
+                Step("arc1", "AddArc", new { centerXmm = 7.0, centerYmm = 11.0, startXmm = -3.0, startYmm = 11.0,
+                    endXmm = 17.0, endYmm = 11.0, clockwise = true })
+            }, new { depthMm = 5.0 }, "Front Plane");
+            return RunAsync("front-semicircle", plan, 250 * Math.PI,
+                new[] { -3.0, 17.0, 11.0, 21.0, 0.0, 5.0 }, 1, "Front Plane", false, true);
+        }
+
+        [TestMethod, Timeout(300000)]
+        public Task RectangularPlateWithSemicircleCut_ApprovedJobVerifiesContourAndReopens()
+        {
+            var plan = NewPlan();
+            Group(plan, "AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 },
+                new { depthMm = 13.0 });
+            ContourGroup(plan, new[]
+            {
+                Step("line2", "AddLine", new { startXmm = -5.0, startYmm = 12.0, endXmm = -11.0, endYmm = 12.0 }),
+                Step("arc2", "AddArc", new { centerXmm = -8.0, centerYmm = 12.0, startXmm = -11.0, startYmm = 12.0,
+                    endXmm = -5.0, endYmm = 12.0, clockwise = true })
+            }, new { endCondition = "ThroughAll" });
+            return RunAsync("semicircle-cut", plan, 31200 - 58.5 * Math.PI,
+                new[] { -23.0, 37.0, 0.0, 13.0, -31.0, 9.0 }, 2, "Top Plane", false, true);
+        }
+
         [TestMethod, Timeout(300000)]
         public Task RectangularPlateWithFourDisjointCuts_ApprovedJobVerifiesThroughAndBlindDepthsAfterReopen()
         {
@@ -92,7 +122,7 @@ namespace SolidWorksCadAgent.IntegrationTests
         }
 
         private async Task RunAsync(string name, JObject candidate, double expectedVolume, double[] bounds, int groups,
-            string plane = "Top Plane", bool assertAsymmetricPlaneSketches = false)
+            string plane = "Top Plane", bool assertAsymmetricPlaneSketches = false, bool assertClosedContourSketch = false)
         {
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS") != "1")
                 Assert.Inconclusive("Set SOLIDWORKS_RUN_REFERENCE_TESTS=1 and SOLIDWORKS_EXPECTED_YEAR=2020 for native acceptance.");
@@ -129,7 +159,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                     var detail = string.Join(System.Environment.NewLine, result.Commands.Select(c => c.CommandName + ": " + c.ResultJson));
                     TestContext?.WriteLine("Workspace: " + workspace + System.Environment.NewLine + detail);
                     Assert.AreEqual(JobState.ReadyForReview, result.Job.State, detail);
-                    Assert.AreEqual(2 + groups * 4, result.Commands.Count);
+                    Assert.AreEqual(((JArray)candidate["steps"]).Count, result.Commands.Count);
                     Assert.IsTrue(result.Commands.All(c => c.Success), detail);
                     CollectionAssert.AreEqual(((JArray)candidate["steps"]).Select(s => (string)s["command"]).ToArray(),
                         result.Commands.Select(c => c.CommandName).ToArray());
@@ -192,6 +222,23 @@ namespace SolidWorksCadAgent.IntegrationTests
                                 return false;
 #endif
                             }, CancellationToken.None);
+                        if (assertClosedContourSketch && (string)sketch.OutputKey == "profile" + (groups == 1 ? "1" : "2"))
+                            await session.InvokeWithApplicationAsync(app =>
+                            {
+#if SOLIDWORKS_INTEROP
+                                var native = (ModelDoc2)((SldWorks)app).ActiveDoc;
+                                var nativeStatus = -1;
+                                var objectRef = native.Extension.GetObjectByPersistReference3(binding.NativeReferenceBytes, out nativeStatus);
+                                Assert.AreEqual((int)swPersistReferencedObjectStates_e.swPersistReferencedObject_Ok, nativeStatus);
+                                var nativeSketch = objectRef as Sketch ?? (objectRef as Feature)?.GetSpecificFeature2() as Sketch;
+                                Assert.IsNotNull(nativeSketch, "The persisted contour sketch reference must resolve after reopen.");
+                                AssertSemicircleSketch(nativeSketch, groups == 1 ? 7.0 : -8.0, groups == 1 ? 11.0 : 12.0,
+                                    groups == 1 ? 10.0 : 3.0, groups == 1 ? 17.0 : -5.0, groups == 1 ? -3.0 : -11.0, -1);
+                                return true;
+#else
+                                return false;
+#endif
+                            }, CancellationToken.None);
                     }
                 }
                 finally
@@ -237,11 +284,25 @@ namespace SolidWorksCadAgent.IntegrationTests
         private static void Group(JObject plan, string primitive, object profile, object featureParameters, string plane = "Top Plane")
         {
             var steps = (JArray)plan["steps"];
-            int number = (steps.Count - 1) / 4 + 1;
+            int number = steps.Count(step => (string)step["command"] == CadCommandNames.CreateSketch) + 1;
             var sketch = Step("sketch" + number, "CreateSketch", new { plane });
             sketch["outputKey"] = "profile" + number;
             steps.Add(sketch);
             steps.Add(Step("primitive" + number, primitive, profile));
+            steps.Add(Step("exit" + number, "ExitSketch", new { }));
+            var feature = Step("feature" + number, number == 1 ? "Extrude" : "CutExtrude", featureParameters);
+            feature["operationVersion"] = 2;
+            feature["inputs"] = new JObject { ["profileSketch"] = new JObject { ["kind"] = "Sketch", ["outputKey"] = "profile" + number } };
+            steps.Add(feature);
+        }
+        private static void ContourGroup(JObject plan, JObject[] segments, object featureParameters, string plane = "Top Plane")
+        {
+            var steps = (JArray)plan["steps"];
+            int number = steps.Count(step => (string)step["command"] == CadCommandNames.CreateSketch) + 1;
+            var sketch = Step("sketch" + number, "CreateSketch", new { plane });
+            sketch["outputKey"] = "profile" + number;
+            steps.Add(sketch);
+            foreach (var segment in segments) steps.Add(segment);
             steps.Add(Step("exit" + number, "ExitSketch", new { }));
             var feature = Step("feature" + number, number == 1 ? "Extrude" : "CutExtrude", featureParameters);
             feature["operationVersion"] = 2;
@@ -275,6 +336,27 @@ namespace SolidWorksCadAgent.IntegrationTests
             var center = (SketchPoint)((SketchArc)arcs[0]).GetCenterPoint2();
             Assert.AreEqual(expectedX, center.X * 1000.0, 0.001, "circle local X");
             Assert.AreEqual(expectedY, center.Y * 1000.0, 0.001, "circle local Y");
+        }
+
+        private static void AssertSemicircleSketch(Sketch sketch, double centerX, double centerY, double radius,
+            double lineStartX, double lineEndX, int rotationDirection)
+        {
+            var segments = (sketch.GetSketchSegments() as object[] ?? Array.Empty<object>()).Cast<SketchSegment>().ToArray();
+            Assert.AreEqual(2, segments.Length, "The saved profile must contain the original line and arc entities.");
+            var line = segments.Single(segment => segment.GetType() == (int)swSketchSegments_e.swSketchLINE) as SketchLine;
+            var arc = segments.Single(segment => segment.GetType() == (int)swSketchSegments_e.swSketchARC) as SketchArc;
+            Assert.IsNotNull(line); Assert.IsNotNull(arc);
+            var start = (SketchPoint)line.GetStartPoint2(); var end = (SketchPoint)line.GetEndPoint2();
+            Assert.AreEqual(lineStartX, start.X * 1000.0, 0.001); Assert.AreEqual(centerY, start.Y * 1000.0, 0.001);
+            Assert.AreEqual(lineEndX, end.X * 1000.0, 0.001); Assert.AreEqual(centerY, end.Y * 1000.0, 0.001);
+            var arcCenter = (SketchPoint)arc.GetCenterPoint2(); var arcStart = (SketchPoint)arc.GetStartPoint2();
+            var arcEnd = (SketchPoint)arc.GetEndPoint2();
+            Assert.AreEqual(centerX, arcCenter.X * 1000.0, 0.001); Assert.AreEqual(centerY, arcCenter.Y * 1000.0, 0.001);
+            Assert.AreEqual(lineEndX, arcStart.X * 1000.0, 0.001, "The native arc must preserve its ordered start point.");
+            Assert.AreEqual(lineStartX, arcEnd.X * 1000.0, 0.001, "The native arc must preserve its ordered end point.");
+            Assert.AreEqual(rotationDirection, arc.GetRotationDir(), "The saved native arc must preserve the requested clockwise direction.");
+            Assert.AreEqual(radius, Math.Sqrt(Math.Pow((arcStart.X - arcCenter.X) * 1000.0, 2) +
+                Math.Pow((arcStart.Y - arcCenter.Y) * 1000.0, 2)), 0.001);
         }
 
         private sealed class FixedPlanner : IVersionedCadPlanningProvider

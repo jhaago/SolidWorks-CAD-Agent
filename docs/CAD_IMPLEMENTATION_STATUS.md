@@ -13,7 +13,7 @@ files were edited. Installed Windows applications remain the October 9 build.
 | Rectangle, circular, rotated slot and regular-polygon bosses | One profile per Top, Front or Right origin-plane sketch; profile coordinates map through an explicit shared frame |
 | Through holes and blind pockets | Separate exact sketch references, interior disjoint profiles in a rectangular base; accepted on each of the three origin planes |
 | Multiple sketches / variable-length plans | Ordered durable attempts and model revisions, independent persistent references; 10-step unit and native multi-cut jobs passed |
-| Lines / arcs | Native guarded mutation available; arbitrary line/arc contours remain review-only |
+| Lines / arcs | One ordered closed simple contour of AddLine/AddArc entities per sketch; analytical topology, area and bounds validation; supports bosses and cuts under the existing prismatic plane/base rules |
 | Clarification / approval | `V2:` uses the configured planner and its existing images/clarifications; Host scope context and reference adapter tested; explicit current-revision approval |
 | Save / reopen / artifact delivery | Final new path, staged save, physical volume/bounds, rebuild/body checks and exact file/hash provenance |
 
@@ -47,6 +47,16 @@ Executed evidence:
   passed 7/7 (`v2-prismatic-all-planes-regression.trx`), V1 prismatic regressions
   passed 5/5 (`v2-plane-v1-regressions.trx`), and established V2 reference/rectangle
   tests passed 2/2 (`v2-plane-core-v2-regressions.trx`).
+- Closed-contour increment: full Release solution builds passed with interop off/on
+  (0 warnings/errors); full unit suites passed 674/674 in both modes
+  (`v2-line-arc-unit-disabled-final.trx`, `v2-line-arc-unit-native-final.trx`). The complete
+  V2 prismatic native suite passed 9/9 (`v2-line-arc-native.trx`), and the two new
+  contour cases passed again 2/2 with native arc-direction and endpoint readback
+  (`v2-line-arc-native-final.trx`). These cases verify an asymmetric offset Front
+  Plane semicircle boss and a line/arc through-cut in a rectangular plate, including
+  physical volume/bounds, clean rebuild, managed save/reopen, native line/arc sketch
+  content and persistent sketch-reference resolution. V1 native prismatic
+  regressions passed 5/5 (`v1-prismatic-regression.trx`).
 - Independent code review found no critical/important production defect; its
   persistence-fixture weakness was corrected to use an admitted rectangular
   base and a shallower blind pocket. Shared old/new boundary concurrency test passes.
@@ -64,8 +74,8 @@ No installed applications were replaced and no physical phone acceptance was run
 Remaining priorities:
 - P1: add independent native sketch/feature parameter readback for internal cut
   position, depth/direction and profile topology; volume/bounds cannot certify all geometry.
-- P1: close V1 parity gaps incrementally: arbitrary closed line/arc profiles,
-  multiple boss features and supported edit operations.
+- P1: extend beyond the admitted single-loop contour to multiple boss features,
+  supported edit operations and additional independently verified topology.
 - P2: migrate retired narrow persistence/boundary tests to the shared APIs, then
   remove duplicated compatibility implementations; add driving dimensions/relations.
 - P2: install the candidate and run desktop/paired-phone request, approve, cancel,

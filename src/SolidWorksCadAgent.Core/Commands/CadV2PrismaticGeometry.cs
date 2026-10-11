@@ -50,20 +50,28 @@ namespace SolidWorksCadAgent.Core.Commands
                 Require(result.SaveStep.Parameters["allowOverwrite"]?.Type == JTokenType.Boolean &&
                     !result.SaveStep.Parameters.Value<bool>("allowOverwrite"), "SavePart must explicitly disallow overwrite.");
             }
-            Require(end >= 5 && (end - 1) % 4 == 0 && steps[0].Command == CadCommandNames.NewPart,
-                "Expected NewPart, complete sketch/primitive/exit/feature groups, and an optional final SavePart.");
+            Require(end >= 5 && steps[0].Command == CadCommandNames.NewPart,
+                "Expected NewPart, complete sketch/profile/exit/feature groups, and an optional final SavePart.");
             Profile boss = null;
             CadStandardPlaneFrame frame = null;
             var cuts = new List<Profile>();
-            for (int index = 1; index < end; index += 4)
+            int index = 1;
+            int group = 0;
+            while (index < end)
             {
-                var sketch = steps[index];
-                var primitive = steps[index + 1];
-                var exit = steps[index + 2];
-                var feature = steps[index + 3];
-                bool first = index == 1;
+                var sketch = steps[index++];
+                bool first = group++ == 0;
+                Require(sketch != null && sketch.Command == CadCommandNames.CreateSketch,
+                    "Each prismatic group must begin with CreateSketch.");
+                var primitives = new List<CadPlanV2Step>();
+                while (index < end && IsProfileCommand(steps[index]?.Command)) primitives.Add(steps[index++]);
+                Require(primitives.Count > 0, "Each sketch must contain one supported profile or a complete line/arc contour.");
+                Require(index < end && steps[index].Command == CadCommandNames.ExitSketch,
+                    "Each sketch profile must be followed by ExitSketch.");
+                index++;
+                Require(index < end, "Each closed sketch must be consumed by one feature.");
+                var feature = steps[index++];
                 Require(sketch.Command == CadCommandNames.CreateSketch &&
-                    exit.Command == CadCommandNames.ExitSketch &&
                     feature.Command == (first ? CadCommandNames.Extrude : CadCommandNames.CutExtrude),
                     "Only one-profile standard-plane groups with one initial boss followed by cuts are supported.");
                 CadStandardPlaneFrame groupFrame;
@@ -81,7 +89,7 @@ namespace SolidWorksCadAgent.Core.Commands
                 Require(reference != null && reference.Kind == "Sketch" &&
                     reference.OutputKey == sketch.OutputKey && reference.EntityId == sketch.OutputEntityId,
                     "Each feature must reference its own immediately preceding sketch.");
-                var profile = ReadProfile(primitive);
+                var profile = ReadProfile(primitives);
                 if (first)
                 {
                     boss = profile;
@@ -95,7 +103,7 @@ namespace SolidWorksCadAgent.Core.Commands
                 }
                 else
                 {
-                    Require(steps[2].Command == CadCommandNames.AddRectangle, "Cuts require a rectangular base boss.");
+                    Require(boss.IsRectangle, "Cuts require a rectangular base boss.");
                     Require(profile.MinX > boss.MinX + InteriorMarginMm && profile.MaxX < boss.MaxX - InteriorMarginMm &&
                         profile.MinY > boss.MinY + InteriorMarginMm && profile.MaxY < boss.MaxY - InteriorMarginMm,
                         "Cut bounds must be strictly interior to the base with more than 0.02 mm clearance.");
@@ -116,15 +124,40 @@ namespace SolidWorksCadAgent.Core.Commands
                 Require(Positive(result.VolumeMm3), "The computed solid volume must be finite and positive.");
                 result.LastFeatureStepKey = feature.StepKey;
             }
+            Require(group > 0 && index == end, "The plan contains an incomplete prismatic feature group.");
             return result;
         }
 
         private sealed class Profile
         {
             internal double Area, MinX, MaxX, MinY, MaxY;
+            internal bool IsRectangle;
         }
 
-        private static Profile ReadProfile(CadPlanV2Step primitive)
+        private static bool IsProfileCommand(string command) => command == CadCommandNames.AddRectangle ||
+            command == CadCommandNames.AddCircle || command == CadCommandNames.AddSlot ||
+            command == CadCommandNames.AddRegularPolygon || command == CadCommandNames.AddLine || command == CadCommandNames.AddArc;
+
+        private static Profile ReadProfile(IReadOnlyList<CadPlanV2Step> primitives)
+        {
+            if (primitives.Count == 1 && primitives[0].Command != CadCommandNames.AddLine && primitives[0].Command != CadCommandNames.AddArc)
+                return ReadPrimitive(primitives[0]);
+            var contourCommands = new List<CadCommandEnvelope>();
+            foreach (var step in primitives)
+            {
+                if (step.Command != CadCommandNames.AddLine && step.Command != CadCommandNames.AddArc)
+                    throw new ArgumentException("A line/arc contour cannot be mixed with standalone profile primitives.", "plan");
+                contourCommands.Add(new CadCommandEnvelope { Command = step.Command, Parameters = step.Parameters });
+            }
+            var contour = CadV2ClosedContourGeometry.Analyze(contourCommands);
+            return new Profile
+            {
+                Area = contour.AreaMm2, MinX = contour.MinXmm, MaxX = contour.MaxXmm,
+                MinY = contour.MinYmm, MaxY = contour.MaxYmm
+            };
+        }
+
+        private static Profile ReadPrimitive(CadPlanV2Step primitive)
         {
             var p = primitive.Parameters;
             Require(primitive.Command == CadCommandNames.AddRectangle || primitive.Command == CadCommandNames.AddCircle ||
@@ -139,6 +172,7 @@ namespace SolidWorksCadAgent.Core.Commands
                     double width = Number(p, "widthMm"), height = Number(p, "heightMm");
                     halfX = width / 2; halfY = height / 2;
                     profile.Area = width * height;
+                    profile.IsRectangle = true;
                     break;
                 case CadCommandNames.AddCircle:
                     double radius = Number(p, "diameterMm") / 2;

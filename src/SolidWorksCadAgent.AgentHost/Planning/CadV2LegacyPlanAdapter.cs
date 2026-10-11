@@ -11,8 +11,9 @@ namespace SolidWorksCadAgent.AgentHost.Planning
     /// <summary>Opt-in adaptation of existing intent planning to explicit V2 sketch dependencies.</summary>
     public static class CadV2LegacyPlanAdapter
     {
-        public const string PlanningContext = "V2 execution scope: create a NEW part on Top Plane using one rectangle, circle, slot or regular polygon per sketch, then ExitSketch and Extrude. " +
-            "Optional cuts use separate Top Plane sketches strictly inside a rectangular base, with disjoint profile bounding boxes; Blind depth must be less than boss depth. " +
+        public const string PlanningContext = "V2 execution scope: create a NEW part using Top Plane, Front Plane or Right Plane sketches. Each sketch contains exactly one rectangle, circle, slot or regular polygon, OR one ordered closed simple contour made only from AddLine and AddArc segments. " +
+            "For a contour, each segment end must match the next segment start (including last to first), and segments must not cross or touch except at their shared endpoints. Do not mix contour segments with standalone primitives or create multiple loops. " +
+            "Finish each profile with ExitSketch and Extrude. Optional cuts use separate sketches on the same plane, strictly inside a rectangular base, with disjoint profile bounding boxes; Blind depth must be less than boss depth. " +
             "Finish with one SavePart using a new relative filename and allowOverwrite:false. Final rebuild and close/reopen verification are handled by the Host; do not add CloseDocument. " +
             "Do not approximate requested unsupported geometry or guess missing dimensions. Ask for clarification instead.";
         public static bool IsRequest(string prompt) =>
