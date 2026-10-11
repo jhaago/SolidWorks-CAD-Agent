@@ -29,7 +29,7 @@ namespace SolidWorksCadAgent.Desktop
             MinimumSize = new Size(1180, 800);
             StartPosition = FormStartPosition.CenterScreen;
             KeyPreview = true;
-            var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            var shell = new TableLayoutPanel { ColumnCount = 2, RowCount = 1,
                 Margin = new Padding(0), Padding = new Padding(0) };
             shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 232));
             shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -52,7 +52,18 @@ namespace SolidWorksCadAgent.Desktop
             footer.Controls.Add(busyProgress, 1, 0);
             workspace.Controls.Add(footer, 0, 3);
             shell.Controls.Add(workspace, 1, 0);
-            Controls.Add(shell);
+            // Windows can constrain a form to a screen smaller than MinimumSize.
+            // Keep the layout readable and let that smaller viewport scroll it.
+            var viewport = new Panel { Dock = DockStyle.Fill, AutoScroll = true,
+                AccessibleName = "Scrollable design workspace" };
+            // MinimumSize participates in WinForms DPI scaling with the controls.
+            shell.MinimumSize = new Size(1164, 761);
+            viewport.Controls.Add(shell);
+            viewport.Resize += (sender, args) => shell.Size = new Size(
+                Math.Max(shell.MinimumSize.Width, viewport.ClientSize.Width),
+                Math.Max(shell.MinimumSize.Height, viewport.ClientSize.Height));
+            shell.Size = shell.MinimumSize;
+            Controls.Add(viewport);
             ResumeLayout(true);
             UpdateActions();
         }

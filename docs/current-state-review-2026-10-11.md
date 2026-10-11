@@ -16,20 +16,27 @@ Settings retain unedited JSON fields and the restart-required notice across save
 ## Verification
 
 - Latest backend baseline: 678 unit tests passed outside the sandbox.
-- Combined source: 697 unit tests passed with native interop enabled. Full solution
+- Combined source: 698 unit tests passed with native interop enabled. Full solution
   Release build passed with zero warnings/errors; integration fixtures compiled.
-- Final compile-only run: all 697 unit tests passed, including the clarification
-  regression, recorded in `artifacts/review-results/final-disabled.trx`.
+- Final compile-only run: all 698 unit tests passed, including the clarification
+  and constrained-screen regressions, recorded in
+  `artifacts/review-results/final-screen-disabled.trx`.
 - Windows bundle built and validated with `NativeSolidWorksInterop`. Negative
   checks rejected a missing RemoteAgent and a native claim missing an interop DLL.
 - Regression tests first reproduced missing V2 steps, lost intake/completion,
   completed-job cancellation and the blocked V2 clarification action.
 - Desktop render fixtures passed and the minimum-size combined layout was visually
   inspected. This does not replace physical DPI/screen-reader acceptance.
+- GitHub's smaller Windows screen reproduced an interpretation field only one
+  pixel tall. The workspace now retains its scaled minimum content size inside
+  a scrollable viewport. A local regression failed first, then passed; it also
+  verifies scrolling reaches the submit action. The constrained render was
+  visually inspected and the final bundle rebuilt and validated.
 - Independent read-only backend and final desktop integration reviews completed.
 
 Evidence: `artifacts/review-results/`, `artifacts/review-captures/`,
-`final-native-build.log`, `final-native-tests.log`, and `bundle-review.log`.
+`final-screen-native-build.log`, `final-screen-native-tests.log`, and
+`bundle-screen-review.log`.
 Local logs/artifacts are excluded from source commits. NuGet vulnerability lookup
 was disabled for offline local builds; ordinary build/CI commands retain auditing.
 

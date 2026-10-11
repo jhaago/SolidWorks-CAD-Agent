@@ -275,6 +275,33 @@ namespace SolidWorksCadAgent.UnitTests
             });
         }
 
+        [TestMethod]
+        public void ConstrainedScreen_KeepsInterpretationAndComposerReadable()
+        {
+            OnSta(() =>
+            {
+                using (var client = new AgentHostClient(new HttpClient()))
+                using (var form = new PreviewForm(client))
+                {
+                    PrepareForRender(form);
+                    form.MinimumSize = Size.Empty;
+                    form.ClientSize = new Size(1006, 679);
+                    form.PerformLayout();
+                    Application.DoEvents();
+                    Assert.IsTrue(Field<TextBox>(form, "briefTextBox").Height >= 60);
+                    Assert.IsTrue(Field<TextBox>(form, "promptTextBox").Height >= 60);
+                    Capture(form, "workspace-constrained-screen.png");
+                    var viewport = (Panel)form.Controls[0];
+                    var submit = Field<Button>(form, "sendButton");
+                    viewport.ScrollControlIntoView(submit);
+                    Application.DoEvents();
+                    Assert.IsTrue(viewport.ClientRectangle.Contains(
+                        viewport.RectangleToClient(submit.RectangleToScreen(submit.ClientRectangle))),
+                        "The smaller screen must be able to scroll to the submit action.");
+                }
+            });
+        }
+
         internal static void Capture(Form form, string name)
         {
             var directory = Environment.GetEnvironmentVariable("CAD_AGENT_CAPTURE_DIR");
