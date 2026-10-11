@@ -1,5 +1,16 @@
 # CAD implementation handoff
 
+## Native followup after current-state review — 11 October 2026
+
+The current reviewed source (`42d61ab`) passed the unrestricted SOLIDWORKS 2020
+launch/attach lifecycle check, the two targeted exact-segment native cases, and
+all nine current V2 prismatic acceptance cases, including save/reopen and native
+geometry/reference checks. The earlier startup failure did not reproduce; no
+installation, configuration or licensing change was required. Its exact prior
+cause remains unproven. [Native evidence and limits](native-verification-2026-10-11.md)
+supersede the startup/segment-acceptance blockers in the historical entries below.
+The user deferred physical-phone testing. No production deployment is claimed.
+
 ## V2 expansion toward V1 capabilities - 11 October 2026
 
 Starting scope was the exact six-step centered rectangle boss. Implemented

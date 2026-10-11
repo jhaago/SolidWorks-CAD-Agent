@@ -13,7 +13,7 @@ After building, use `Launch CAD Agent.cmd`; its compiled bundle is also validate
 
 ## CAD architecture and expansion blueprint
 
-The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md), [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md), and the newest dated [implementation status](docs/CAD_IMPLEMENTATION_STATUS.md). Native evidence applies only to its recorded scenarios; current segment-level readback still requires live acceptance.
+The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md), [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md), and the newest dated [implementation status](docs/CAD_IMPLEMENTATION_STATUS.md). Native evidence applies only to its recorded scenarios; [current segment-level readback and all nine V2 prismatic cases passed on SOLIDWORKS 2020](docs/native-verification-2026-10-11.md).
 
 ## PC V2 development
 

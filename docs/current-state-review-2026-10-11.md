@@ -42,12 +42,15 @@ was disabled for offline local builds; ordinary build/CI commands retain auditin
 
 ## Boundaries and local-only work
 
-Current exact line/arc cut readback has not passed native acceptance: earlier runs
-were blocked before model creation by SOLIDWORKS 2020 startup/COM failure. This
-review did not repeat the crashing launch or operate on user documents. Recovery
-and controlled semicircle/four-cut acceptance remain required. Cloud planning and
+Subsequent authorized native verification passed launch/attach, both exact
+semicircle/four-cut cases and all nine current V2 prismatic acceptance cases on
+SOLIDWORKS 2020. The earlier startup failure did not reproduce outside the
+restricted execution sandbox; its exact cause is not established. See
+[the followup native report](native-verification-2026-10-11.md). No user document
+or installation was changed. Cloud planning and
 paired physical-phone execution, photos, artifact saves and network transitions
-were not exercised. No Android device/emulator was connected or available locally.
+were not exercised. The user deferred physical-phone testing; no Android
+device/emulator was connected or available locally.
 
 Original uncommitted remote diagnostic logging, a whitespace edit and assistant
 setup/handover files remain in their source checkout, outside the verified branch.
