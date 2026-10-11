@@ -57,26 +57,33 @@ Executed evidence:
   physical volume/bounds, clean rebuild, managed save/reopen, native line/arc sketch
   content and persistent sketch-reference resolution. V1 native prismatic
   regressions passed 5/5 (`v1-prismatic-regression.trx`).
-- Native cut-definition readback increment: the Bridge now reports native cut
-  end condition, forward depth, direction flags, direct parent profile sketch,
-  and local line/arc counts and bounds. The Host compares these observations with
-  expectations derived from the normalized persisted V2 plan and fails verification
-  closed on missing or mismatched data. Both pre-save and managed post-save/reopen
-  verification use this readback; simulated execution explicitly refuses the
-  native-only observation. The four-cut asymmetric plate (through-all hole and
-  three blind pockets) passed on SOLIDWORKS 2020 with all cut parameters, profile
-  bounds/topology and persistent sketch references checked after reopen:
-  `v2-cut-readback.trx` (1/1). A line/arc semicircle through-cut also passed native
-  readback and reopen checks: `v2-cut-contour-readback.trx` (1/1). The V1 rotated
-  slot through-cut plus blind hex-pocket save/reopen regression passed 1/1:
-  `v1-prismatic-readback-regression.trx`. Full unit suites passed 676/676 with
-  interop disabled and 676/676 with interop enabled in the implementation run;
-  focused reruns of the four changed unit-test classes passed 82/82 in each mode.
-  Current-session full-suite rerun reported four route/coordinator failures: one
-  expected HTTP 200 but received 409, and three approvals reported an unavailable
-  CAD control lease. The runner then stopped making progress before a suite summary
-  and was stopped; focused readback regressions passed in both modes. Native evidence is scenario-specific and does not establish
-  coverage for all profile types or future cut operations.
+- Native cut-definition and segment-geometry readback increment: the Bridge reports
+  native cut end condition, forward depth, direction flags, direct parent profile
+  sketch, and each local line/arc's geometry. The Host compares line endpoints,
+  arc center/radius/endpoints/rotation, topology and bounds against expectations
+  derived from the normalized persisted V2 plan, failing closed on missing or
+  mismatched data. Segment enumeration order is ignored; line endpoint reversal is
+  accepted, and an arc may reverse endpoints only when its rotation reverses too.
+  Both pre-save and managed post-save/reopen verification use this check, while
+  simulation explicitly refuses native-only readback. Focused readback-related
+  unit classes passed 83/83 with interop disabled and 83/83 with interop enabled.
+  Earlier native evidence remains valid for aggregate cut readback, but those
+  SOLIDWORKS 2020 runs predate exact segment matching: the four-cut plate passed
+  1/1 (`v2-cut-readback.trx`), the semicircle through-cut passed 1/1
+  (`v2-cut-contour-readback.trx`), and the V1 slot/hex pocket regression passed
+  1/1 (`v1-prismatic-readback-regression.trx`). They do not verify the new exact
+  segment matcher. In the current session, the 4-cut and contour native fixtures
+  failed at AttachAsync before creating a model because no registered SOLIDWORKS
+  COM application was available. The SOLIDWORKS lifecycle test then timed out
+  waiting for COM registration from a fresh launch. The exact segment matcher
+  therefore still needs live 2020 acceptance.
+  The current full interop-disabled unit run recorded 351 passed and 4 failed
+  (one route expected 200 but received 409; three coordinator approvals reported
+  an unavailable CAD control lease), then the test host was aborted after its
+  2-minute hang detector expired while running
+  `ApproveAndExecuteAsync_TwoJobs_NeverExecuteCadCommandsConcurrently`. The four
+  readback-focused test classes passed in both interop modes; no current full
+  interop-enabled suite result is available.
 - Multi-boss probe (11 October 2026): exploratory edge-joined rectangular boss
   jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
   measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's
@@ -107,10 +114,9 @@ Production bundle validation passed. ZIP SHA-256:
 The candidate contains the preserved local RemoteHttpServer diagnostic edit.
 No installed applications were replaced and no physical phone acceptance was run.
 Remaining priorities:
-- P1: compare each native profile segment with plan-derived geometry (line endpoints,
-  arc center/radius/endpoints and rotation). The Bridge returns these details, but
-  the current Host matcher checks entity counts and overall bounds; a changed contour
-  with the same topology and bounds could pass this part of verification.
+- P1: rerun the four-cut and line/arc native acceptance tests on SOLIDWORKS 2020
+  with the exact segment matcher enabled. Current attempts could not attach to the
+  registered COM application, and the fresh launch timed out before native work.
 - P1: extend beyond the admitted single-loop contour to multiple boss features,
   supported edit operations and additional independently verified topology.
 - P2: migrate retired narrow persistence/boundary tests to the shared APIs, then

@@ -56,18 +56,39 @@ namespace SolidWorksCadAgent.UnitTests
             var plan = Plan("AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 });
             Group(plan, "AddCircle", new { centerXmm = -8.0, centerYmm = 12.0, diameterMm = 6.0 },
                 new { endCondition = "ThroughAll" });
-            Group(plan, "AddSlot", new { centerXmm = 17.0, centerYmm = -1.0, lengthMm = 12.0, widthMm = 4.0, angleDegrees = 23.0 },
+            Group(plan, "AddRectangle", new { centerXmm = 17.0, centerYmm = -1.0, widthMm = 12.0, heightMm = 8.0 },
                 new { endCondition = "Blind", depthMm = 4.0 });
             var expected = CadV2PrismaticGeometry.Analyze(plan).Cuts;
-            double slotHalfX = 4.0 * Math.Cos(23.0 * Math.PI / 180.0) + 2.0;
-            double slotHalfY = 4.0 * Math.Sin(23.0 * Math.PI / 180.0) + 2.0;
             var observed = new JArray
             {
-                NativeCut("ThroughAll", null, -11, -5, 9, 15, 0, 1),
-                NativeCut("Blind", 4.0, 17.0 - slotHalfX, 17.0 + slotHalfX,
-                    -1.0 - slotHalfY, -1.0 + slotHalfY, 2, 2)
+                NativeCut("ThroughAll", null, -11, -5, 9, 15, 0, 1, new JArray
+                {
+                    new JObject { ["type"] = "Arc", ["centerXmm"] = -8.0, ["centerYmm"] = 12.0,
+                        ["radiusMm"] = 3.0, ["startXmm"] = -5.0, ["startYmm"] = 12.0,
+                        ["endXmm"] = -5.0, ["endYmm"] = 12.0, ["rotationDirection"] = -1, ["isCircle"] = true }
+                }),
+                NativeCut("Blind", 4.0, 11.0, 23.0, -5.0, 3.0, 4, 0, new JArray
+                {
+                    new JObject { ["type"] = "Line", ["startXmm"] = 11.0, ["startYmm"] = -5.0, ["endXmm"] = 23.0, ["endYmm"] = -5.0 },
+                    new JObject { ["type"] = "Line", ["startXmm"] = 23.0, ["startYmm"] = -5.0, ["endXmm"] = 23.0, ["endYmm"] = 3.0 },
+                    new JObject { ["type"] = "Line", ["startXmm"] = 23.0, ["startYmm"] = 3.0, ["endXmm"] = 11.0, ["endYmm"] = 3.0 },
+                    new JObject { ["type"] = "Line", ["startXmm"] = 11.0, ["startYmm"] = 3.0, ["endXmm"] = 11.0, ["endYmm"] = -5.0 }
+                })
             };
             Assert.IsTrue(CadV2NativeCutReadbackMatcher.Matches(expected, observed, out var reason), reason);
+
+            var reorderedAndReversedLines = (JArray)observed.DeepClone();
+            var nativeLines = (JArray)reorderedAndReversedLines[1]["profile"]["segments"];
+            var firstLine = (JObject)nativeLines[0].DeepClone();
+            double startX = firstLine.Value<double>("startXmm"), startY = firstLine.Value<double>("startYmm");
+            firstLine["startXmm"] = firstLine["endXmm"];
+            firstLine["startYmm"] = firstLine["endYmm"];
+            firstLine["endXmm"] = startX;
+            firstLine["endYmm"] = startY;
+            nativeLines.RemoveAt(0);
+            nativeLines.Add(firstLine);
+            Assert.IsTrue(CadV2NativeCutReadbackMatcher.Matches(expected, reorderedAndReversedLines, out _),
+                "Native segment enumeration order and line endpoint orientation do not change sketch geometry.");
 
             var changedDepth = (JArray)observed.DeepClone();
             changedDepth[1]["depthMm"] = 4.5;
@@ -76,8 +97,16 @@ namespace SolidWorksCadAgent.UnitTests
             shiftedSketch[0]["profile"]["minXmm"] = -10.0;
             Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, shiftedSketch, out _));
             var wrongTopology = (JArray)observed.DeepClone();
-            wrongTopology[1]["profile"]["lineCount"] = 4;
+            wrongTopology[1]["profile"]["lineCount"] = 3;
             Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongTopology, out _));
+            var changedSegmentWithSameBoundsAndTopology = (JArray)observed.DeepClone();
+            changedSegmentWithSameBoundsAndTopology[1]["profile"]["segments"][1]["endXmm"] = 9.0;
+            changedSegmentWithSameBoundsAndTopology[1]["profile"]["segments"][2]["startXmm"] = 9.0;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, changedSegmentWithSameBoundsAndTopology, out _),
+                "A trapezoid with the same line count and overall bounds must not match the planned rectangle.");
+            var changedCircleRadius = (JArray)observed.DeepClone();
+            changedCircleRadius[0]["profile"]["segments"][0]["radiusMm"] = 2.5;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, changedCircleRadius, out _));
             var wrongDirection = (JArray)observed.DeepClone();
             wrongDirection[0]["reverseDirection"] = false;
             Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongDirection, out _));
@@ -85,8 +114,43 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, null, out _));
         }
 
+        [TestMethod]
+        public void NativeCutReadbackChecksArcCenterEndpointsAndSweep()
+        {
+            var plan = ContourCutPlan();
+            var expected = CadV2PrismaticGeometry.Analyze(plan).Cuts;
+            var observed = new JArray
+            {
+                NativeCut("ThroughAll", null, -11, -5, 12, 15, 1, 1, new JArray
+                {
+                    new JObject { ["type"] = "Line", ["startXmm"] = -5.0, ["startYmm"] = 12.0,
+                        ["endXmm"] = -11.0, ["endYmm"] = 12.0 },
+                    new JObject { ["type"] = "Arc", ["centerXmm"] = -8.0, ["centerYmm"] = 12.0,
+                        ["radiusMm"] = 3.0, ["startXmm"] = -11.0, ["startYmm"] = 12.0,
+                        ["endXmm"] = -5.0, ["endYmm"] = 12.0, ["rotationDirection"] = -1, ["isCircle"] = false }
+                })
+            };
+            Assert.IsTrue(CadV2NativeCutReadbackMatcher.Matches(expected, observed, out var reason), reason);
+
+            var equivalentReversedArc = (JArray)observed.DeepClone();
+            var equivalentArc = equivalentReversedArc[0]["profile"]["segments"][1];
+            equivalentArc["startXmm"] = -5.0;
+            equivalentArc["endXmm"] = -11.0;
+            equivalentArc["rotationDirection"] = 1;
+            Assert.IsTrue(CadV2NativeCutReadbackMatcher.Matches(expected, equivalentReversedArc, out _),
+                "Reversing arc endpoints and rotation together preserves the same circular sweep.");
+
+            var wrongSweep = (JArray)observed.DeepClone();
+            wrongSweep[0]["profile"]["segments"][1]["rotationDirection"] = 1;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongSweep, out _),
+                "Changing only the arc sweep must be rejected even when bounds and topology are unchanged.");
+            var wrongArcCenter = (JArray)observed.DeepClone();
+            wrongArcCenter[0]["profile"]["segments"][1]["centerXmm"] = -7.5;
+            Assert.IsFalse(CadV2NativeCutReadbackMatcher.Matches(expected, wrongArcCenter, out _));
+        }
+
         private static JObject NativeCut(string condition, double? depthMm, double minX, double maxX,
-            double minY, double maxY, int lines, int arcs) => new JObject
+            double minY, double maxY, int lines, int arcs, JArray segments) => new JObject
         {
             ["featureName"] = "Cut-Extrude",
             ["endCondition"] = condition,
@@ -100,10 +164,28 @@ namespace SolidWorksCadAgent.UnitTests
                 ["sketchName"] = "Sketch",
                 ["lineCount"] = lines,
                 ["arcCount"] = arcs,
+                ["segments"] = segments,
                 ["minXmm"] = minX, ["maxXmm"] = maxX,
                 ["minYmm"] = minY, ["maxYmm"] = maxY
             }
         };
+
+        private static CadPlanV2Document ContourCutPlan()
+        {
+            var plan = Plan("AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 });
+            plan.Steps[4].Parameters["depthMm"] = 13.0;
+            var sketch = Step("cut-sketch", "CreateSketch", new { plane = "Top Plane" });
+            sketch.OutputKey = "cut-profile"; sketch.OutputEntityId = Guid.NewGuid(); plan.Steps.Add(sketch);
+            plan.Steps.Add(Step("cut-line", "AddLine", new { startXmm = -5.0, startYmm = 12.0, endXmm = -11.0, endYmm = 12.0 }));
+            plan.Steps.Add(Step("cut-arc", "AddArc", new { centerXmm = -8.0, centerYmm = 12.0,
+                startXmm = -11.0, startYmm = 12.0, endXmm = -5.0, endYmm = 12.0, clockwise = true }));
+            plan.Steps.Add(Step("cut-exit", "ExitSketch", new { }));
+            var cut = Step("cut-feature", "CutExtrude", new { endCondition = "ThroughAll" }); cut.OperationVersion = 2;
+            cut.Inputs = new CadPlanV2Inputs { ProfileSketch = new CadPlanV2Reference
+            { Kind = "Sketch", OutputKey = sketch.OutputKey, EntityId = sketch.OutputEntityId } };
+            plan.Steps.Add(cut);
+            return plan;
+        }
 
         [TestMethod]
         public void CircleBossUsesCircularAreaAndOffsetBounds()

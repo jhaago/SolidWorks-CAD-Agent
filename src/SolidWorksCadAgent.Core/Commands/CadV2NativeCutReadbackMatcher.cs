@@ -45,9 +45,59 @@ namespace SolidWorksCadAgent.Core.Commands
                     !Close(profile, "minXmm", plan.MinXmm) || !Close(profile, "maxXmm", plan.MaxXmm) ||
                     !Close(profile, "minYmm", plan.MinYmm) || !Close(profile, "maxYmm", plan.MaxYmm))
                     return Fail("Native parent sketch position or topology differs from the persisted plan at index " + index + ".", out reason);
+                if (!MatchesSegments(plan.Segments, profile["segments"] as JArray))
+                    return Fail("Native parent sketch segment geometry differs from the persisted plan at index " + index + ".", out reason);
             }
             return true;
         }
+
+        private static bool MatchesSegments(IReadOnlyList<CadV2ProfileSegmentExpectation> expected, JArray observed)
+        {
+            if (expected == null || observed == null || expected.Count != observed.Count) return false;
+            var used = new bool[observed.Count];
+            foreach (var segment in expected)
+            {
+                bool found = false;
+                for (int index = 0; index < observed.Count; index++)
+                {
+                    if (used[index] || !MatchesSegment(segment, observed[index] as JObject)) continue;
+                    used[index] = true;
+                    found = true;
+                    break;
+                }
+                if (!found) return false;
+            }
+            return true;
+        }
+
+        private static bool MatchesSegment(CadV2ProfileSegmentExpectation expected, JObject observed)
+        {
+            if (expected == null || observed == null ||
+                !string.Equals(observed.Value<string>("type"), expected.Type, StringComparison.Ordinal)) return false;
+            if (expected.Type == "Line")
+            {
+                bool forward = Close(observed, "startXmm", expected.StartXmm) && Close(observed, "startYmm", expected.StartYmm) &&
+                    Close(observed, "endXmm", expected.EndXmm) && Close(observed, "endYmm", expected.EndYmm);
+                bool reverse = Close(observed, "startXmm", expected.EndXmm) && Close(observed, "startYmm", expected.EndYmm) &&
+                    Close(observed, "endXmm", expected.StartXmm) && Close(observed, "endYmm", expected.StartYmm);
+                return forward || reverse;
+            }
+            if (expected.Type != "Arc" || observed.Value<bool?>("isCircle") != expected.IsCircle ||
+                !Close(observed, "centerXmm", expected.CenterXmm) || !Close(observed, "centerYmm", expected.CenterYmm) ||
+                !Close(observed, "radiusMm", expected.RadiusMm)) return false;
+            if (expected.IsCircle) return true;
+
+            int? direction = observed.Value<int?>("rotationDirection");
+            if (!direction.HasValue || direction.Value == 0) return false;
+            bool forwardEndpoints = Close(observed, "startXmm", expected.StartXmm) && Close(observed, "startYmm", expected.StartYmm) &&
+                Close(observed, "endXmm", expected.EndXmm) && Close(observed, "endYmm", expected.EndYmm);
+            bool reverseEndpoints = Close(observed, "startXmm", expected.EndXmm) && Close(observed, "startYmm", expected.EndYmm) &&
+                Close(observed, "endXmm", expected.StartXmm) && Close(observed, "endYmm", expected.StartYmm);
+            return forwardEndpoints && IsDirection(direction.Value, expected.Clockwise) ||
+                reverseEndpoints && IsDirection(direction.Value, !expected.Clockwise);
+        }
+
+        private static bool IsDirection(int nativeDirection, bool clockwise) => (nativeDirection < 0) == clockwise;
 
         private static bool Close(JObject data, string key, double expected) =>
             ReadFinite(data?[key], out var actual) && Math.Abs(actual - expected) <= ToleranceMm;

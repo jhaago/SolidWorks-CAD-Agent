@@ -125,7 +125,8 @@ namespace SolidWorksCadAgent.Core.Commands
                     result._cutExpectations.Add(new CadV2CutExpectation(feature.StepKey,
                         feature.Parameters.Value<string>("endCondition"),
                         feature.Parameters.Value<string>("endCondition") == "Blind" ? (double?)cutDepth : null,
-                        profile.MinX, profile.MaxX, profile.MinY, profile.MaxY, profile.LineCount, profile.ArcCount));
+                        profile.MinX, profile.MaxX, profile.MinY, profile.MaxY, profile.LineCount, profile.ArcCount,
+                        profile.Segments.AsReadOnly()));
                 }
                 Require(Positive(result.VolumeMm3), "The computed solid volume must be finite and positive.");
                 result.LastFeatureStepKey = feature.StepKey;
@@ -142,6 +143,7 @@ namespace SolidWorksCadAgent.Core.Commands
             internal double Area, MinX, MaxX, MinY, MaxY;
             internal bool IsRectangle;
             internal int LineCount, ArcCount;
+            internal List<CadV2ProfileSegmentExpectation> Segments = new List<CadV2ProfileSegmentExpectation>();
         }
 
         private static bool IsProfileCommand(string command) => command == CadCommandNames.AddRectangle ||
@@ -150,24 +152,84 @@ namespace SolidWorksCadAgent.Core.Commands
 
         private static Profile ReadProfile(IReadOnlyList<CadPlanV2Step> primitives)
         {
+            Profile profile;
             if (primitives.Count == 1 && primitives[0].Command != CadCommandNames.AddLine && primitives[0].Command != CadCommandNames.AddArc)
-                return ReadPrimitive(primitives[0]);
-            var contourCommands = new List<CadCommandEnvelope>();
-            foreach (var step in primitives)
+                profile = ReadPrimitive(primitives[0]);
+            else
             {
-                if (step.Command != CadCommandNames.AddLine && step.Command != CadCommandNames.AddArc)
-                    throw new ArgumentException("A line/arc contour cannot be mixed with standalone profile primitives.", "plan");
-                contourCommands.Add(new CadCommandEnvelope { Command = step.Command, Parameters = step.Parameters });
+                var contourCommands = new List<CadCommandEnvelope>();
+                foreach (var step in primitives)
+                {
+                    if (step.Command != CadCommandNames.AddLine && step.Command != CadCommandNames.AddArc)
+                        throw new ArgumentException("A line/arc contour cannot be mixed with standalone profile primitives.", "plan");
+                    contourCommands.Add(new CadCommandEnvelope { Command = step.Command, Parameters = step.Parameters });
+                }
+                var contour = CadV2ClosedContourGeometry.Analyze(contourCommands);
+                profile = new Profile
+                {
+                    Area = contour.AreaMm2, MinX = contour.MinXmm, MaxX = contour.MaxXmm,
+                    MinY = contour.MinYmm, MaxY = contour.MaxYmm,
+                    LineCount = primitives.Count(step => step.Command == CadCommandNames.AddLine),
+                    ArcCount = primitives.Count(step => step.Command == CadCommandNames.AddArc)
+                };
             }
-            var contour = CadV2ClosedContourGeometry.Analyze(contourCommands);
-            return new Profile
-            {
-                Area = contour.AreaMm2, MinX = contour.MinXmm, MaxX = contour.MaxXmm,
-                MinY = contour.MinYmm, MaxY = contour.MaxYmm,
-                LineCount = primitives.Count(step => step.Command == CadCommandNames.AddLine),
-                ArcCount = primitives.Count(step => step.Command == CadCommandNames.AddArc)
-            };
+            profile.Segments = ReadProfileSegments(primitives);
+            return profile;
         }
+
+        private static List<CadV2ProfileSegmentExpectation> ReadProfileSegments(IReadOnlyList<CadPlanV2Step> primitives)
+        {
+            if (primitives.Count == 1)
+            {
+                var primitive = primitives[0];
+                var p = primitive.Parameters;
+                double x = Number(p, "centerXmm"), y = Number(p, "centerYmm");
+                if (primitive.Command == CadCommandNames.AddRectangle)
+                {
+                    double halfWidth = Number(p, "widthMm") / 2, halfHeight = Number(p, "heightMm") / 2;
+                    double minX = x - halfWidth, maxX = x + halfWidth, minY = y - halfHeight, maxY = y + halfHeight;
+                    return new List<CadV2ProfileSegmentExpectation>
+                    {
+                        Line(minX, minY, maxX, minY), Line(maxX, minY, maxX, maxY),
+                        Line(maxX, maxY, minX, maxY), Line(minX, maxY, minX, minY)
+                    };
+                }
+                if (primitive.Command == CadCommandNames.AddCircle)
+                {
+                    double radius = Number(p, "diameterMm") / 2;
+                    return new List<CadV2ProfileSegmentExpectation> { Circle(x, y, radius) };
+                }
+                var generated = primitive.Command == CadCommandNames.AddSlot
+                    ? PrismaticProfileGeometry.Slot(p)
+                    : PrismaticProfileGeometry.RegularPolygon(p);
+                return generated.Select(ReadProfileSegment).ToList();
+            }
+            return primitives.Select(step => ReadProfileSegment(new CadCommandEnvelope
+            { Command = step.Command, Parameters = step.Parameters })).ToList();
+        }
+
+        private static CadV2ProfileSegmentExpectation ReadProfileSegment(CadCommandEnvelope command)
+        {
+            var p = command.Parameters;
+            if (command.Command == CadCommandNames.AddLine)
+                return Line(Number(p, "startXmm"), Number(p, "startYmm"), Number(p, "endXmm"), Number(p, "endYmm"));
+            if (command.Command == CadCommandNames.AddArc)
+            {
+                double centerX = Number(p, "centerXmm"), centerY = Number(p, "centerYmm");
+                double startX = Number(p, "startXmm"), startY = Number(p, "startYmm");
+                double radius = Math.Sqrt((startX - centerX) * (startX - centerX) + (startY - centerY) * (startY - centerY));
+                return new CadV2ProfileSegmentExpectation("Arc", startX, startY, Number(p, "endXmm"), Number(p, "endYmm"),
+                    centerX, centerY, radius, p.Value<bool>("clockwise"), false);
+            }
+            throw new ArgumentException("A cut profile contains an unsupported native segment.", "plan");
+        }
+
+        private static CadV2ProfileSegmentExpectation Line(double startX, double startY, double endX, double endY) =>
+            new CadV2ProfileSegmentExpectation("Line", startX, startY, endX, endY, 0, 0, 0, false, false);
+
+        private static CadV2ProfileSegmentExpectation Circle(double centerX, double centerY, double radius) =>
+            new CadV2ProfileSegmentExpectation("Arc", centerX + radius, centerY, centerX + radius, centerY,
+                centerX, centerY, radius, false, true);
 
         private static Profile ReadPrimitive(CadPlanV2Step primitive)
         {
@@ -249,11 +311,12 @@ namespace SolidWorksCadAgent.Core.Commands
     public sealed class CadV2CutExpectation
     {
         internal CadV2CutExpectation(string stepKey, string endCondition, double? depthMm,
-            double minXmm, double maxXmm, double minYmm, double maxYmm, int lineCount, int arcCount)
+            double minXmm, double maxXmm, double minYmm, double maxYmm, int lineCount, int arcCount,
+            IReadOnlyList<CadV2ProfileSegmentExpectation> segments)
         {
             StepKey = stepKey; EndCondition = endCondition; DepthMm = depthMm;
             MinXmm = minXmm; MaxXmm = maxXmm; MinYmm = minYmm; MaxYmm = maxYmm;
-            LineCount = lineCount; ArcCount = arcCount;
+            LineCount = lineCount; ArcCount = arcCount; Segments = segments;
         }
         public string StepKey { get; }
         public string EndCondition { get; }
@@ -264,5 +327,28 @@ namespace SolidWorksCadAgent.Core.Commands
         public double MaxYmm { get; }
         public int LineCount { get; }
         public int ArcCount { get; }
+        public IReadOnlyList<CadV2ProfileSegmentExpectation> Segments { get; }
+    }
+
+    /// <summary>Plan-derived local geometry for one expected native sketch segment.</summary>
+    public sealed class CadV2ProfileSegmentExpectation
+    {
+        internal CadV2ProfileSegmentExpectation(string type, double startXmm, double startYmm, double endXmm,
+            double endYmm, double centerXmm, double centerYmm, double radiusMm, bool clockwise, bool isCircle)
+        {
+            Type = type; StartXmm = startXmm; StartYmm = startYmm; EndXmm = endXmm; EndYmm = endYmm;
+            CenterXmm = centerXmm; CenterYmm = centerYmm; RadiusMm = radiusMm;
+            Clockwise = clockwise; IsCircle = isCircle;
+        }
+        public string Type { get; }
+        public double StartXmm { get; }
+        public double StartYmm { get; }
+        public double EndXmm { get; }
+        public double EndYmm { get; }
+        public double CenterXmm { get; }
+        public double CenterYmm { get; }
+        public double RadiusMm { get; }
+        public bool Clockwise { get; }
+        public bool IsCircle { get; }
     }
 }

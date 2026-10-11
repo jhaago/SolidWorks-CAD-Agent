@@ -504,7 +504,13 @@ namespace SolidWorksCadAgent.UnitTests
                     ["profile"] = new JObject
                     {
                         ["parentRelationVerified"] = true, ["sketchName"] = "Sketch2", ["lineCount"] = 0, ["arcCount"] = 1,
-                        ["minXmm"] = -2.0, ["maxXmm"] = 2.0, ["minYmm"] = -2.0, ["maxYmm"] = 2.0
+                        ["minXmm"] = -2.0, ["maxXmm"] = 2.0, ["minYmm"] = -2.0, ["maxYmm"] = 2.0,
+                        ["segments"] = new JArray
+                        {
+                            new JObject { ["type"] = "Arc", ["centerXmm"] = 0.0, ["centerYmm"] = 0.0,
+                                ["radiusMm"] = 2.0, ["startXmm"] = 2.0, ["startYmm"] = 0.0,
+                                ["endXmm"] = 2.0, ["endYmm"] = 0.0, ["rotationDirection"] = 1, ["isCircle"] = true }
+                        }
                     }
                 }
             };
