@@ -376,11 +376,12 @@ Implementation and validation sequence:
    persisted-plan hashes, ownership, ordered Applied prerequisites, sketch tokens,
    atomic model revisions, and non-replayable uncertain outcomes.
 3. Generalize Host binding, runner, save/reopen verification and artifact delivery.
-   Admission requires a supported analytical geometry contract: one Top Plane
-   rectangle/circle/slot/regular-polygon boss; optional disjoint interior cuts in
+   Admission requires a supported analytical geometry contract: one
+   rectangle/circle/slot/regular-polygon boss on the Top, Front or Right origin
+   plane; optional disjoint interior cuts in
    a rectangular base; one profile primitive per sketch; final non-overwriting save.
-   Freeform line/arc contours, additional boss unions, intersecting cuts and other
-   planes remain review-only until topology/frame verification is implemented.
+   Freeform line/arc contours, additional boss unions and intersecting cuts remain
+   review-only until topology verification is implemented.
 4. Provide an explicit `V2:` opt-in using the existing planner with a deterministic
    V1-to-V2 reference adapter. Preserve clarification and explicit revision approval.
 5. Run unit regressions in both interop modes, then live SOLIDWORKS 2020 acceptance
@@ -391,4 +392,4 @@ saved-byte identity detect important failures but do not certify every internal
 face location or manufacturing tolerance. Native acceptance must inspect the
 new sketch/feature structure; no claim of full V1 parity before that evidence.
 
-Progress: shared pipeline, planner adapter, guarded Bridge and analytical verifier implemented. Both full unit modes pass (659 each); expanded SOLIDWORKS 2020 profiles/cuts, V1 regressions and original V2 rectangle pass. See CAD_IMPLEMENTATION_STATUS.md for final evidence and remaining parity/readback gates.
+Progress: shared pipeline, planner adapter, guarded Bridge and analytical verifier implemented. Standard-plane frame support now covers Top/Front/Right with asymmetric native 2020 boss/cut/save/reopen acceptance. Both full unit modes pass (665 each); the full V2 native prismatic suite passes 7/7, V1 regressions 5/5 and established V2 reference tests 2/2. See CAD_IMPLEMENTATION_STATUS.md for final evidence and remaining parity/readback gates.

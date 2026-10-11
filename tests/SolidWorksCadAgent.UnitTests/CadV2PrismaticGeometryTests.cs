@@ -33,6 +33,37 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.AreEqual(0, result.MaxZmm, 1e-9);
         }
 
+        [DataTestMethod]
+        [DataRow("Top Plane", 7.0, 5.0, -11.0)]
+        [DataRow("Front Plane", 7.0, 11.0, 5.0)]
+        [DataRow("Right Plane", 5.0, 11.0, -7.0)]
+        public void StandardPlaneFramesMapAsymmetricSketchCoordinates(string plane, double x, double y, double z)
+        {
+            var frame = CadStandardPlaneFrame.FromPlaneName(plane);
+            var point = frame.ToModel(7, 11, 5);
+            Assert.AreEqual(x, point.Xmm, 1e-9, "model X");
+            Assert.AreEqual(y, point.Ymm, 1e-9, "model Y");
+            Assert.AreEqual(z, point.Zmm, 1e-9, "model Z");
+        }
+
+        [DataTestMethod]
+        [DataRow("Top Plane", 1.0, 13.0, 0.0, 5.0, -15.0, -7.0)]
+        [DataRow("Front Plane", 1.0, 13.0, 7.0, 15.0, 0.0, 5.0)]
+        [DataRow("Right Plane", 0.0, 5.0, 7.0, 15.0, -13.0, -1.0)]
+        public void AsymmetricBossBoundsFollowStandardPlaneFrame(string plane,
+            double minX, double maxX, double minY, double maxY, double minZ, double maxZ)
+        {
+            var plan = Plan("AddRectangle", new { centerXmm = 7, centerYmm = 11, widthMm = 12, heightMm = 8 }, plane);
+            var geometry = CadV2PrismaticGeometry.Analyze(plan);
+            Assert.AreEqual(12 * 8 * 5, geometry.VolumeMm3, 1e-9);
+            Assert.AreEqual(minX, geometry.MinXmm, 1e-9);
+            Assert.AreEqual(maxX, geometry.MaxXmm, 1e-9);
+            Assert.AreEqual(minY, geometry.MinYmm, 1e-9);
+            Assert.AreEqual(maxY, geometry.MaxYmm, 1e-9);
+            Assert.AreEqual(minZ, geometry.MinZmm, 1e-9);
+            Assert.AreEqual(maxZ, geometry.MaxZmm, 1e-9);
+        }
+
         [TestMethod]
         public void RotatedSlotBossIncludesSemicircleExtents()
         {
@@ -112,7 +143,7 @@ namespace SolidWorksCadAgent.UnitTests
         public void RejectsMalformedSequencesReferencesAndUnsupportedScope()
         {
             var mutations = new Action<CadPlanV2Document>[] {
-                p => p.Steps[1].Parameters["plane"] = "Front Plane",
+                p => p.Steps[1].Parameters["plane"] = "Diagonal Plane",
                 p => p.Steps[4].Inputs.ProfileSketch.OutputKey = "other",
                 p => p.Steps[4].Inputs.ProfileSketch.EntityId = Guid.NewGuid(),
                 p => p.Steps[4].Inputs.ProfileSketch.Kind = "Face",
@@ -135,20 +166,25 @@ namespace SolidWorksCadAgent.UnitTests
             Group(circle, "AddCircle", new { centerXmm = 0, centerYmm = 0, diameterMm = 4 }, new { endCondition = "ThroughAll" });
             Reject(circle);
             Reject(null);
+
+            var mismatchedPlanes = Plate();
+            Group(mismatchedPlanes, "AddCircle", new { centerXmm = 0, centerYmm = 0, diameterMm = 4 },
+                new { endCondition = "ThroughAll" }, "Front Plane");
+            Reject(mismatchedPlanes);
         }
 
         private static void Reject(CadPlanV2Document plan) => Assert.ThrowsException<ArgumentException>(() => CadV2PrismaticGeometry.Analyze(plan));
         private static CadPlanV2Document Plate() => Plan("AddRectangle", new { centerXmm = 0, centerYmm = 0, widthMm = 40, heightMm = 20 });
-        private static CadPlanV2Document Plan(string command, object parameters)
+        private static CadPlanV2Document Plan(string command, object parameters, string plane = "Top Plane")
         {
             var plan = new CadPlanV2Document { PlanVersion = 2, Steps = new List<CadPlanV2Step> { Step("new", "NewPart", new {}) } };
-            Group(plan, command, parameters, null);
+            Group(plan, command, parameters, null, plane);
             return plan;
         }
-        private static void Group(CadPlanV2Document plan, string primitive, object parameters, object cut)
+        private static void Group(CadPlanV2Document plan, string primitive, object parameters, object cut, string plane = "Top Plane")
         {
             int number = (plan.Steps.Count - 1) / 4 + 1;
-            var sketch = Step("sketch" + number, "CreateSketch", new { plane = "Top Plane" });
+            var sketch = Step("sketch" + number, "CreateSketch", new { plane });
             sketch.OutputKey = "profile" + number;
             sketch.OutputEntityId = Guid.NewGuid();
             plan.Steps.Add(sketch);

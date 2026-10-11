@@ -5,7 +5,7 @@ using SolidWorksCadAgent.Contracts.Cad;
 
 namespace SolidWorksCadAgent.Core.Commands
 {
-    /// <summary>Analytical expectations for one Top Plane boss and disjoint interior cuts.</summary>
+    /// <summary>Analytical expectations for one origin-plane boss and disjoint interior cuts.</summary>
     public sealed class CadV2PrismaticGeometry
     {
         private const double InteriorMarginMm = 0.02;
@@ -18,6 +18,7 @@ namespace SolidWorksCadAgent.Core.Commands
         public double MinZmm { get; private set; }
         public double MaxZmm { get; private set; }
         public double DepthMm { get; private set; }
+        public string PlaneName { get; private set; }
         public string LastFeatureStepKey { get; private set; }
         public CadPlanV2Step SaveStep { get; private set; }
         public JObject ExpectedBounds() => new JObject
@@ -52,6 +53,7 @@ namespace SolidWorksCadAgent.Core.Commands
             Require(end >= 5 && (end - 1) % 4 == 0 && steps[0].Command == CadCommandNames.NewPart,
                 "Expected NewPart, complete sketch/primitive/exit/feature groups, and an optional final SavePart.");
             Profile boss = null;
+            CadStandardPlaneFrame frame = null;
             var cuts = new List<Profile>();
             for (int index = 1; index < end; index += 4)
             {
@@ -61,10 +63,20 @@ namespace SolidWorksCadAgent.Core.Commands
                 var feature = steps[index + 3];
                 bool first = index == 1;
                 Require(sketch.Command == CadCommandNames.CreateSketch &&
-                    sketch.Parameters.Value<string>("plane") == "Top Plane" &&
                     exit.Command == CadCommandNames.ExitSketch &&
                     feature.Command == (first ? CadCommandNames.Extrude : CadCommandNames.CutExtrude),
-                    "Only Top Plane single-profile groups with one initial boss followed by cuts are supported.");
+                    "Only one-profile standard-plane groups with one initial boss followed by cuts are supported.");
+                CadStandardPlaneFrame groupFrame;
+                try { groupFrame = CadStandardPlaneFrame.FromPlaneName(sketch.Parameters.Value<string>("plane")); }
+                catch (ArgumentException) { throw new ArgumentException("Every sketch must use the Top Plane, Front Plane or Right Plane.", "plan"); }
+                if (first)
+                {
+                    frame = groupFrame;
+                    result.PlaneName = frame.PlaneName;
+                }
+                else
+                    Require(groupFrame.PlaneName == frame.PlaneName,
+                        "All profiles in a prismatic part must use the same standard plane.");
                 var reference = feature.Inputs?.ProfileSketch;
                 Require(reference != null && reference.Kind == "Sketch" &&
                     reference.OutputKey == sketch.OutputKey && reference.EntityId == sketch.OutputEntityId,
@@ -76,10 +88,10 @@ namespace SolidWorksCadAgent.Core.Commands
                     result.DepthMm = Number(feature.Parameters, "depthMm");
                     Require(Positive(result.DepthMm) && Positive(result.DepthMm / 1000), "Boss depth is not representable.");
                     result.VolumeMm3 = boss.Area * result.DepthMm;
-                    result.MinXmm = boss.MinX; result.MaxXmm = boss.MaxX;
-                    result.MinYmm = 0; result.MaxYmm = result.DepthMm;
-                    // Top Plane: sketch +X is model +X, and its +Y normal requires sketch +Y to be model -Z.
-                    result.MinZmm = -boss.MaxY; result.MaxZmm = -boss.MinY;
+                    var modelBounds = frame.TransformBounds(boss.MinX, boss.MaxX, boss.MinY, boss.MaxY, 0, result.DepthMm);
+                    result.MinXmm = modelBounds.MinXmm; result.MaxXmm = modelBounds.MaxXmm;
+                    result.MinYmm = modelBounds.MinYmm; result.MaxYmm = modelBounds.MaxYmm;
+                    result.MinZmm = modelBounds.MinZmm; result.MaxZmm = modelBounds.MaxZmm;
                 }
                 else
                 {

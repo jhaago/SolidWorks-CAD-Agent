@@ -19,20 +19,24 @@ its producer; only the Host assigns execution/entity IDs. Clarification and
 explicit revision approval remain required. The old `V2 rectangle boss:` syntax
 continues to construct its deterministic candidate without a provider call.
 
-Admission supports one Top Plane rectangle/circle/slot/regular-polygon boss,
-followed by zero or more strictly interior disjoint cuts in a rectangular base.
-One profile primitive is allowed per sketch. Blind cuts must be shallower than
-the boss; ThroughAll cuts omit depth. SavePart is final and non-overwriting.
+Admission supports one rectangle/circle/slot/regular-polygon boss on the Top,
+Front or Right origin plane, followed by zero or more strictly interior disjoint
+cuts in a rectangular base on the same plane. One profile primitive is allowed
+per sketch. Blind cuts must be shallower than the boss; ThroughAll cuts omit
+depth. SavePart is final and non-overwriting.
 Native guarded dispatch also covers line/arc mutations, but arbitrary contours
-are not admitted without topology verification. Other origin planes, multiple
+are not admitted without topology verification. Nonstandard planes, multiple
 boss unions, overlapping cuts, face sketches and in-place edits remain gated.
 
 Expected geometry derives from independent analytical area/extents formulas.
 Before save and after managed reopen, the Host verifies clean rebuild, one solid,
 finite volume and bounds, model revision and exact saved-byte hash. Live 2020
-acceptance established Top Plane sketch X -> model X, sketch Y -> model -Z and
-positive extrusion -> model +Y. The historical verifier/runner names and saved
-check key are retained for compatibility. Volume/bounds are bounded checks;
+SOLIDWORKS 2020 native acceptance established these standard frames: Top sketch
+X/Y/normal map to model +X/-Z/+Y; Front maps to +X/+Y/+Z; Right maps to
+-Z/+Y/+X. Asymmetric offset bosses and both through/blind cuts on every plane
+passed physical bounds/volume checks after save/reopen; native sketch coordinates
+and persistent references were also checked. The historical verifier/runner names
+and saved check key are retained for compatibility. Volume/bounds are bounded checks;
 they do not certify internal face placement, driving dimensions or manufacturing
 tolerances. See the handoff for actual tests and remaining acceptance gates.
 ## Engineering review and corrections — 10 October 2026

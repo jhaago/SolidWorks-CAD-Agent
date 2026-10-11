@@ -150,7 +150,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
-        public void FinalSaveSupportsOffsetRectangleButRejectsUnverifiedSketchPlane()
+        public void FinalSaveSupportsOffsetRectangleOnAllOriginPlanesButRejectsUnsupportedPlane()
         {
             var candidate = JObject.Parse(ExtrudeCandidate);
             ((JArray)candidate["steps"]).Add(JObject.FromObject(new
@@ -165,11 +165,17 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsTrue(offset.IsReady, string.Join(" ", offset.Errors));
             Assert.AreEqual(6, offset.Requests.Count);
             steps[2]["parameters"]["centerXmm"] = 0;
-            steps[1]["parameters"]["plane"] = "Front Plane";
-            var plane = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
-                ExecutionMode.Real, new RegisteredExecutor(), Guid.NewGuid(), Guid.NewGuid());
-            Assert.IsFalse(plane.IsReady);
-            Assert.AreEqual(0, plane.Requests.Count);
+            foreach (var planeName in new[] { "Front Plane", "Right Plane" })
+            {
+                steps[1]["parameters"]["plane"] = planeName;
+                var plane = CadPlanV2ExecutionReadiness.Assess(Normalize(candidate.ToString()),
+                    ExecutionMode.Real, new RegisteredExecutor(), Guid.NewGuid(), Guid.NewGuid());
+                Assert.IsTrue(plane.IsReady, planeName + ": " + string.Join(" ", plane.Errors));
+                Assert.AreEqual(6, plane.Requests.Count);
+            }
+            steps[1]["parameters"]["plane"] = "Diagonal Plane";
+            Assert.IsFalse(CadPlanDocumentReader.ReadCandidate(candidate.ToString()).IsValid,
+                "An unsupported plane must fail plan validation before readiness assessment.");
         }
 
         [TestMethod]

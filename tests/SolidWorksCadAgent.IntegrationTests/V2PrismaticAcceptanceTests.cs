@@ -73,7 +73,26 @@ namespace SolidWorksCadAgent.IntegrationTests
                 new[] { -60.0, 60.0, 0.0, 10.0, -30.0, 30.0 }, 5);
         }
 
-        private async Task RunAsync(string name, JObject candidate, double expectedVolume, double[] bounds, int groups)
+        [DataTestMethod]
+        [DataRow("Front Plane", "front-plane", -23.0, 37.0, -9.0, 31.0, 0.0, 13.0)]
+        [DataRow("Right Plane", "right-plane", 0.0, 13.0, -9.0, 31.0, -37.0, 23.0)]
+        [DataRow("Top Plane", "top-plane", -23.0, 37.0, 0.0, 13.0, -31.0, 9.0)]
+        public Task OffsetBossWithThroughAndBlindCuts_ApprovedJobVerifiesPlaneFrameAndReopensSketches(
+            string plane, string name, double minX, double maxX, double minY, double maxY, double minZ, double maxZ)
+        {
+            var plan = NewPlan();
+            Group(plan, "AddRectangle", new { centerXmm = 7.0, centerYmm = 11.0, widthMm = 60.0, heightMm = 40.0 },
+                new { depthMm = 13.0 }, plane);
+            Group(plan, "AddCircle", new { centerXmm = -8.0, centerYmm = 12.0, diameterMm = 6.0 },
+                new { endCondition = "ThroughAll" }, plane);
+            Group(plan, "AddSlot", new { centerXmm = 17.0, centerYmm = -1.0, lengthMm = 12.0, widthMm = 4.0, angleDegrees = 23.0 },
+                new { endCondition = "Blind", depthMm = 4.0 }, plane);
+            return RunAsync(name, plan, 31072.0 - 133.0 * Math.PI,
+                new[] { minX, maxX, minY, maxY, minZ, maxZ }, 3, plane, true);
+        }
+
+        private async Task RunAsync(string name, JObject candidate, double expectedVolume, double[] bounds, int groups,
+            string plane = "Top Plane", bool assertAsymmetricPlaneSketches = false)
         {
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS") != "1")
                 Assert.Inconclusive("Set SOLIDWORKS_RUN_REFERENCE_TESTS=1 and SOLIDWORKS_EXPECTED_YEAR=2020 for native acceptance.");
@@ -123,7 +142,16 @@ namespace SolidWorksCadAgent.IntegrationTests
                     var keys = new[] { "minXmm", "maxXmm", "minYmm", "maxYmm", "minZmm", "maxZmm" };
                     for (int i = 0; i < keys.Length; i++)
                         Assert.AreEqual(bounds[i], observed["bounds"].Value<double>(keys[i]), 0.02, keys[i]);
-                    Assert.AreEqual(bounds[3] - bounds[2], observed["bounds"].Value<double>("sizeYmm"), 0.02, "Extrusion depth along model Y.");
+                    var frame = CadStandardPlaneFrame.FromPlaneName(plane);
+                    var origin = frame.ToModel(0, 0, 0);
+                    var bossDepth = candidate["steps"].Values<JObject>()
+                        .First(step => step.Value<string>("command") == CadCommandNames.Extrude)
+                        .Value<JObject>("parameters").Value<double>("depthMm");
+                    var depthEnd = frame.ToModel(0, 0, bossDepth);
+                    var expectedDepth = Math.Abs(depthEnd.Xmm - origin.Xmm) + Math.Abs(depthEnd.Ymm - origin.Ymm) + Math.Abs(depthEnd.Zmm - origin.Zmm);
+                    var sizes = new[] { observed["bounds"].Value<double>("sizeXmm"), observed["bounds"].Value<double>("sizeYmm"),
+                        observed["bounds"].Value<double>("sizeZmm") };
+                    Assert.IsTrue(sizes.Any(size => Math.Abs(size - expectedDepth) < 0.02), "Boss depth must follow the selected plane normal.");
                     string savedPath = Path.Combine(workspace, filename);
                     Assert.AreEqual(savedPath, result.Job.OutputPath, true);
                     Assert.IsTrue(new FileInfo(savedPath).Length > 0);
@@ -147,6 +175,23 @@ namespace SolidWorksCadAgent.IntegrationTests
                         Assert.IsTrue(binding.NativeReferenceBytes != null && binding.NativeReferenceBytes.Length > 0);
                         var resolved = await bridge.ResolveSketchReferenceAsync(modelId, sketch.OutputEntityId.Value, CancellationToken.None);
                         Assert.IsTrue(resolved.Success, "Reopened sketch " + sketch.OutputKey + ": " + resolved.Error?.Message);
+                        if (assertAsymmetricPlaneSketches)
+                            await session.InvokeWithApplicationAsync(app =>
+                            {
+#if SOLIDWORKS_INTEROP
+                                var native = (ModelDoc2)((SldWorks)app).ActiveDoc;
+                                var nativeStatus = -1;
+                                var objectRef = native.Extension.GetObjectByPersistReference3(binding.NativeReferenceBytes, out nativeStatus);
+                                Assert.AreEqual((int)swPersistReferencedObjectStates_e.swPersistReferencedObject_Ok, nativeStatus);
+                                var nativeSketch = objectRef as Sketch ?? (objectRef as Feature)?.GetSpecificFeature2() as Sketch;
+                                Assert.IsNotNull(nativeSketch, "The persisted sketch reference must resolve to its native sketch.");
+                                if (sketch.OutputKey == "profile1") AssertSketchBounds(nativeSketch, -23, 37, -9, 31);
+                                if (sketch.OutputKey == "profile2") AssertCircleCenter(nativeSketch, -8, 12);
+                                return true;
+#else
+                                return false;
+#endif
+                            }, CancellationToken.None);
                     }
                 }
                 finally
@@ -189,11 +234,11 @@ namespace SolidWorksCadAgent.IntegrationTests
             ["steps"] = new JArray(Step("new", "NewPart", new { })) };
         private static JObject Step(string key, string command, object parameters) => new JObject {
             ["stepKey"] = key, ["command"] = command, ["operationVersion"] = 1, ["parameters"] = JObject.FromObject(parameters) };
-        private static void Group(JObject plan, string primitive, object profile, object featureParameters)
+        private static void Group(JObject plan, string primitive, object profile, object featureParameters, string plane = "Top Plane")
         {
             var steps = (JArray)plan["steps"];
             int number = (steps.Count - 1) / 4 + 1;
-            var sketch = Step("sketch" + number, "CreateSketch", new { plane = "Top Plane" });
+            var sketch = Step("sketch" + number, "CreateSketch", new { plane });
             sketch["outputKey"] = "profile" + number;
             steps.Add(sketch);
             steps.Add(Step("primitive" + number, primitive, profile));
@@ -204,6 +249,34 @@ namespace SolidWorksCadAgent.IntegrationTests
             steps.Add(feature);
         }
 #if SOLIDWORKS_INTEROP
+        private static void AssertSketchBounds(Sketch sketch, double minX, double maxX, double minY, double maxY)
+        {
+            var points = new System.Collections.Generic.List<Tuple<double, double>>();
+            foreach (var segment in sketch.GetSketchSegments() as object[] ?? Array.Empty<object>())
+            {
+                var line = segment as SketchLine;
+                if (line == null || ((SketchSegment)line).ConstructionGeometry) continue;
+                var start = (SketchPoint)line.GetStartPoint2(); var end = (SketchPoint)line.GetEndPoint2();
+                points.Add(Tuple.Create(start.X * 1000.0, start.Y * 1000.0));
+                points.Add(Tuple.Create(end.X * 1000.0, end.Y * 1000.0));
+            }
+            Assert.AreEqual(8, points.Count, "The asymmetric base sketch must contain four native lines.");
+            Assert.AreEqual(minX, points.Min(point => point.Item1), 0.001, "local sketch min X");
+            Assert.AreEqual(maxX, points.Max(point => point.Item1), 0.001, "local sketch max X");
+            Assert.AreEqual(minY, points.Min(point => point.Item2), 0.001, "local sketch min Y");
+            Assert.AreEqual(maxY, points.Max(point => point.Item2), 0.001, "local sketch max Y");
+        }
+
+        private static void AssertCircleCenter(Sketch sketch, double expectedX, double expectedY)
+        {
+            var arcs = (sketch.GetSketchSegments() as object[] ?? Array.Empty<object>())
+                .Cast<SketchSegment>().Where(segment => segment.GetType() == (int)swSketchSegments_e.swSketchARC).ToArray();
+            Assert.AreEqual(1, arcs.Length, "The through cut sketch must retain one native circle.");
+            var center = (SketchPoint)((SketchArc)arcs[0]).GetCenterPoint2();
+            Assert.AreEqual(expectedX, center.X * 1000.0, 0.001, "circle local X");
+            Assert.AreEqual(expectedY, center.Y * 1000.0, 0.001, "circle local Y");
+        }
+
         private sealed class FixedPlanner : IVersionedCadPlanningProvider
         {
             private readonly string _json;

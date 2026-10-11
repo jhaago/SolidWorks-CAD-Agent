@@ -10,8 +10,8 @@ files were edited. Installed Windows applications remain the October 9 build.
 
 | Capability | Current V2 boundary |
 |---|---|
-| Rectangle, circular, rotated slot and regular-polygon bosses | One profile per Top Plane sketch; circle/slot/hexagon native acceptance and original rectangle regression passed |
-| Through holes and blind pockets | Separate exact sketch references, interior disjoint profiles in a rectangular base; circle/slot/rectangle/polygon native cuts passed |
+| Rectangle, circular, rotated slot and regular-polygon bosses | One profile per Top, Front or Right origin-plane sketch; profile coordinates map through an explicit shared frame |
+| Through holes and blind pockets | Separate exact sketch references, interior disjoint profiles in a rectangular base; accepted on each of the three origin planes |
 | Multiple sketches / variable-length plans | Ordered durable attempts and model revisions, independent persistent references; 10-step unit and native multi-cut jobs passed |
 | Lines / arcs | Native guarded mutation available; arbitrary line/arc contours remain review-only |
 | Clarification / approval | `V2:` uses the configured planner and its existing images/clarifications; Host scope context and reference adapter tested; explicit current-revision approval |
@@ -37,6 +37,16 @@ Executed evidence:
 - V1 hidden-body, rotated slot/hexagon and conflicting-open-filename regressions:
   5 passed (`v2-expansion-v1-regressions.trx`). Original approved V2 rectangle:
   1 passed (`v2-expansion-rectangle-regression.trx`).
+- Standard-plane extension: both full Release builds passed with 0 warnings/errors;
+  full unit suites passed 665/665 in both interop modes
+  (`v2-standard-planes-disabled-unit-final.trx`, `v2-standard-planes-native-unit-final.trx`).
+  SOLIDWORKS 2020 asymmetric offset boss + through hole + blind slot jobs passed on
+  Top, Front and Right after save/reopen, checking expected bounds/volume, local
+  rectangle/circle coordinates and every persistent sketch reference
+  (`v2-standard-planes-live-final.trx`). The complete V2 prismatic native suite
+  passed 7/7 (`v2-prismatic-all-planes-regression.trx`), V1 prismatic regressions
+  passed 5/5 (`v2-plane-v1-regressions.trx`), and established V2 reference/rectangle
+  tests passed 2/2 (`v2-plane-core-v2-regressions.trx`).
 - Independent code review found no critical/important production defect; its
   persistence-fixture weakness was corrected to use an admitted rectangular
   base and a shallower blind pocket. Shared old/new boundary concurrency test passes.
@@ -54,8 +64,8 @@ No installed applications were replaced and no physical phone acceptance was run
 Remaining priorities:
 - P1: add independent native sketch/feature parameter readback for internal cut
   position, depth/direction and profile topology; volume/bounds cannot certify all geometry.
-- P1: close V1 parity gaps incrementally: Front/Right frame acceptance, arbitrary
-  closed line/arc profiles, multiple boss features and supported edit operations.
+- P1: close V1 parity gaps incrementally: arbitrary closed line/arc profiles,
+  multiple boss features and supported edit operations.
 - P2: migrate retired narrow persistence/boundary tests to the shared APIs, then
   remove duplicated compatibility implementations; add driving dimensions/relations.
 - P2: install the candidate and run desktop/paired-phone request, approve, cancel,
