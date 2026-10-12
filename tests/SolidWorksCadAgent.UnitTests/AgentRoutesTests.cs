@@ -72,6 +72,50 @@ namespace SolidWorksCadAgent.UnitTests
             finally { if (File.Exists(settingsPath)) File.Delete(settingsPath); }
         }
 
+        [TestMethod]
+        public async Task SubmissionIdentity_DifferentValidImageConflictsWithoutReplacingOriginal()
+        {
+            var coordinator = new JobCoordinator(_repository, new ImagePlanner(), new SimulatedCadCommandExecutor(),
+                new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var images = new byte[2][];
+            for (var index = 0; index < images.Length; index++)
+            {
+                using (var bitmap = new Bitmap(4, 3))
+                using (var graphics = Graphics.FromImage(bitmap))
+                using (var buffer = new MemoryStream())
+                {
+                    graphics.Clear(index == 0 ? Color.Red : Color.Blue);
+                    bitmap.Save(buffer, ImageFormat.Png);
+                    images[index] = buffer.ToArray();
+                }
+            }
+            Assert.IsFalse(images[0].SequenceEqual(images[1]));
+            foreach (var route in new[] { "/jobs", "/jobs/submit" })
+            {
+                var id = Guid.NewGuid();
+                var body = new JObject
+                {
+                    ["prompt"] = "Create a bracket from this sketch",
+                    ["clientSubmissionId"] = id.ToString(),
+                    ["image"] = new JObject { ["mediaType"] = "image/png", ["dataBase64"] = Convert.ToBase64String(images[0]) }
+                };
+                var first = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(route == "/jobs" ? 201 : 202, first.StatusCode, first.JsonBody);
+                var repeat = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(repeat.JsonBody)["id"]);
+                body["image"]["dataBase64"] = Convert.ToBase64String(images[1]);
+                var conflict = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(409, conflict.StatusCode, conflict.JsonBody);
+                Assert.AreEqual("SUBMISSION_CONFLICT", (string)JObject.Parse(conflict.JsonBody)["error"]["code"]);
+                CollectionAssert.AreEqual(images[0], (await _repository.GetInputImageAsync(id)).Bytes);
+                body["clientSubmissionId"] = Guid.NewGuid().ToString();
+                var separate = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(route == "/jobs" ? 201 : 202, separate.StatusCode, separate.JsonBody);
+            }
+            await coordinator.WaitForSubmittedJobsAsync();
+        }
+
         private sealed class ImagePlanner : IImageCadPlanningProvider
         {
             public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
