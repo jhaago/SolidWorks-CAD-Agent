@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>SolidWorksCadAgent.SolidWorksBridge</RootNamespace>
+    <AssemblyName>SolidWorksCadAgent.SolidWorksBridge</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">$(ProgramW6432)\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == '' and Exists('C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist\SolidWorks.Interop.sldworks.dll')">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+    <SolidWorksInteropAvailable Condition="Exists('$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll') and Exists('$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll')">true</SolidWorksInteropAvailable>
+    <SolidWorksInteropAvailable Condition="'$(SolidWorksInteropAvailable)' == ''">false</SolidWorksInteropAvailable>
+    <DefineConstants Condition="'$(SolidWorksInteropAvailable)' == 'true'">$(DefineConstants);SOLIDWORKS_INTEROP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Draft edge finishing still lacks the persistent semantic face/edge resolver. Keep the WIP source in-tree, but out of both interop build paths until its topology dependencies are implemented. -->
+    <Compile Remove="Commands\EdgeFinishingCommandHandlers.cs" />
+    <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
+    <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SolidWorksInteropAvailable)' == 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
