@@ -33,6 +33,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         private readonly Func<CadNativeControlLease> _nativeControlLeaseFactory;
         private readonly SemaphoreSlim _executionGate = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _submissionSlots = new SemaphoreSlim(4, 4);
+        private readonly SemaphoreSlim _submissionAdmission = new SemaphoreSlim(1, 1);
         private readonly object _submittedSync = new object();
         private readonly HashSet<Task> _submitted = new HashSet<Task>();
 
@@ -72,25 +73,55 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         public string WorkspaceRoot => _settings.WorkspaceRoot;
         public bool SupportsImageInputs => _planningProvider is IImageCadPlanningProvider;
 
-        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null)
+        public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null, Guid? clientSubmissionId = null)
         {
-            var job = await CreateNewJobAsync(prompt, cancellationToken, requiresExplicitApproval, image).ConfigureAwait(false);
-            return await PlanCreatedJobAsync(job, cancellationToken).ConfigureAwait(false);
+            var receipt = await TryRecoverSubmissionAsync(prompt, image, clientSubmissionId, cancellationToken).ConfigureAwait(false);
+            if (receipt != null) return receipt;
+            var result = await CreateNewJobAsync(prompt, cancellationToken, requiresExplicitApproval, image, clientSubmissionId).ConfigureAwait(false);
+            return result.Created ? await PlanCreatedJobAsync(result.Job, cancellationToken).ConfigureAwait(false)
+                : await SnapshotAsync(result.Job.Id, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<JobSnapshot> TryRecoverSubmissionAsync(string prompt, CadPlanningImage image, Guid? clientSubmissionId, CancellationToken token)
+        {
+            if (!clientSubmissionId.HasValue) return null;
+            if (clientSubmissionId.Value == Guid.Empty) throw new JobCoordinatorException("INVALID_SUBMISSION_ID", "A nonempty submission UUID is required.");
+            if (string.IsNullOrWhiteSpace(prompt)) throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            var job = await _repository.FindSubmissionAsync(clientSubmissionId.Value, SubmissionInputHash.Compute(prompt, image), token).ConfigureAwait(false);
+            return job == null ? null : await SnapshotAsync(job.Id, token).ConfigureAwait(false);
         }
 
         // Return a durable job before cloud planning, for clients with short transport deadlines.
-        public async Task<JobSnapshot> SubmitAsync(string prompt, CancellationToken cancellationToken, CadPlanningImage image = null)
+        public async Task<JobSnapshot> SubmitAsync(string prompt, CancellationToken cancellationToken, CadPlanningImage image = null, Guid? clientSubmissionId = null)
         {
+            // Keep identity lookup and bounded admission together. Otherwise simultaneous
+            // duplicates can consume all slots before the first identity is persisted.
+            await _submissionAdmission.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try { return await SubmitCoreAsync(prompt, cancellationToken, image, clientSubmissionId).ConfigureAwait(false); }
+            finally { _submissionAdmission.Release(); }
+        }
+
+        private async Task<JobSnapshot> SubmitCoreAsync(string prompt, CancellationToken cancellationToken, CadPlanningImage image, Guid? clientSubmissionId)
+        {
+            var existing = await TryRecoverSubmissionAsync(prompt, image, clientSubmissionId, cancellationToken).ConfigureAwait(false);
+            if (existing != null) return existing;
             if (!_submissionSlots.Wait(0))
+            {
+                existing = await TryRecoverSubmissionAsync(prompt, image, clientSubmissionId, cancellationToken).ConfigureAwait(false);
+                if (existing != null) return existing;
                 throw new JobCoordinatorException("SUBMISSION_BUSY", "Four submitted jobs are already pending. Wait for a job to finish.");
+            }
+            var ownsSlot = true;
             try
             {
-                var job = await CreateNewJobAsync(prompt, cancellationToken, false, image).ConfigureAwait(false);
-                var receipt = await SnapshotAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
-                TrackBackground(job.Id, () => PlanCreatedJobAsync(job, cancellationToken));
+                var result = await CreateNewJobAsync(prompt, cancellationToken, false, image, clientSubmissionId).ConfigureAwait(false);
+                var receipt = await SnapshotAsync(result.Job.Id, CancellationToken.None).ConfigureAwait(false);
+                if (!result.Created) { _submissionSlots.Release(); ownsSlot = false; return receipt; }
+                TrackBackground(result.Job.Id, () => PlanCreatedJobAsync(result.Job, cancellationToken));
+                ownsSlot = false;
                 return receipt;
             }
-            catch { _submissionSlots.Release(); throw; }
+            catch { if (ownsSlot) _submissionSlots.Release(); throw; }
         }
 
         // All remote lifecycle work shares the same bounded queue and host shutdown drain.
@@ -119,7 +150,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             lock (_submittedSync) return Task.WhenAll(_submitted.ToArray());
         }
 
-        private async Task<CadJob> CreateNewJobAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null)
+        private async Task<SubmissionCreateResult> CreateNewJobAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null, Guid? clientSubmissionId = null)
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
@@ -136,7 +167,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             var now = _utcNow();
             var job = new CadJob
             {
-                Id = Guid.NewGuid(),
+                Id = clientSubmissionId ?? Guid.NewGuid(),
                 Prompt = prompt.Trim(),
                 State = JobState.New,
                 IsSimulated = _executionMode == ExecutionMode.Simulation,
@@ -144,8 +175,10 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 CreatedUtc = now,
                 UpdatedUtc = now
             };
+            if (clientSubmissionId.HasValue)
+                return await _repository.CreateSubmissionAsync(job, image, SubmissionInputHash.Compute(prompt, image), cancellationToken).ConfigureAwait(false);
             await _repository.CreateAsync(job, image, cancellationToken).ConfigureAwait(false);
-            return job;
+            return new SubmissionCreateResult(job, true);
         }
 
         private async Task<JobSnapshot> PlanCreatedJobAsync(CadJob job, CancellationToken cancellationToken)

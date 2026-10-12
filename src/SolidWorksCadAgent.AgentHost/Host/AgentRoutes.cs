@@ -115,6 +115,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     status = "ok",
                     schemaVersion = 1,
                     jobInputImages = _coordinator?.SupportsImageInputs == true,
+                    clientSubmissionIds = _coordinator != null,
                     executionMode = (_settingsService?.ActiveExecutionMode ?? ExecutionMode.Real).ToString(),
                     bridgeCapability = BridgeBuildCapabilities.Capability
                 });
@@ -525,8 +526,16 @@ namespace SolidWorksCadAgent.AgentHost.Host
         private async Task<AgentResponse> CreateJobAsync(string body, CancellationToken cancellationToken, bool submitOnly = false)
         {
             CreateJobRequest request;
+            Guid? clientSubmissionId = null;
             try
             {
+                var json = JObject.Parse(body ?? string.Empty);
+                if (json.TryGetValue("clientSubmissionId", StringComparison.OrdinalIgnoreCase, out var identity))
+                {
+                    if (identity.Type != JTokenType.String || !Guid.TryParse((string)identity, out var id) || id == Guid.Empty)
+                        return Error(400, "INVALID_SUBMISSION_ID", "A nonempty submission UUID is required.");
+                    clientSubmissionId = id;
+                }
                 request = JsonConvert.DeserializeObject<CreateJobRequest>(body ?? string.Empty);
             }
             catch (JsonException)
@@ -558,6 +567,16 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 image = new CadPlanningImage { MediaType = request.Image.MediaType, Bytes = bytes };
             }
 
+            if (clientSubmissionId.HasValue)
+            {
+                if (_coordinator == null) return Error(503, "SUBMISSION_ID_UNAVAILABLE", "Submission identity support is unavailable.");
+                try
+                {
+                    var receipt = await _coordinator.TryRecoverSubmissionAsync(request.Prompt, image, clientSubmissionId, cancellationToken).ConfigureAwait(false);
+                    if (receipt != null) return SnapshotResponse(submitOnly ? 202 : 201, receipt);
+                }
+                catch (JobCoordinatorException ex) { return Error(409, ex.Code, ex.Message); }
+            }
             if (_settingsService?.ExecutionModeRestartRequired == true)
             {
                 return Error(
@@ -571,8 +590,8 @@ namespace SolidWorksCadAgent.AgentHost.Host
                 try
                 {
                     var snapshot = await (submitOnly
-                        ? _coordinator.SubmitAsync(request.Prompt, cancellationToken, image)
-                        : _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken, image: image))
+                        ? _coordinator.SubmitAsync(request.Prompt, cancellationToken, image, clientSubmissionId)
+                        : _coordinator.CreateAndPlanAsync(request.Prompt, cancellationToken, image: image, clientSubmissionId: clientSubmissionId))
                         .ConfigureAwait(false);
                     return SnapshotResponse(submitOnly ? 202 : 201, snapshot);
                 }

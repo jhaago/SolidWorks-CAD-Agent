@@ -7,6 +7,7 @@ namespace SolidWorksCadAgent.Contracts.Jobs
     {
         public string Prompt { get; set; }
         public JobInputImageRequest Image { get; set; }
+        public string ClientSubmissionId { get; set; }
     }
 
     public sealed class JobInputImageRequest

@@ -24,6 +24,54 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class AgentRoutesTests
     {
+        [TestMethod]
+        public async Task SubmissionIdentity_RoutesValidateAndRecoverSameJob()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = Path.GetTempPath() });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            foreach (var route in new[] { "/jobs", "/jobs/submit" })
+            {
+                var id = Guid.NewGuid(); var body = new JObject { ["prompt"] = "Create plate", ["clientSubmissionId"] = id.ToString() };
+                var first = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.IsTrue(first.StatusCode == 201 || first.StatusCode == 202);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(first.JsonBody)["id"]);
+                var repeat = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(repeat.JsonBody)["id"]);
+                body["prompt"] = "changed";
+                Assert.AreEqual(409, (await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None)).StatusCode);
+                foreach (var invalid in new JToken[] { "", "bad", Guid.Empty.ToString(), 5, JValue.CreateNull() })
+                {
+                    body["clientSubmissionId"] = invalid;
+                    Assert.AreEqual(400, (await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None)).StatusCode);
+                }
+            }
+            await coordinator.WaitForSubmittedJobsAsync();
+            var health = await routes.HandleAsync(new AgentRequest("GET", "/health", null), CancellationToken.None);
+            Assert.IsTrue((bool)JObject.Parse(health.JsonBody)["clientSubmissionIds"]);
+        }
+        [TestMethod]
+        public async Task ExistingSubmissionRecoversWhileHostRestartIsRequired()
+        {
+            var settingsPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+            try
+            {
+                var settings = new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Real };
+                var service = new AgentSettingsService(settings, new JsonAgentSettingsStore(settingsPath), new FakeSecretStore(), _repository);
+                var candidate = new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation };
+                await service.UpdateAsync(candidate, CancellationToken.None);
+                Assert.IsTrue(service.ExecutionModeRestartRequired);
+                var id = Guid.NewGuid();
+                await _repository.CreateSubmissionAsync(new CadJob { Id = id, Prompt = "plate", State = JobState.Failed, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }, null, SubmissionInputHash.Compute("plate", null), CancellationToken.None);
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(), settings);
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator, service);
+                var body = new JObject { ["prompt"] = "plate", ["clientSubmissionId"] = id.ToString() };
+                Assert.AreEqual(202, (await routes.HandleAsync(new AgentRequest("POST", "/jobs/submit", body.ToString()), CancellationToken.None)).StatusCode);
+                body["clientSubmissionId"] = Guid.NewGuid().ToString();
+                Assert.AreEqual("HOST_RESTART_REQUIRED", (string)JObject.Parse((await routes.HandleAsync(new AgentRequest("POST", "/jobs/submit", body.ToString()), CancellationToken.None)).JsonBody)["error"]["code"]);
+            }
+            finally { if (File.Exists(settingsPath)) File.Delete(settingsPath); }
+        }
+
         private sealed class ImagePlanner : IImageCadPlanningProvider
         {
             public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
@@ -874,3 +922,4 @@ namespace SolidWorksCadAgent.UnitTests
         }
     }
 }
+

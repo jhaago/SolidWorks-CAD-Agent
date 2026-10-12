@@ -22,6 +22,64 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class JobCoordinatorTests
     {
+        [TestMethod]
+        public async Task ConcurrentDuplicateSubmit_PlansOnceAndFullQueueAllowsRecovery()
+        {
+            var planner = new SubmissionPlanner(); var executor = new SimulatedCadCommandExecutor();
+            var coordinator = new JobCoordinator(_repository, planner, executor,
+                new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            var id = Guid.NewGuid();
+            try
+            {
+                var receipts = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: id))));
+                Assert.IsTrue(receipts.All(r => r.Job.Id == id));
+                await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: Guid.NewGuid());
+                await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: Guid.NewGuid());
+                await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: Guid.NewGuid());
+                Assert.AreEqual(id, (await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: id)).Job.Id);
+                var busy = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() => coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: Guid.NewGuid()));
+                Assert.AreEqual("SUBMISSION_BUSY", busy.Code);
+                var conflict = await Assert.ThrowsExceptionAsync<JobCoordinatorException>(() => coordinator.SubmitAsync("different", CancellationToken.None, clientSubmissionId: id));
+                Assert.AreEqual("SUBMISSION_CONFLICT", conflict.Code);
+            }
+            finally { planner.Result.TrySetResult(new CadPlanningResult { Summary = "Need dimensions", Ambiguities = new System.Collections.Generic.List<string> { "dimensions" } }); await coordinator.WaitForSubmittedJobsAsync(); }
+            Assert.AreEqual(4, planner.Calls); Assert.AreEqual(0, executor.ExecutedCommands.Count);
+            // All four reservations were released; a deliberate new task can be admitted.
+            await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: Guid.NewGuid());
+            await coordinator.WaitForSubmittedJobsAsync(); Assert.AreEqual(5, planner.Calls);
+        }
+
+        [TestMethod]
+        public async Task TerminalAndRestartInterruptedRepeat_DoesNotPlan()
+        {
+            var hash = SubmissionInputHash.Compute(AcceptancePrompt, null); var planner = new SubmissionPlanner();
+            var coordinator = new JobCoordinator(_repository, planner, new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = Path.GetTempPath() });
+            foreach (var state in new[] { JobState.Completed, JobState.Cancelled, JobState.Failed, JobState.New })
+            {
+                var id = Guid.NewGuid();
+                await _repository.CreateSubmissionAsync(new CadJob { Id = id, Prompt = AcceptancePrompt, State = state, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }, null, hash, CancellationToken.None);
+                if (state == JobState.New) await _repository.RecoverInterruptedJobsAsync();
+                var receipt = await coordinator.CreateAndPlanAsync(AcceptancePrompt, CancellationToken.None, clientSubmissionId: id);
+                Assert.AreEqual(state == JobState.New ? JobState.Failed : state, receipt.Job.State);
+            }
+            Assert.AreEqual(0, planner.Calls);
+        }
+
+        [TestMethod]
+        public async Task ExistingImageSubmissionRecoversWhenNewPlannerDoesNotSupportImages()
+        {
+            var image = new CadPlanningImage { MediaType = "image/jpeg", Bytes = new byte[] { 1, 2 } }; var id = Guid.NewGuid();
+            await _repository.CreateSubmissionAsync(new CadJob { Id = id, Prompt = AcceptancePrompt, State = JobState.Failed, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }, image, SubmissionInputHash.Compute(AcceptancePrompt, image), CancellationToken.None);
+            var coordinator = CreateCoordinator(new SimulatedCadCommandExecutor(), false);
+            Assert.AreEqual(id, (await coordinator.SubmitAsync(AcceptancePrompt, CancellationToken.None, image, id)).Job.Id);
+        }
+
+        private sealed class SubmissionPlanner : ICadPlanningProvider
+        {
+            public int Calls;
+            public readonly TaskCompletionSource<CadPlanningResult> Result = new TaskCompletionSource<CadPlanningResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token) { Interlocked.Increment(ref Calls); return Result.Task; }
+        }
         private sealed class CapturingPlanner : IImageCadPlanningProvider
         {
             public readonly System.Collections.Generic.List<CadPlanningRequest> Requests = new System.Collections.Generic.List<CadPlanningRequest>();
