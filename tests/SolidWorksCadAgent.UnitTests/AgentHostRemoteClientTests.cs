@@ -35,6 +35,7 @@ namespace SolidWorksCadAgent.UnitTests
                 var response = client.Forward("GET", "status", null);
                 Assert.AreEqual(200, response.Status);
                 Assert.IsTrue((bool)JObject.Parse(response.Body)["jobInputImages"]);
+                Assert.IsTrue((bool)JObject.Parse(response.Body)["clientSubmissionIds"]);
                 var active = (JObject)JObject.Parse(response.Body)["activeJob"];
                 Assert.AreEqual("AwaitingClarification", (string)active["state"]);
                 Assert.AreEqual(revision.ToString("D"), (string)active["currentRevisionId"]);
@@ -73,7 +74,7 @@ namespace SolidWorksCadAgent.UnitTests
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("{}") });
                 var body = path == "/jobs" ? "{\"items\":[{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\"}]}" :
                     path == "/jobs/" + id ? "{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\",\"currentRevisionId\":\"" + revision + "\",\"currentRevisionNumber\":1,\"plan\":{\"Ambiguities\":[\"Which diameter?\"]},\"revisions\":[{\"prompt\":\"old work\"}]}" :
-                    path == "/health" ? "{\"jobInputImages\":true}" :
+                    path == "/health" ? "{\"jobInputImages\":true,\"clientSubmissionIds\":true}" :
                     path == "/settings" ? "{\"settings\":{}}" :
                     path == "/solidworks/status" ? "{\"runtime\":null}" : "{}";
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
@@ -98,6 +99,23 @@ namespace SolidWorksCadAgent.UnitTests
         {
             using (var client = new AgentHostRemoteClient(new SlowArtifactHandler()))
                 Assert.AreEqual(200, client.Forward("GET", "jobs/" + Guid.NewGuid() + "/artifact", null).Status);
+        }
+
+        [TestMethod]
+        public void ApprovalSubmission_WaitsForTheHostReceiptBeyondStatusDeadline()
+        {
+            using (var client = new AgentHostRemoteClient(new SlowApprovalHandler()))
+                Assert.AreEqual(202, client.Forward("POST", "jobs/" + Guid.NewGuid() + "/approve", "{}").Status);
+        }
+
+        private sealed class SlowApprovalHandler : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                Assert.IsTrue(request.RequestUri.AbsolutePath.EndsWith("/approve-submit", StringComparison.Ordinal));
+                await Task.Delay(1200, token);
+                return new HttpResponseMessage(HttpStatusCode.Accepted) { Content = new StringContent("{}") };
+            }
         }
 
         private sealed class SlowArtifactHandler : HttpMessageHandler

@@ -11,6 +11,34 @@ namespace SolidWorksCadAgent.SolidWorksBridge.References
     internal static class SolidWorksSketchSelectionScope
     {
 #if SOLIDWORKS_INTEROP
+        internal static CadCommandResult RunActive(ModelDoc2 model, byte[] token, Func<ModelDoc2, CadCommandResult> action)
+        {
+            if (model == null || token == null || token.Length == 0 || action == null)
+                return SolidWorksReferenceResolver.Failure(Error("SKETCH_REFERENCE_INVALID", "Validate", "A bound model, sketch token and action are required."));
+            var active = model.SketchManager.ActiveSketch as Sketch;
+            if (active == null)
+                return SolidWorksReferenceResolver.Failure(Error("NO_ACTIVE_SKETCH", "Resolve", "The plan-owned sketch is not active."));
+            var actionStarted = false;
+            try
+            {
+                var resolved = model.Extension.GetObjectByPersistReference3((byte[])token.Clone(), out var nativeStatus);
+                var feature = resolved as Feature;
+                var referenced = resolved as Sketch ??
+                    (feature != null && feature.GetTypeName2() == "ProfileFeature" ? feature.GetSpecificFeature2() as Sketch : null);
+                var classification = SolidWorksReferenceResolver.ClassifySketchResolution(nativeStatus, referenced != null);
+                if (classification != null) return SolidWorksReferenceResolver.Failure(classification);
+                if (!SameComIdentity(active, referenced))
+                    return SolidWorksReferenceResolver.Failure(Error("ACTIVE_SKETCH_MISMATCH", "Resolve", "The active sketch is not the plan-owned sketch."));
+                actionStarted = true;
+                return action(model);
+            }
+            catch (COMException ex)
+            {
+                if (actionStarted) throw;
+                return SolidWorksReferenceResolver.Failure(Error("SKETCH_REFERENCE_INVALID", "Resolve", "SOLIDWORKS failed while resolving the active sketch.", ex.Message));
+            }
+        }
+
         internal static CadCommandResult Run(ModelDoc2 model, byte[] token, int mark, Func<ModelDoc2, CadCommandResult> action)
         {
             if (model == null || token == null || token.Length == 0 || mark < 0 || action == null)

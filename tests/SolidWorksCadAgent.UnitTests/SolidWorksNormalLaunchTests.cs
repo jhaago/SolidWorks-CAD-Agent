@@ -77,6 +77,26 @@ namespace SolidWorksCadAgent.UnitTests
         }
 
         [TestMethod]
+        public async Task StartedProcessExit_ReturnsExitCodeWithoutWaitingForLaunchTimeout()
+        {
+            var starts = 0;
+            var waits = 0;
+            var result = await SolidWorksNormalLaunch.RunAsync(
+                () => Task.FromResult(new SolidWorksSessionStatus()),
+                () => Task.FromResult(false),
+                () => starts++,
+                token => { waits++; return Task.CompletedTask; },
+                120, CancellationToken.None, TimeSpan.FromSeconds(60),
+                () => starts > 0 ? (int?)unchecked((int)0x80000003) : null);
+
+            Assert.IsFalse(result.IsConnected);
+            Assert.AreEqual(1, starts);
+            Assert.AreEqual(0, waits);
+            StringAssert.Contains(result.ErrorMessage, "exited during startup");
+            StringAssert.Contains(result.ErrorMessage, "0x80000003");
+        }
+
+        [TestMethod]
         public async Task Cancellation_PreventsProcessStart()
         {
             var starts = 0;

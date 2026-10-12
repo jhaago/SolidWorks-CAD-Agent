@@ -47,14 +47,28 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
         public override Task<CadCommandResult> ExecuteAsync(
             JObject parameters,
             CancellationToken cancellationToken)
+            => ExecuteCoreAsync(parameters, null, cancellationToken);
+
+        internal Task<CadCommandResult> ExecuteStagedV2Async(
+            JObject parameters, Guid modelId, CancellationToken cancellationToken)
+            => ExecuteCoreAsync(parameters, modelId, cancellationToken);
+
+        private Task<CadCommandResult> ExecuteCoreAsync(
+            JObject parameters, Guid? stagedModelId, CancellationToken cancellationToken)
         {
             var requestedPath = GetString(parameters, "path");
             var allowOverwrite = parameters?["allowOverwrite"]?.Value<bool>() ?? false;
+            if (stagedModelId.HasValue && allowOverwrite)
+                return Task.FromResult(Failure("WORKSPACE_POLICY_VIOLATION", "Validate",
+                    "Version-2 managed saves cannot overwrite an existing part."));
 
             string resolvedPath;
+            string stagingPath = null;
             try
             {
                 resolvedPath = _workspacePolicy.ResolveForWrite(requestedPath, allowOverwrite);
+                if (stagedModelId.HasValue)
+                    stagingPath = _workspacePolicy.ResolveForWrite(CadV2SavePath.StageFor(resolvedPath, stagedModelId.Value), false);
             }
             catch (WorkspacePolicyException ex)
             {
@@ -75,16 +89,33 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("NO_ACTIVE_DOCUMENT", "Save", "No active SOLIDWORKS document is available to save.");
                 }
 
+                // SOLIDWORKS document activation/closure is title-based. Saving a second
+                // open model under the same filename can make later close/reopen target
+                // the wrong document even when the directories are different.
+                var targetNames = new[] { resolvedPath, stagingPath }.Where(path => path != null)
+                    .Select(Path.GetFileName).ToArray();
+                foreach (var open in (swApp.GetDocuments() as object[] ?? Array.Empty<object>()).OfType<ModelDoc2>())
+                {
+                    if (SolidWorksDocumentContext.SameIdentity(model, open)) continue;
+                    var openPath = open.GetPathName();
+                    var openName = string.IsNullOrWhiteSpace(openPath) ? open.GetTitle() : Path.GetFileName(openPath);
+                    if (targetNames.Any(name => string.Equals(name, openName, StringComparison.OrdinalIgnoreCase) ||
+                        (string.IsNullOrWhiteSpace(openPath) && string.Equals(Path.GetFileNameWithoutExtension(name),
+                            openName, StringComparison.OrdinalIgnoreCase))))
+                        return Failure("DOCUMENT_NAME_CONFLICT", "Save",
+                            "Another open document already uses the requested filename. Choose a unique filename or close that document before saving.");
+                }
                 // Recheck on the STA after queueing, before creating directories or saving.
                 _workspacePolicy.ResolveForWrite(resolvedPath, allowOverwrite);
                 var parent = Path.GetDirectoryName(resolvedPath);
                 if (!string.IsNullOrWhiteSpace(parent)) Directory.CreateDirectory(parent);
                 _workspacePolicy.ResolveForWrite(resolvedPath, allowOverwrite);
+                if (stagingPath != null) _workspacePolicy.ResolveForWrite(stagingPath, false);
                 model.ClearSelection2(true);
                 var errors = 0;
                 var warnings = 0;
                 var saved = model.Extension.SaveAs(
-                    resolvedPath,
+                    stagingPath ?? resolvedPath,
                     (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
                     null,
@@ -100,7 +131,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                         string.Format("errors={0}; warnings={1}; path={2}", errors, warnings, resolvedPath));
                 }
 
-                if (!File.Exists(resolvedPath))
+                if (!File.Exists(stagingPath ?? resolvedPath))
                 {
                     return Failure(
                         "SAVE_OUTPUT_MISSING",
@@ -109,7 +140,34 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                         resolvedPath);
                 }
 
-                return Ok(new { path = resolvedPath, errors, warnings });
+                if (stagingPath != null)
+                {
+                    // Copy into a second owned file first. A failed copy must never leave
+                    // a partially-written artifact at the user-facing final path.
+                    var publishPath = CadV2SavePath.PublishFor(resolvedPath, stagedModelId.Value);
+                    try
+                    {
+                        _workspacePolicy.ResolveForWrite(publishPath, false);
+                        File.Copy(stagingPath, publishPath, false);
+                        // Same-directory rename is atomic and File.Move never overwrites.
+                        File.Move(publishPath, resolvedPath);
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                        ex is WorkspacePolicyException)
+                    {
+                        try { if (File.Exists(publishPath)) File.Delete(publishPath); }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                        return Failure("SAVE_FINALIZATION_FAILED", "Save",
+                            "The staged part could not be published to a new final path without overwrite.", ex.Message);
+                    }
+                    if (!File.Exists(resolvedPath) || new FileInfo(resolvedPath).Length == 0)
+                        return Failure("SAVE_OUTPUT_MISSING", "Save", "The finalized part file is empty or missing.", resolvedPath);
+                }
+
+                return stagingPath == null
+                    ? Ok(new { path = resolvedPath, errors, warnings })
+                    : Ok(new { path = resolvedPath, errors, warnings, stagingPath });
 #else
                 return InteropUnavailable();
 #endif

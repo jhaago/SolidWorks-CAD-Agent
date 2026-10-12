@@ -70,6 +70,15 @@ namespace SolidWorksCadAgent.Desktop.Api
         public Task<JobViewDto> GetJobAsync(Guid jobId, CancellationToken cancellationToken) =>
             SendAsync<JobViewDto>(HttpMethod.Get, "jobs/" + jobId.ToString("D"), null, cancellationToken);
 
+        public Task<JobPageDto> ListJobsAsync(string cursor, CancellationToken cancellationToken) =>
+            ListJobsAsync(25, cursor, cancellationToken);
+
+        public Task<SettingsResponseDto> UpdateSettingsAsync(AgentSettingsDto settings, CancellationToken cancellationToken) =>
+            SendAsync<SettingsResponseDto>(HttpMethod.Put, "settings", JObject.FromObject(settings), cancellationToken);
+
+        public Task<CredentialStatusDto> GetCredentialStatusAsync(CancellationToken cancellationToken) =>
+            SendAsync<CredentialStatusDto>(HttpMethod.Get, "credentials/openai", null, cancellationToken);
+
         public Task<JobViewDto> ApproveJobAsync(Guid jobId, Guid revisionId, CancellationToken cancellationToken) =>
             SendAsync<JobViewDto>(
                 HttpMethod.Post,

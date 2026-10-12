@@ -88,6 +88,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             {
                 agentHostAvailable = true,
                 jobInputImages = (bool?)health["jobInputImages"] == true,
+                clientSubmissionIds = (bool?)health["clientSubmissionIds"] == true,
                 executionMode = (string)settings["executionMode"] ?? (string)health["executionMode"],
                 model = (string)settings["openAiModel"],
                 solidWorks = new
@@ -156,8 +157,9 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
 
         private async Task<RemoteResponse> SendAsync(string method, string path, string body)
         {
-            using (var deadline = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(
-                path.EndsWith("/artifact", StringComparison.Ordinal) || path == "jobs/submit" ? 15000 : 750)))
+            var timeoutMs = path.EndsWith("/artifact", StringComparison.Ordinal) || path == "jobs/submit" ? 15000 :
+                method == "POST" && path.StartsWith("jobs/", StringComparison.Ordinal) ? 10000 : 750;
+            using (var deadline = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs)))
             using (var request = new HttpRequestMessage(method == "GET" ? HttpMethod.Get : HttpMethod.Post, path))
             {
                 if (method == "POST") request.Content = new StringContent(body ?? "{}", Encoding.UTF8, "application/json");

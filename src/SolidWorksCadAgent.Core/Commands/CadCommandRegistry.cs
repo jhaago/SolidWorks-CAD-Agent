@@ -153,6 +153,8 @@ namespace SolidWorksCadAgent.Core.Commands
                 return Failure("UNSUPPORTED_PLAN_VERSION", "Registry", "The CAD plan version is not supported for execution.", null);
             if (request.Command == null || string.IsNullOrWhiteSpace(request.Command.Command))
                 return Failure("INVALID_COMMAND", "Registry", "A CAD command name is required.", null);
+            if (request.TargetSketchEntityId.HasValue)
+                return Failure("INVALID_EXECUTION_CONTEXT", "Registry", "A target-sketch reference requires the Bridge's guarded sketch-mutation path.", null);
 
             if (request.PlanVersion == 1 && request.OperationVersion != 1)
                 return Failure("INVALID_EXECUTION_REQUEST", "Registry", "Version-1 plans use version-1 operations.", null);

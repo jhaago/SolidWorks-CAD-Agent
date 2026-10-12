@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -123,6 +124,230 @@ namespace SolidWorksCadAgent.UnitTests
                 provider.PlanAsync(new CadPlanningRequest { Prompt = "Do something" }, CancellationToken.None));
 
             Assert.AreEqual("UNEXPECTED_TOOL_CALL", error.Code);
+        }
+
+        [DataTestMethod]
+        [DataRow("null")]
+        [DataRow("42")]
+        [DataRow("\"invalid-command\"")]
+        [DataRow("[]")]
+        public async Task PlanAsync_RejectsMalformedCommandEntryWithoutReturningPartialPlan(string invalidEntry)
+        {
+            var commands = new JArray(new JObject { ["command"] = CadCommandNames.NewPart, ["parameters_json"] = "{}" });
+            commands.Add(JToken.Parse(invalidEntry));
+            await AssertInvalidResponseAsync(PlanResponse("Create a plate", new JArray(), new JArray(), commands), "INVALID_PLAN_ARGUMENTS");
+        }
+
+        [DataTestMethod]
+        [DataRow("summary", "42")]
+        [DataRow("summary", "null")]
+        [DataRow("summary", "{}")]
+        [DataRow("assumptions", "[42]")]
+        [DataRow("assumptions", "[false]")]
+        [DataRow("assumptions", "[null]")]
+        [DataRow("assumptions", "[{}]")]
+        [DataRow("ambiguities", "[42]")]
+        [DataRow("ambiguities", "[null]")]
+        [DataRow("commands", "[{\"command\":42,\"parameters_json\":\"{}\"}]")]
+        [DataRow("commands", "[{\"command\":{},\"parameters_json\":\"{}\"}]")]
+        [DataRow("commands", "[{\"command\":\"NewPart\",\"parameters_json\":{}}]")]
+        [DataRow("commands", "[{\"command\":\"NewPart\",\"parameters_json\":42}]")]
+        public async Task PlanAsync_RejectsWrongPlanTokenTypes(string field, string invalidJson)
+        {
+            var response = JObject.Parse(PlanResponse("Create a plate", new JArray(), new JArray(), new JArray()));
+            var arguments = JObject.Parse((string)response["output"][0]["arguments"]);
+            arguments[field] = JToken.Parse(invalidJson);
+            response["output"][0]["arguments"] = arguments.ToString();
+            await AssertInvalidResponseAsync(response.ToString(), "INVALID_PLAN_ARGUMENTS");
+        }
+
+        [DataTestMethod]
+        [DataRow("{\"summary\":\"First\",\"summary\":\"Second\",\"assumptions\":[],\"ambiguities\":[],\"commands\":[]}")]
+        [DataRow("{\"summary\":\"Plate\",\"assumptions\":[],\"ambiguities\":[],\"commands\":[{\"command\":\"NewPart\",\"parameters_json\":\"{\\\"x\\\":1,\\\"x\\\":2}\"}]}")]
+        [DataRow("{\"assumptions\":[],\"ambiguities\":[],\"commands\":[]}")]
+        [DataRow("{\"summary\":\"Plate\",\"assumptions\":[],\"ambiguities\":[],\"commands\":[],\"extra\":true}")]
+        [DataRow("{\"summary\":\"Plate\",\"assumptions\":[],\"ambiguities\":[],\"commands\":[{\"command\":\"NewPart\",\"parameters_json\":\"{}\",\"extra\":true}]}")]
+        public async Task PlanAsync_RejectsPlanSchemaViolations(string arguments)
+        {
+            var response = JObject.Parse(PlanResponse("Plate", new JArray(), new JArray(), new JArray()));
+            response["output"][0]["arguments"] = arguments;
+            await AssertInvalidResponseAsync(response.ToString(), "INVALID_PLAN_ARGUMENTS");
+        }
+
+        [DataTestMethod]
+        [DataRow("status", "\"incomplete\"")]
+        [DataRow("status", "42")]
+        [DataRow("call-status", "\"in_progress\"")]
+        [DataRow("call-arguments", "42")]
+        [DataRow("call-arguments", "{}")]
+        [DataRow("output-entry", "null")]
+        [DataRow("output-entry", "{\"type\":{}}")]
+        [DataRow("model", "42")]
+        [DataRow("model", "{}")]
+        [DataRow("usage", "42")]
+        [DataRow("usage", "{\"input_tokens\":\"120\",\"output_tokens\":40}")]
+        [DataRow("usage", "{\"input_tokens\":1.5,\"output_tokens\":40}")]
+        [DataRow("usage", "{\"input_tokens\":-1,\"output_tokens\":40}")]
+        [DataRow("usage", "{\"input_tokens\":2147483648,\"output_tokens\":40}")]
+        [DataRow("usage", "{\"input_tokens\":2147483647,\"output_tokens\":40}")]
+        public async Task PlanAsync_RejectsMalformedResponseMetadataSafely(string field, string invalidJson)
+        {
+            var response = JObject.Parse(PlanResponse("Plate", new JArray(), new JArray(), new JArray()));
+            var value = JToken.Parse(invalidJson);
+            if (field == "call-status") response["output"][0]["status"] = value;
+            else if (field == "call-arguments") response["output"][0]["arguments"] = value;
+            else if (field == "output-entry") ((JArray)response["output"]).Add(value);
+            else response[field] = value;
+            await AssertInvalidResponseAsync(response.ToString(), "INVALID_OPENAI_RESPONSE");
+        }
+
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public async Task PlanAsync_RejectsOversizedResponseBeforeReturningPlan(bool unknownLength)
+        {
+            var body = PlanResponse(new string('x', 256 * 1024), new JArray(), new JArray(), new JArray());
+            using (var client = new HttpClient(new BodyHandler(body, unknownLength)))
+            {
+                var provider = new OpenAiCadPlanningProvider(client, () => "key", "test-model");
+                var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                    provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+                Assert.AreEqual("INVALID_OPENAI_RESPONSE", error.Code);
+            }
+        }
+
+        [TestMethod]
+        [TimeoutAttribute(5000)]
+        public async Task PlanAsync_StalledBodyAfterHeadersUsesClientTimeoutSafely()
+        {
+            using (var stream = new StalledBodyStream())
+            using (var client = new HttpClient(new StalledBodyHandler(stream)) { Timeout = TimeSpan.FromMilliseconds(200) })
+            {
+                var provider = new OpenAiCadPlanningProvider(client, () => "private-key", "test-model");
+                var pending = provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None);
+                await stream.ReadStarted;
+                var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() => pending);
+                Assert.AreEqual("OPENAI_REQUEST_TIMEOUT", error.Code);
+                Assert.IsFalse(error.ToString().Contains("private-key"));
+            }
+        }
+
+        [TestMethod]
+        [TimeoutAttribute(5000)]
+        public async Task PlanAsync_StalledBodyAfterHeadersPreservesCallerCancellation()
+        {
+            using (var cancellation = new CancellationTokenSource())
+            using (var stream = new StalledBodyStream())
+            using (var client = new HttpClient(new StalledBodyHandler(stream)) { Timeout = Timeout.InfiniteTimeSpan })
+            {
+                var provider = new OpenAiCadPlanningProvider(client, () => "private-key", "test-model");
+                var pending = provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, cancellation.Token);
+                await stream.ReadStarted;
+                cancellation.Cancel();
+                try
+                {
+                    await pending;
+                    Assert.Fail("Caller cancellation during the response body must propagate.");
+                }
+                catch (OperationCanceledException)
+                {
+                    Assert.IsTrue(cancellation.IsCancellationRequested);
+                }
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public async Task HttpFailure_OversizedBodyKeepsSafeStatusDiagnostics(bool unknownLength)
+        {
+            var body = new JObject { ["error"] = new JObject
+            {
+                ["type"] = "rate_limit_error", ["code"] = "rate_limit_exceeded",
+                ["message"] = "Authorization: Bearer private-key " + new string('x', 256 * 1024)
+            } }.ToString();
+            using (var client = new HttpClient(new BodyHandler(body, unknownLength, (HttpStatusCode)429)))
+            {
+                var provider = new OpenAiCadPlanningProvider(client, () => "private-key", "test-model");
+                var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                    provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+                Assert.AreEqual("OPENAI_HTTP_ERROR", error.Code);
+                Assert.AreEqual((int?)429, error.HttpStatusCode);
+                StringAssert.Contains(error.Message, "HTTP 429");
+                Assert.IsNull(error.OpenAiErrorCode);
+                Assert.IsNull(error.OpenAiErrorType);
+                Assert.IsFalse(error.ToString().Contains("private-key"));
+                Assert.IsFalse(error.Message.Contains("Authorization"));
+            }
+        }
+
+        private static async Task AssertInvalidResponseAsync(string body, string expectedCode)
+        {
+            using (var client = new HttpClient(new RecordingHandler(body)))
+            {
+                var provider = new OpenAiCadPlanningProvider(client, () => "private-key", "test-model");
+                var error = await Assert.ThrowsExceptionAsync<OpenAiPlanningException>(() =>
+                    provider.PlanAsync(new CadPlanningRequest { Prompt = "Plate" }, CancellationToken.None));
+                Assert.AreEqual(expectedCode, error.Code);
+                Assert.IsFalse(error.ToString().Contains("private-key"));
+            }
+        }
+
+        private sealed class BodyHandler : HttpMessageHandler
+        {
+            private readonly string _body;
+            private readonly bool _unknownLength;
+            private readonly HttpStatusCode _status;
+            public BodyHandler(string body, bool unknownLength, HttpStatusCode status = HttpStatusCode.OK)
+            {
+                _body = body;
+                _unknownLength = unknownLength;
+                _status = status;
+            }
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                Task.FromResult(new HttpResponseMessage(_status)
+                {
+                    Content = _unknownLength
+                        ? (HttpContent)new StreamContent(new NonSeekableStream(Encoding.UTF8.GetBytes(_body)))
+                        : new StringContent(_body, Encoding.UTF8, "application/json")
+                });
+        }
+
+        private sealed class NonSeekableStream : MemoryStream
+        {
+            public NonSeekableStream(byte[] bytes) : base(bytes) { }
+            public override bool CanSeek => false;
+        }
+
+        private sealed class StalledBodyHandler : HttpMessageHandler
+        {
+            private readonly Stream _stream;
+            public StalledBodyHandler(Stream stream) { _stream = stream; }
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(_stream) });
+        }
+
+        private sealed class StalledBodyStream : Stream
+        {
+            private readonly TaskCompletionSource<bool> _readStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Task ReadStarted => _readStarted.Task;
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                _readStarted.TrySetResult(true);
+                // A missing body cancellation token fails promptly instead of hanging the test host.
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+                throw new IOException("Authorization: Bearer private-key");
+            }
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override void Flush() => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
         [TestMethod]

@@ -10,6 +10,24 @@ namespace SolidWorksCadAgent.UnitTests.Remote
     [TestClass]
     public class RemoteAgentControlTests
     {
+        [TestMethod]
+        public void JobPost_ForwardsCanonicalSubmissionIdentityAndRejectsInvalidValues()
+        {
+            var fixture = new SessionFixture(); string forwarded = null;
+            var routes = CreateRoutes(fixture, (method, path, body) => { forwarded = body; return new RemoteResponse { Status = 409, Body = "{\"error\":{\"code\":\"SUBMISSION_CONFLICT\"}}" }; });
+            var id = Guid.NewGuid(); var input = new JObject { ["prompt"] = " plate ", ["clientSubmissionId"] = id.ToString("D").ToUpperInvariant(), ["extra"] = true };
+            Assert.AreEqual(401, routes.Handle(Request("agent/jobs", body: input.ToString())).Status); Assert.IsNull(forwarded);
+            Assert.AreEqual(409, routes.Handle(Request("agent/jobs", fixture.Grant.SessionToken, body: input.ToString())).Status);
+            var payload = JObject.Parse(forwarded); Assert.AreEqual(id.ToString("D"), (string)payload["clientSubmissionId"]); Assert.IsNull(payload["extra"]);
+            foreach (var invalid in new JToken[] { "", "bad", Guid.Empty.ToString(), 4, JValue.CreateNull() })
+            {
+                forwarded = null; input["clientSubmissionId"] = invalid;
+                Assert.AreEqual(400, routes.Handle(Request("agent/jobs", fixture.Grant.SessionToken, body: input.ToString())).Status); Assert.IsNull(forwarded);
+            }
+            input.Remove("clientSubmissionId");
+            Assert.AreEqual(409, routes.Handle(Request("agent/jobs", fixture.Grant.SessionToken, body: input.ToString())).Status);
+            Assert.IsNull(JObject.Parse(forwarded)["clientSubmissionId"]);
+        }
         private static RemoteRequest Request(string path, string token = null, string method = "POST", string body = "{}") => new RemoteRequest
         {
             Method = method,

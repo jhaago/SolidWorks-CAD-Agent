@@ -2,9 +2,18 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## Current reviewed source
+
+`feature/current-state-reviewed` combines the latest CAD/backend work through
+`63100d4` with the modern desktop interface. It retains image/design intake,
+explicit completion, persisted history, connection recovery, and V2 plan review.
+See [the current review and verification report](docs/current-state-review-2026-10-11.md)
+for passing checks and the remaining native/device acceptance limits.
+After building, use `Launch CAD Agent.cmd`; its compiled bundle is also validated.
+
 ## CAD architecture and expansion blueprint
 
-The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md) for the repository review, architectural debt, testing hierarchy and future-agent rules, and [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md) for dependencies and the next ten increments. The current tree builds in both interop modes, while face-sketch and finishing work remains unregistered and unverified; the review distinguishes historical native evidence from these drafts.
+The authoritative expansion checklist is [CAD capability matrix](docs/CAD_CAPABILITY_MATRIX.md). Read [current and target architecture](docs/CAD_AGENT_ARCHITECTURE.md), [implementation roadmap](docs/CAD_IMPLEMENTATION_ROADMAP.md), and the newest dated [implementation status](docs/CAD_IMPLEMENTATION_STATUS.md). Native evidence applies only to its recorded scenarios; [current segment-level readback and all nine V2 prismatic cases passed on SOLIDWORKS 2020](docs/native-verification-2026-10-11.md).
 
 ## PC V2 development
 
@@ -35,6 +44,13 @@ See `docs/superpowers/specs/2026-09-22-solidworks-cad-agent-design.md` and the v
 Image interpretation, assemblies, drawings and arbitrary macros are not enabled in V1.
 
 ## Manual remote workstation test build
+
+Current Host/RemoteAgent builds advertise `clientSubmissionIds` for compatible
+phone builds: the optional `clientSubmissionId` UUID creates or recovers one
+persisted job, and changed input for that UUID returns `SUBMISSION_CONFLICT`.
+Creation without an ID still works. Recovery returns existing state without
+repeating planning or native commands; approval remains required. The SQLite
+schema advances to 7, so older Host binaries cannot open an upgraded database.
 
 The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. V2 also provides authenticated paired job submission, status, approval, revisions, completion and bounded native artifact download. Android UI availability depends on the companion build. Image-design intake remains desktop/loopback-only in this milestone. See [setup and physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native plate and millimetre-scale acceptance passed on the SOLIDWORKS 2020 PC; see [Windows validation](docs/windows-validation-2026-10-05.md).
 

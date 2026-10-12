@@ -26,5 +26,6 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetBodyCount = "GetBodyCount";
         public const string GetRebuildErrors = "GetRebuildErrors";
         public const string GetFeatureTree = "GetFeatureTree";
+        public const string GetPrismaticCutReadback = "GetPrismaticCutReadback";
     }
 }

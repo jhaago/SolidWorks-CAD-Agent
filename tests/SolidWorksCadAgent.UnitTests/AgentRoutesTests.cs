@@ -24,6 +24,98 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass]
     public class AgentRoutesTests
     {
+        [TestMethod]
+        public async Task SubmissionIdentity_RoutesValidateAndRecoverSameJob()
+        {
+            var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = Path.GetTempPath() });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            foreach (var route in new[] { "/jobs", "/jobs/submit" })
+            {
+                var id = Guid.NewGuid(); var body = new JObject { ["prompt"] = "Create plate", ["clientSubmissionId"] = id.ToString() };
+                var first = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.IsTrue(first.StatusCode == 201 || first.StatusCode == 202);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(first.JsonBody)["id"]);
+                var repeat = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(repeat.JsonBody)["id"]);
+                body["prompt"] = "changed";
+                Assert.AreEqual(409, (await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None)).StatusCode);
+                foreach (var invalid in new JToken[] { "", "bad", Guid.Empty.ToString(), 5, JValue.CreateNull() })
+                {
+                    body["clientSubmissionId"] = invalid;
+                    Assert.AreEqual(400, (await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None)).StatusCode);
+                }
+            }
+            await coordinator.WaitForSubmittedJobsAsync();
+            var health = await routes.HandleAsync(new AgentRequest("GET", "/health", null), CancellationToken.None);
+            Assert.IsTrue((bool)JObject.Parse(health.JsonBody)["clientSubmissionIds"]);
+        }
+        [TestMethod]
+        public async Task ExistingSubmissionRecoversWhileHostRestartIsRequired()
+        {
+            var settingsPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+            try
+            {
+                var settings = new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Real };
+                var service = new AgentSettingsService(settings, new JsonAgentSettingsStore(settingsPath), new FakeSecretStore(), _repository);
+                var candidate = new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation };
+                await service.UpdateAsync(candidate, CancellationToken.None);
+                Assert.IsTrue(service.ExecutionModeRestartRequired);
+                var id = Guid.NewGuid();
+                await _repository.CreateSubmissionAsync(new CadJob { Id = id, Prompt = "plate", State = JobState.Failed, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }, null, SubmissionInputHash.Compute("plate", null), CancellationToken.None);
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(), new SimulatedCadCommandExecutor(), settings);
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator, service);
+                var body = new JObject { ["prompt"] = "plate", ["clientSubmissionId"] = id.ToString() };
+                Assert.AreEqual(202, (await routes.HandleAsync(new AgentRequest("POST", "/jobs/submit", body.ToString()), CancellationToken.None)).StatusCode);
+                body["clientSubmissionId"] = Guid.NewGuid().ToString();
+                Assert.AreEqual("HOST_RESTART_REQUIRED", (string)JObject.Parse((await routes.HandleAsync(new AgentRequest("POST", "/jobs/submit", body.ToString()), CancellationToken.None)).JsonBody)["error"]["code"]);
+            }
+            finally { if (File.Exists(settingsPath)) File.Delete(settingsPath); }
+        }
+
+        [TestMethod]
+        public async Task SubmissionIdentity_DifferentValidImageConflictsWithoutReplacingOriginal()
+        {
+            var coordinator = new JobCoordinator(_repository, new ImagePlanner(), new SimulatedCadCommandExecutor(),
+                new AgentSettings { WorkspaceRoot = Path.GetTempPath(), ExecutionMode = ExecutionMode.Simulation });
+            var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+            var images = new byte[2][];
+            for (var index = 0; index < images.Length; index++)
+            {
+                using (var bitmap = new Bitmap(4, 3))
+                using (var graphics = Graphics.FromImage(bitmap))
+                using (var buffer = new MemoryStream())
+                {
+                    graphics.Clear(index == 0 ? Color.Red : Color.Blue);
+                    bitmap.Save(buffer, ImageFormat.Png);
+                    images[index] = buffer.ToArray();
+                }
+            }
+            Assert.IsFalse(images[0].SequenceEqual(images[1]));
+            foreach (var route in new[] { "/jobs", "/jobs/submit" })
+            {
+                var id = Guid.NewGuid();
+                var body = new JObject
+                {
+                    ["prompt"] = "Create a bracket from this sketch",
+                    ["clientSubmissionId"] = id.ToString(),
+                    ["image"] = new JObject { ["mediaType"] = "image/png", ["dataBase64"] = Convert.ToBase64String(images[0]) }
+                };
+                var first = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(route == "/jobs" ? 201 : 202, first.StatusCode, first.JsonBody);
+                var repeat = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(id.ToString(), (string)JObject.Parse(repeat.JsonBody)["id"]);
+                body["image"]["dataBase64"] = Convert.ToBase64String(images[1]);
+                var conflict = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(409, conflict.StatusCode, conflict.JsonBody);
+                Assert.AreEqual("SUBMISSION_CONFLICT", (string)JObject.Parse(conflict.JsonBody)["error"]["code"]);
+                CollectionAssert.AreEqual(images[0], (await _repository.GetInputImageAsync(id)).Bytes);
+                body["clientSubmissionId"] = Guid.NewGuid().ToString();
+                var separate = await routes.HandleAsync(new AgentRequest("POST", route, body.ToString()), CancellationToken.None);
+                Assert.AreEqual(route == "/jobs" ? 201 : 202, separate.StatusCode, separate.JsonBody);
+            }
+            await coordinator.WaitForSubmittedJobsAsync();
+        }
+
         private sealed class ImagePlanner : IImageCadPlanningProvider
         {
             public Task<CadPlanningResult> PlanAsync(CadPlanningRequest request, CancellationToken token)
@@ -133,6 +225,61 @@ namespace SolidWorksCadAgent.UnitTests
             var saved = await _repository.GetAsync(jobId);
             Assert.AreEqual("Create a plate", saved.Prompt);
             Assert.AreEqual(JobState.New, saved.State);
+        }
+
+        [TestMethod]
+        public async Task ExplicitV2JobInputReturnsPlanAndRejectsIncompleteDimensions()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "cad-v2-route-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                    new SimulatedCadCommandExecutor(), new AgentSettings
+                    { WorkspaceRoot = root, ExecutionMode = ExecutionMode.Simulation });
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+                var invalid = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                    new JObject { ["prompt"] = "V2 rectangle boss: 20 x 10 mm; save as part.sldprt" }.ToString()), CancellationToken.None);
+                Assert.AreEqual(400, invalid.StatusCode);
+                Assert.AreEqual("V2_REQUEST_INVALID", JObject.Parse(invalid.JsonBody)["error"]["code"]);
+                var valid = await routes.HandleAsync(new AgentRequest("POST", "/jobs",
+                    new JObject { ["prompt"] = "V2 rectangle boss: 20 x 10 x 5 mm; save as part.sldprt" }.ToString()), CancellationToken.None);
+                Assert.AreEqual(201, valid.StatusCode);
+                var body = JObject.Parse(valid.JsonBody);
+                Assert.AreEqual(2, body["plan"].Value<int>("planVersion"));
+                Assert.AreEqual("AwaitingClarification", body.Value<string>("state"),
+                    "The normal UI must show v2 syntax without advertising native execution in simulation.");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        [TestMethod]
+        public async Task Artifact_RejectsVersionTwoSaveWithoutOwnedVerificationEvidence()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "CAD-v2-artifact-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var file = Path.Combine(root, "owned.sldprt");
+                File.WriteAllBytes(file, new byte[] { 1, 2, 3 });
+                var job = new CadJob { Id = Guid.NewGuid(), Prompt = "owned v2 part",
+                    State = JobState.ReadyForReview, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow };
+                await _repository.CreateAsync(job);
+                await _repository.AppendRevisionAsync(new JobRevision { Id = Guid.NewGuid(), JobId = job.Id,
+                    RevisionNumber = 1, Prompt = job.Prompt,
+                    PlanJson = "{\"planVersion\":2,\"steps\":[]}", InterpretationJson = "{}", CreatedUtc = DateTime.UtcNow });
+                await _repository.AppendCommandAsync(new CommandExecutionRecord { Id = Guid.NewGuid(),
+                    JobId = job.Id, RevisionNumber = 1, SequenceNumber = 1, CommandName = "SavePart",
+                    Success = true, ParametersJson = "{}", ResultJson = new JObject { ["path"] = file }.ToString(),
+                    StartedUtc = DateTime.UtcNow, CompletedUtc = DateTime.UtcNow });
+                var coordinator = new JobCoordinator(_repository, new DeterministicCadPlanningProvider(),
+                    new SimulatedCadCommandExecutor(), new AgentSettings { WorkspaceRoot = root });
+                var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
+                var response = await routes.HandleAsync(new AgentRequest("GET", "/jobs/" + job.Id + "/artifact", null), CancellationToken.None);
+                Assert.AreEqual(409, response.StatusCode);
+                Assert.AreEqual("ARTIFACT_NOT_READY", (string)JObject.Parse(response.JsonBody)["error"]["code"]);
+            }
+            finally { Directory.Delete(root, true); }
         }
 
         [TestMethod]
@@ -447,7 +594,7 @@ namespace SolidWorksCadAgent.UnitTests
                 _repository,
                 new DeterministicCadPlanningProvider(),
                 executor,
-                new AgentSettings { AutoMode = false });
+                new AgentSettings { AutoMode = false, ExecutionMode = ExecutionMode.Simulation });
             var routes = new AgentRoutes(_repository, _solidWorks, coordinator);
 
             var create = await routes.HandleAsync(
@@ -819,3 +966,4 @@ namespace SolidWorksCadAgent.UnitTests
         }
     }
 }
+

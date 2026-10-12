@@ -15,6 +15,11 @@ namespace SolidWorksCadAgent.AgentHost.Planning
     /// </summary>
     public static class CadPlanV2ExecutionReadiness
     {
+        internal static bool IsSketchPrimitive(string command) =>
+            command == CadCommandNames.AddRectangle || command == CadCommandNames.AddCircle ||
+            command == CadCommandNames.AddSlot || command == CadCommandNames.AddRegularPolygon ||
+            command == CadCommandNames.AddLine || command == CadCommandNames.AddArc;
+
         public static CadPlanV2ExecutionReadinessResult Assess(
             string persistedPlanJson, ExecutionMode mode, ICadCommandExecutor executor,
             Guid executionId, Guid managedModelId)
@@ -38,52 +43,52 @@ namespace SolidWorksCadAgent.AgentHost.Planning
             if (errors.Count > 0) return CadPlanV2ExecutionReadinessResult.Fail(errors);
 
             var requests = new List<CadVersionedCommandRequest>();
-            foreach (var step in parsed.CandidateV2.Steps)
+            var steps = parsed.CandidateV2.Steps;
+            Guid? activeSketch = null;
+            for (var index = 0; index < steps.Count; index++)
             {
+                var step = steps[index];
                 var version = step.OperationVersion.Value;
-                if (step.Command == CadCommandNames.SavePart)
-                {
-                    errors.Add("STEP_" + step.StepKey + ": SavePart requires Host overwrite authorization and artifact finalization binding before version-2 execution.");
-                    continue;
-                }
                 if (!availability.IsOperationRegistered(step.Command, version))
                 {
                     errors.Add("STEP_" + step.StepKey + ": No handler is registered for " + step.Command +
                         " operation version " + version + ".");
                     continue;
                 }
-
-                if (version == 2 && step.Command == CadCommandNames.Extrude)
+                if (step.Command == CadCommandNames.SavePart &&
+                    (index != steps.Count - 1 || step.Parameters.Value<bool?>("allowOverwrite") != false))
                 {
-                    try
-                    {
-                        requests.Add(CadPlanV2ExecutionBinder.BindExtrude(
-                            persistedPlanJson, step.StepKey, executionId, managedModelId));
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        errors.Add("STEP_" + step.StepKey + ": Host reference binding failed: " + ex.Message);
-                    }
+                    errors.Add("STEP_" + step.StepKey + ": SavePart must be final and explicitly non-overwriting.");
                     continue;
                 }
-
+                if (version == 2 && (step.Command == CadCommandNames.Extrude || step.Command == CadCommandNames.CutExtrude))
+                {
+                    try { requests.Add(CadPlanV2ExecutionBinder.BindFeature(persistedPlanJson, step.StepKey, executionId, managedModelId)); }
+                    catch (ArgumentException ex) { errors.Add("STEP_" + step.StepKey + ": " + ex.Message); }
+                    continue;
+                }
                 if (version != 1)
                 {
-                    errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command +
-                        " operation version " + version + ".");
+                    errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command + ".");
                     continue;
                 }
-
+                if (step.Command == CadCommandNames.CreateSketch) activeSketch = step.OutputEntityId;
+                var targetsSketch = IsSketchPrimitive(step.Command) || step.Command == CadCommandNames.ExitSketch;
+                if (targetsSketch && !activeSketch.HasValue)
+                {
+                    errors.Add("STEP_" + step.StepKey + ": No open managed sketch is available.");
+                    continue;
+                }
                 requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
                 {
-                    Command = step.Command,
-                    Parameters = (JObject)step.Parameters.DeepClone(),
-                    ExecutionId = executionId,
-                    ManagedModelId = managedModelId,
+                    Command = step.Command, Parameters = (JObject)step.Parameters.DeepClone(),
+                    ExecutionId = executionId, ManagedModelId = managedModelId,
                     OutputEntityId = step.Command == CadCommandNames.CreateSketch ? step.OutputEntityId : null
-                }));
+                }, targetSketchEntityId: targetsSketch ? activeSketch : null));
+                if (step.Command == CadCommandNames.ExitSketch) activeSketch = null;
             }
-
+            try { CadV2PrismaticGeometry.Analyze(parsed.CandidateV2); }
+            catch (ArgumentException ex) { errors.Add("UNSUPPORTED_GEOMETRY: " + ex.Message); }
             return errors.Count == 0
                 ? CadPlanV2ExecutionReadinessResult.Ready(requests)
                 : CadPlanV2ExecutionReadinessResult.Fail(errors);

@@ -14,6 +14,8 @@ namespace SolidWorksCadAgent.Core.Remote
         private readonly RemotePairingCoordinator pairing;
         private readonly IRemoteInputSink input;
         private readonly IRemoteSecretGenerator secrets;
+        private readonly Func<CadNativeControlLease> nativeControlLeaseFactory;
+        private CadNativeControlLease nativeControlLease;
         private ActiveSession active;
         private long nextEpoch, generation;
         private bool healthy=true;
@@ -23,8 +25,10 @@ namespace SolidWorksCadAgent.Core.Remote
             public bool Controlling;
             public DateTimeOffset Expires, Heartbeat;
         }
-        public RemoteSessionCoordinator(IRemoteClock clock,RemotePairingCoordinator pairing,IRemoteInputSink input,IRemoteSecretGenerator secrets=null) {
-            this.clock=clock; this.pairing=pairing; this.input=input; this.secrets=secrets??new RemoteSecretGenerator(); pairing.Revoked+=OnRevoked;
+        public RemoteSessionCoordinator(IRemoteClock clock,RemotePairingCoordinator pairing,IRemoteInputSink input,IRemoteSecretGenerator secrets=null,
+            Func<CadNativeControlLease> nativeControlLeaseFactory=null) {
+            this.clock=clock; this.pairing=pairing; this.input=input; this.secrets=secrets??new RemoteSecretGenerator();
+            this.nativeControlLeaseFactory=nativeControlLeaseFactory; pairing.Revoked+=OnRevoked;
         }
         public SessionGrant CreateSession(string deviceId,string credential) {
             lock(gate) {
@@ -47,14 +51,19 @@ namespace SolidWorksCadAgent.Core.Remote
         public RemoteSessionSnapshot Status(string token) { lock(gate) { Authorize(token); return Snapshot(); } }
         public RemoteSessionSnapshot Heartbeat(string token) { lock(gate) { Authorize(token).Heartbeat=clock.UtcNow; return Snapshot(); } }
         public RemoteSessionSnapshot ResumeControl(string token) {
-            lock(gate) { Authorize(token); EnsureHealthy(); if(generation<1) throw Error(409,"display_unavailable","Wait for a current desktop image before taking control."); ResetAuthority(); active.Controlling=true; return Snapshot(); }
+            lock(gate) { Authorize(token); EnsureHealthy(); if(generation<1) throw Error(409,"display_unavailable","Wait for a current desktop image before taking control."); ResetAuthority();
+                if(nativeControlLeaseFactory!=null) {
+                    nativeControlLease=nativeControlLeaseFactory();
+                    if(nativeControlLease==null) throw Error(409,"cad_execution_active","A CAD job is executing. Wait for it to finish before taking manual control.");
+                }
+                active.Controlling=true; return Snapshot(); }
         }
         public RemoteSessionSnapshot TakeControl(string token) { return ResumeControl(token); }
         public bool SubmitInput(string token,RemoteInputEvent value) {
             lock(gate) {
                 var session=Authorize(token); EnsureHealthy();
                 if(value==null || !value.IsValid()) throw Error(400,"input_invalid","This input event is unsupported or invalid.");
-                if(!session.Controlling || value.SessionId!=session.Id || value.AuthorityEpoch!=session.Epoch || value.DisplayGeneration!=generation || value.Sequence!=session.Sequence+1)
+                if(!session.Controlling || nativeControlLeaseFactory!=null && nativeControlLease==null || value.SessionId!=session.Id || value.AuthorityEpoch!=session.Epoch || value.DisplayGeneration!=generation || value.Sequence!=session.Sequence+1)
                     throw Error(409,"input_stale","Input authority or display changed. Take control again.");
                 session.Sequence=value.Sequence; // Consume before OS delivery: a lost reply must never replay input.
                 bool applied; try { applied=input.Apply(value); } catch { applied=false; }
@@ -82,9 +91,11 @@ namespace SolidWorksCadAgent.Core.Remote
         private void ResetAuthority() {
             active.Controlling=false; active.Sequence=0; active.Epoch=++nextEpoch;
             if(!Release()) { active=null; throw Error(503,"release_failed","Windows could not release remote input. Restart the remote agent before taking control."); }
+            ReleaseNativeLease();
         }
         private bool Release() { try { if(!input.ReleaseAll()) healthy=false; } catch { healthy=false; } return healthy; }
-        private void StopLocked() { Release(); active=null; nextEpoch++; }
+        private void StopLocked() { if(Release()) ReleaseNativeLease(); active=null; nextEpoch++; }
+        private void ReleaseNativeLease() { nativeControlLease?.Dispose(); nativeControlLease=null; }
         private void Expire() {
             if(active!=null && (clock.UtcNow>=active.Expires || clock.UtcNow-active.Heartbeat>=TimeSpan.FromSeconds(3) || !pairing.IsDeviceActive(active.Device))) StopLocked();
         }
@@ -96,7 +107,7 @@ namespace SolidWorksCadAgent.Core.Remote
         private void EnsureHealthy() { if(!healthy) throw Error(503,"release_failed","Remote input release failed. Restart the Windows remote agent."); }
         private RemoteSessionSnapshot Snapshot()=>new RemoteSessionSnapshot { SessionId=active.Id,AuthorityEpoch=active.Epoch,Controlling=active.Controlling,ExpiresAt=active.Expires };
         private void OnRevoked(string device) { lock(gate) { if(active!=null && (device=="*" || device==active.Device)) StopLocked(); } }
-        public void Dispose() { pairing.Revoked-=OnRevoked; StopRemote(); }
+        public void Dispose() { pairing.Revoked-=OnRevoked; StopRemote(); ReleaseNativeLease(); }
         private static RemoteProtocolException Error(int status,string code,string message)=>new RemoteProtocolException(status,code,message);
     }
 }

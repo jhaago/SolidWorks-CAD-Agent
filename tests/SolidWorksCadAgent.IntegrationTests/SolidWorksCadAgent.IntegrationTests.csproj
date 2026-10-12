@@ -30,9 +30,11 @@
   <ItemGroup>
     <PackageReference Include="MSTest.TestAdapter" Version="3.6.4" />
     <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.SolidWorksBridge\SolidWorksCadAgent.SolidWorksBridge.csproj" />
+    <ProjectReference Include="..\..\src\SolidWorksCadAgent.AgentHost\SolidWorksCadAgent.AgentHost.csproj" />
   </ItemGroup>
   <ItemGroup><Compile Include="..\Shared\AcceptancePlateEvidence.cs" Link="TestUtilities\AcceptancePlateEvidence.cs" /></ItemGroup>
 </Project>

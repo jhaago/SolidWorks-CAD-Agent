@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -23,11 +24,11 @@ namespace SolidWorksCadAgent.UnitTests.Remote
         public readonly RemoteSessionCoordinator Sessions;
         public readonly PairingResult Device;
         public readonly SessionGrant Grant;
-        public SessionFixture() {
+        public SessionFixture(Func<CadNativeControlLease> leaseFactory=null) {
             Pairing=new RemotePairingCoordinator(Clock,new MemoryRemoteStore());
             var receipt=Pairing.RequestPairing(Pairing.OpenPairing().Secret,"phone"); Pairing.Approve(receipt.RequestId);
             Device=Pairing.Poll(receipt.RequestId,receipt.ReceiptSecret);
-            Sessions=new RemoteSessionCoordinator(Clock,Pairing,Sink); Sessions.UpdateDisplayGeneration(1);
+            Sessions=new RemoteSessionCoordinator(Clock,Pairing,Sink,nativeControlLeaseFactory:leaseFactory); Sessions.UpdateDisplayGeneration(1);
             Grant=Sessions.CreateSession(Device.DeviceId,Device.Credential);
         }
         public RemoteInputEvent Input(long sequence=1) {
@@ -38,6 +39,26 @@ namespace SolidWorksCadAgent.UnitTests.Remote
     [TestClass]
     public class RemoteSessionTests
     {
+        [TestMethod] public void NativeCadLeaseExcludesManualControlInBothDirections() {
+            var folder=Path.Combine(Path.GetTempPath(),"cad-control-"+Guid.NewGuid().ToString("N"));
+            var path=Path.Combine(folder,"lease.lock");
+            try {
+                var f=new SessionFixture(()=>CadNativeControlLease.TryAcquire(path));
+                using(var host=CadNativeControlLease.TryAcquire(path)) {
+                    Assert.IsNotNull(host);
+                    var blocked=Assert.ThrowsException<RemoteProtocolException>(()=>f.Sessions.ResumeControl(f.Grant.SessionToken));
+                    Assert.AreEqual("cad_execution_active",blocked.Code);
+                    Assert.AreEqual(0,f.Sink.Applied);
+                }
+                var manual=f.Sessions.ResumeControl(f.Grant.SessionToken);
+                Assert.IsTrue(manual.Controlling);
+                Assert.IsNull(CadNativeControlLease.TryAcquire(path));
+                f.Sessions.ReleaseInput(f.Grant.SessionToken,manual.AuthorityEpoch);
+                using(var host=CadNativeControlLease.TryAcquire(path)) Assert.IsNotNull(host);
+                f.Sessions.Dispose();
+            }
+            finally { if(Directory.Exists(folder)) Directory.Delete(folder,true); }
+        }
         [TestMethod] public void StaleReleaseCannotRevokeFreshControl() {
             var f=new SessionFixture();var first=f.Sessions.ResumeControl(f.Grant.SessionToken);
             var fresh=f.Sessions.TakeControl(f.Grant.SessionToken);

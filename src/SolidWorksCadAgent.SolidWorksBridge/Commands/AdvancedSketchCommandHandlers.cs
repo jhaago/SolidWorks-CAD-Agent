@@ -23,7 +23,14 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
         public override Task<CadCommandResult> ExecuteAsync(JObject p, CancellationToken token) => InvokeAsync(application =>
         {
 #if SOLIDWORKS_INTEROP
-            var model = RequireDocument(application) as ModelDoc2;
+            return CreateOnActiveSketch(RequireDocument(application) as ModelDoc2, p);
+#else
+            return InteropUnavailable();
+#endif
+        }, token);
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateOnActiveSketch(ModelDoc2 model, JObject p)
+        {
             var manager = model?.SketchManager;
             if (manager?.ActiveSketch == null) return Failure("NO_ACTIVE_SKETCH", "Execute", "An owned sketch must be active before adding a line.");
             var previous = manager.AddToDB;
@@ -36,10 +43,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     : Ok(new { created = true, geometry = p.DeepClone() });
             }
             finally { manager.AddToDB = previous; }
-#else
-            return InteropUnavailable();
+        }
 #endif
-        }, token);
         private static double Mm(JObject p, string name) => UnitConverter.MillimetresToMetres((double)p[name]);
     }
 
@@ -55,7 +60,14 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
         public override Task<CadCommandResult> ExecuteAsync(JObject p, CancellationToken token) => InvokeAsync(application =>
         {
 #if SOLIDWORKS_INTEROP
-            var model = RequireDocument(application) as ModelDoc2;
+            return CreateOnActiveSketch(RequireDocument(application) as ModelDoc2, p);
+#else
+            return InteropUnavailable();
+#endif
+        }, token);
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateOnActiveSketch(ModelDoc2 model, JObject p)
+        {
             var manager = model?.SketchManager;
             if (manager?.ActiveSketch == null) return Failure("NO_ACTIVE_SKETCH", "Execute", "An owned sketch must be active before adding an arc.");
             var previous = manager.AddToDB;
@@ -69,10 +81,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     : Ok(new { created = true, geometry = p.DeepClone() });
             }
             finally { manager.AddToDB = previous; }
-#else
-            return InteropUnavailable();
+        }
 #endif
-        }, token);
         private static double Mm(JObject p, string name) => UnitConverter.MillimetresToMetres((double)p[name]);
     }
 }

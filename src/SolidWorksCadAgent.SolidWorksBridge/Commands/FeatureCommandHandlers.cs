@@ -115,6 +115,18 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 if (model == null)
                     return Failure("NO_ACTIVE_DOCUMENT", "Execute", "No active SOLIDWORKS document is available.");
 
+                return CreateSelectedCut(model, parameters);
+#else
+                return InteropUnavailable();
+#endif
+            }, cancellationToken);
+        }
+#if SOLIDWORKS_INTEROP
+        internal static CadCommandResult CreateSelectedCut(ModelDoc2 model, JObject parameters)
+        {
+            var endCondition = parameters.Value<string>("endCondition");
+            bool blind = endCondition == "Blind";
+            double? depthMm = blind ? (double?)parameters["depthMm"] : null;
                 if (model.SketchManager.ActiveSketch != null)
                     return Failure("SKETCH_STILL_ACTIVE", "Execute", "Exit the sketch before creating a cut feature.");
 
@@ -155,10 +167,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     return Failure("CUT_EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the requested cut.");
 
                 return Ok(new { endCondition, depthMm, featureName = feature.Name });
-#else
-                return InteropUnavailable();
-#endif
-            }, cancellationToken);
         }
+#endif
     }
 }

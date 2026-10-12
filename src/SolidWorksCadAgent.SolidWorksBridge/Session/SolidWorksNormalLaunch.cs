@@ -14,7 +14,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         internal static async Task<SolidWorksSessionStatus> RunAsync(
             Func<Task<SolidWorksSessionStatus>> attach, Func<Task<bool>> ready,
             Action start, Func<CancellationToken, Task> wait, int attempts, CancellationToken token,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null, Func<int?> launchProcessExitCode = null)
         {
             token.ThrowIfCancellationRequested();
             var status = new SolidWorksSessionStatus();
@@ -29,10 +29,14 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                     for (var attempt = 0; attempt < attempts; attempt++)
                     {
                         deadline.Token.ThrowIfCancellationRequested();
+                        var exitCode = launchProcessExitCode == null ? null : launchProcessExitCode();
+                        if (exitCode.HasValue) return BuildExitedStatus(status, exitCode.Value);
                         if (status.IsConnected && await WaitForProbeAsync(ready(), deadline.Token).ConfigureAwait(false)) return status;
                         await wait(deadline.Token).ConfigureAwait(false);
                         status = await WaitForProbeAsync(attach(), deadline.Token).ConfigureAwait(false);
                     }
+                    var finalExitCode = launchProcessExitCode == null ? null : launchProcessExitCode();
+                    if (finalExitCode.HasValue) return BuildExitedStatus(status, finalExitCode.Value);
                     if (status.IsConnected && await WaitForProbeAsync(ready(), deadline.Token).ConfigureAwait(false)) return status;
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
@@ -44,6 +48,19 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
                 DispatcherThreadId = status.DispatcherThreadId,
                 ErrorMessage = "SOLIDWORKS launch timed out waiting for COM registration and startup. " +
                     "Check the SOLIDWORKS window for startup or licence dialogs, then try Attach. " + status.ErrorMessage
+            };
+        }
+
+        private static SolidWorksSessionStatus BuildExitedStatus(SolidWorksSessionStatus status, int exitCode)
+        {
+            return new SolidWorksSessionStatus
+            {
+                IsConnected = false,
+                IsRunning = false,
+                IsVisible = status.IsVisible,
+                DispatcherThreadId = status.DispatcherThreadId,
+                ErrorMessage = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "SOLIDWORKS launch process exited during startup (exit code 0x{0:X8}).", exitCode)
             };
         }
 

@@ -85,6 +85,22 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
             {
                 var now = DateText(DateTime.UtcNow);
+                using (var bindings = connection.CreateCommand())
+                {
+                    bindings.Transaction = transaction;
+                    bindings.CommandText = @"
+UPDATE EntityReferenceBindings SET Status = @Uncertain, UpdatedUtc = @Now
+WHERE Status IN (@Pending, @Active) AND EXISTS (
+    SELECT 1 FROM V2MutationAttempts a JOIN ManagedModels m ON m.ModelId = a.ModelId
+    WHERE a.Status = 'Prepared' AND a.OutputEntityId = EntityReferenceBindings.EntityId
+      AND a.ModelId = EntityReferenceBindings.ModelId
+      AND m.ConfigurationKey = EntityReferenceBindings.ConfigurationKey);";
+                    Add(bindings, "@Uncertain", CadEntityReferenceStatus.Uncertain.ToString());
+                    Add(bindings, "@Pending", CadEntityReferenceStatus.Pending.ToString());
+                    Add(bindings, "@Active", CadEntityReferenceStatus.Active.ToString());
+                    Add(bindings, "@Now", now);
+                    bindings.ExecuteNonQuery();
+                }
                 using (var models = connection.CreateCommand())
                 {
                     models.Transaction = transaction;
@@ -131,17 +147,27 @@ WHERE ModelId IN (SELECT ModelId FROM V2MutationAttempts WHERE Status = 'Prepare
 
             using (var connection = OpenConnection())
             using (var transaction = connection.BeginTransaction())
+            {
+                InsertJob(connection, transaction, job, image, null);
+                transaction.Commit();
+            }
+            return Task.CompletedTask;
+        }
+
+        private static void InsertJob(SQLiteConnection connection, SQLiteTransaction transaction, CadJob job, CadPlanningImage image, string inputHash)
+        {
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
                 command.CommandText = @"
 INSERT INTO Jobs
 (Id, Prompt, State, PlanValidated, HasUnresolvedAmbiguity, AmbiguityMessage,
- OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc, RequiresExplicitApproval)
+ OverwriteRequested, OverwriteAuthorized, IsSimulated, OutputPath, CreatedUtc, UpdatedUtc, RequiresExplicitApproval, SubmissionInputHash)
 VALUES
 (@Id, @Prompt, @State, @PlanValidated, @HasUnresolvedAmbiguity, @AmbiguityMessage,
- @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc, @RequiresExplicitApproval);";
+ @OverwriteRequested, @OverwriteAuthorized, @IsSimulated, @OutputPath, @CreatedUtc, @UpdatedUtc, @RequiresExplicitApproval, @SubmissionInputHash);";
                 BindJob(command, job);
+                Add(command, "@SubmissionInputHash", inputHash);
                 command.ExecuteNonQuery();
                 if (image != null)
                 {
@@ -155,10 +181,7 @@ VALUES
                         input.ExecuteNonQuery();
                     }
                 }
-                transaction.Commit();
             }
-
-            return Task.CompletedTask;
         }
 
         public Task<CadPlanningImage> GetInputImageAsync(Guid jobId, CancellationToken cancellationToken = default(CancellationToken))
@@ -325,7 +348,8 @@ UPDATE Jobs SET
     IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
-    UpdatedUtc = @UpdatedUtc
+    UpdatedUtc = @UpdatedUtc,
+    RequiresExplicitApproval = @RequiresExplicitApproval
 WHERE Id = @Id AND State = @ExpectedState AND (@ExpectedRevision IS NULL OR (SELECT Id FROM Revisions WHERE JobId = @Id ORDER BY RevisionNumber DESC LIMIT 1) = @ExpectedRevision);";
                 BindJob(command, job);
                 Add(command, "@ExpectedState", (int)expectedState);
@@ -440,7 +464,8 @@ UPDATE Jobs SET
     IsSimulated = @IsSimulated,
     OutputPath = @OutputPath,
     CreatedUtc = @CreatedUtc,
-    UpdatedUtc = @UpdatedUtc
+    UpdatedUtc = @UpdatedUtc,
+    RequiresExplicitApproval = @RequiresExplicitApproval
 WHERE Id = @Id AND State = @ExpectedState;";
                     BindJob(update, job);
                     Add(update, "@ExpectedState", (int)expectedState);
@@ -890,7 +915,7 @@ FROM CommandExecutions WHERE JobId = @JobId ORDER BY RevisionNumber, SequenceNum
                 command.Transaction = transaction;
                 command.CommandText = @"
 SELECT Id, JobId, RevisionNumber, CheckName, Passed, ExpectedJson, ActualJson, CreatedUtc
-FROM VerificationResults WHERE JobId = @JobId ORDER BY RevisionNumber, CreatedUtc;";
+FROM VerificationResults WHERE JobId = @JobId ORDER BY RevisionNumber, CreatedUtc, rowid;";
                 Add(command, "@JobId", GuidText(jobId));
                 using (var reader = command.ExecuteReader())
                 {
@@ -1077,8 +1102,16 @@ VALUES
         private static void EnsureSchemaVersion(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             var currentVersion = GetSchemaVersion(connection, transaction);
-            if (currentVersion > 6)
-                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (6).");
+            if (currentVersion > 7)
+                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (7).");
+
+            if (!HasColumn(connection, transaction, "Jobs", "SubmissionInputHash"))
+                using (var command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    command.CommandText = "ALTER TABLE Jobs ADD COLUMN SubmissionInputHash TEXT NULL;";
+                    command.ExecuteNonQuery();
+                }
 
             if (!HasColumn(connection, transaction, "Jobs", "RequiresExplicitApproval"))
             {
@@ -1107,7 +1140,7 @@ VALUES
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
-                command.CommandText = "PRAGMA user_version = 6;";
+                command.CommandText = "PRAGMA user_version = 7;";
                 command.ExecuteNonQuery();
             }
         }

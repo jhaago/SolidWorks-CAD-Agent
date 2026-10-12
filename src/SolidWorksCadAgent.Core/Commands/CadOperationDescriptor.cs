@@ -44,8 +44,8 @@ namespace SolidWorksCadAgent.Core.Commands
             Descriptor(CadCommandNames.CreateSketch,
                 "CreateSketch {plane:'Top Plane'|'Front Plane'|'Right Plane'}\n" +
                 "Standard origin-plane positive bosses: Top Plane +Y, Front Plane +Z, Right Plane +X in the installed SOLIDWORKS 2020 template."),
-            Descriptor(CadCommandNames.AddLine, "AddLine {startXmm:number, startYmm:number, endXmm:number, endYmm:number}; endpoints must be distinct."),
-            Descriptor(CadCommandNames.AddArc, "AddArc {centerXmm:number, centerYmm:number, startXmm:number, startYmm:number, endXmm:number, endYmm:number, clockwise:boolean}; endpoints must be distinct and have equal nonzero radii."),
+            Descriptor(CadCommandNames.AddLine, "AddLine {startXmm:number, startYmm:number, endXmm:number, endYmm:number}; endpoints must be distinct. In V2 prismatic plans, line and arc entities may form one ordered closed simple loop when each end matches the next start."),
+            Descriptor(CadCommandNames.AddArc, "AddArc {centerXmm:number, centerYmm:number, startXmm:number, startYmm:number, endXmm:number, endYmm:number, clockwise:boolean}; endpoints must be distinct and have equal nonzero radii. In V2 prismatic plans, clockwise is interpreted in local sketch coordinates; the arc can join an ordered closed simple line/arc loop."),
             Descriptor(CadCommandNames.AddRectangle, "AddRectangle {centerXmm:number, centerYmm:number, widthMm:number>0, heightMm:number>0}"),
             Descriptor(CadCommandNames.AddCircle, "AddCircle {centerXmm:number, centerYmm:number, diameterMm:number>0}"),
             Descriptor(CadCommandNames.AddSlot, "AddSlot {centerXmm:number, centerYmm:number, lengthMm:number, widthMm:number, angleDegrees:number}; total end-to-end lengthMm > widthMm > 0, axis angle counterclockwise in degrees [-360,360]."),

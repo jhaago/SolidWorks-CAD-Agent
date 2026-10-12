@@ -22,6 +22,8 @@ appsettings.local.json
 Workspace/
 .design-intake/
 workspace/
+!src/SolidWorksCadAgent.Core/Workspace/
+!src/SolidWorksCadAgent.Core/Workspace/**
 *.SLDPRT
 *.SLDASM
 *.SLDDRW
@@ -32,3 +34,6 @@ Thumbs.db
 
 # Generated release/test bundles
 artifacts/
+
+# Local build and validation logs
+*.log

@@ -1,8 +1,389 @@
 # CAD implementation handoff
 
-Updated 2026-10-08. Current base revision: `820f2bfaff402c4977a9e9365ba8926ece4b1ff4` on `feature/v2-face-sketches-and-finishing`. The pre-existing unrelated whitespace-only change in `PrismaticCapabilityTests.cs` remains untouched. The consolidation source commit containing this handoff includes reviewed Tasks 7d-f and 7d-g1–g4-r, based on the revision above. The user authorized publication to the existing feature branch; no deployment or main merge is part of this consolidation. See Git history/remote for the resulting commit identity.
+## Native followup after current-state review — 11 October 2026
 
-## Current bounded slice: Task 7d-g4-r — fence unresolved NewPart dispatch
+The current reviewed source (`42d61ab`) passed the unrestricted SOLIDWORKS 2020
+launch/attach lifecycle check, the two targeted exact-segment native cases, and
+all nine current V2 prismatic acceptance cases, including save/reopen and native
+geometry/reference checks. The earlier startup failure did not reproduce; no
+installation, configuration or licensing change was required. Its exact prior
+cause remains unproven. [Native evidence and limits](native-verification-2026-10-11.md)
+supersede the startup/segment-acceptance blockers in the historical entries below.
+The user deferred physical-phone testing. No production deployment is claimed.
+
+## V2 expansion toward V1 capabilities - 11 October 2026
+
+Starting scope was the exact six-step centered rectangle boss. Implemented
+shared ordered persistence/dispatch, general sketch/feature binding, deterministic
+V1-plan adaptation for `V2:` requests, guarded native primitives/cuts, and general
+prismatic save/reopen verification and artifact authorization. No production CAD
+files were edited. Installed Windows applications remain the October 9 build.
+
+| Capability | Current V2 boundary |
+|---|---|
+| Rectangle, circular, rotated slot and regular-polygon bosses | One profile per Top, Front or Right origin-plane sketch; profile coordinates map through an explicit shared frame |
+| Through holes and blind pockets | Separate exact sketch references, interior disjoint profiles in a rectangular base; accepted on each of the three origin planes |
+| Multiple sketches / variable-length plans | Ordered durable attempts and model revisions, independent persistent references; 10-step unit and native multi-cut jobs passed |
+| Lines / arcs | One ordered closed simple contour of AddLine/AddArc entities per sketch; analytical topology, area and bounds validation; supports bosses and cuts under the existing prismatic plane/base rules |
+| Clarification / approval | `V2:` uses the configured planner and its existing images/clarifications; Host scope context and reference adapter tested; explicit current-revision approval |
+| Save / reopen / artifact delivery | Final new path, staged save, physical volume/bounds, rebuild/body checks and exact file/hash provenance |
+
+Example in the existing desktop or paired-phone CAD input:
+`V2: Create a 120 x 60 x 10 mm rectangular plate on Top Plane with a 10 mm through hole at x=-40 mm, y=0 mm. Save as v2/plate-hole.sldprt.`
+The configured planner may ask for missing details; inspect and approve the plan.
+Provider calls were not made during this development verification. Native fixtures
+use deterministic planning and the real Host/Bridge/SOLIDWORKS execution path.
+
+Executed evidence:
+- Complete Release solution builds with interop disabled and enabled: 0 warnings/errors.
+- Full unit suite: 659 passed in each mode, 0 failed/skipped. Evidence:
+  `v2-expansion-final-disabled-unit.trx`, `v2-expansion-final-native-unit.trx`.
+- Expanded V2 native acceptance: offset circular, rotated slot and rotated hexagon
+  bosses and an 18-step three-cut part passed, including save/reopen, physical
+  volume/bounds, feature tree and resolving every sketch token after reopen.
+  `v2-prismatic-live-first.trx`. Top Plane handedness was independently confirmed.
+- Extended 22-step plate with a through hole and three blind pockets (slot,
+  rectangle, polygon): 1 passed (`v2-prismatic-four-cuts-live.trx`). Retained
+  artifact SHA-256 `8978E2C9E9C6B37C94E7AFBE224FCDC31FF12EC0BB65627E3634613E70846A54`.
+- V1 hidden-body, rotated slot/hexagon and conflicting-open-filename regressions:
+  5 passed (`v2-expansion-v1-regressions.trx`). Original approved V2 rectangle:
+  1 passed (`v2-expansion-rectangle-regression.trx`).
+- Standard-plane extension: both full Release builds passed with 0 warnings/errors;
+  full unit suites passed 665/665 in both interop modes
+  (`v2-standard-planes-disabled-unit-final.trx`, `v2-standard-planes-native-unit-final.trx`).
+  SOLIDWORKS 2020 asymmetric offset boss + through hole + blind slot jobs passed on
+  Top, Front and Right after save/reopen, checking expected bounds/volume, local
+  rectangle/circle coordinates and every persistent sketch reference
+  (`v2-standard-planes-live-final.trx`). The complete V2 prismatic native suite
+  passed 7/7 (`v2-prismatic-all-planes-regression.trx`), V1 prismatic regressions
+  passed 5/5 (`v2-plane-v1-regressions.trx`), and established V2 reference/rectangle
+  tests passed 2/2 (`v2-plane-core-v2-regressions.trx`).
+- Closed-contour increment: full Release solution builds passed with interop off/on
+  (0 warnings/errors); full unit suites passed 674/674 in both modes
+  (`v2-line-arc-unit-disabled-final.trx`, `v2-line-arc-unit-native-final.trx`). The complete
+  V2 prismatic native suite passed 9/9 (`v2-line-arc-native.trx`), and the two new
+  contour cases passed again 2/2 with native arc-direction and endpoint readback
+  (`v2-line-arc-native-final.trx`). These cases verify an asymmetric offset Front
+  Plane semicircle boss and a line/arc through-cut in a rectangular plate, including
+  physical volume/bounds, clean rebuild, managed save/reopen, native line/arc sketch
+  content and persistent sketch-reference resolution. V1 native prismatic
+  regressions passed 5/5 (`v1-prismatic-regression.trx`).
+- Native cut-definition and segment-geometry readback increment: the Bridge reports
+  native cut end condition, forward depth, direction flags, direct parent profile
+  sketch, and each local line/arc's geometry. The Host compares line endpoints,
+  arc center/radius/endpoints/rotation, topology and bounds against expectations
+  derived from the normalized persisted V2 plan, failing closed on missing or
+  mismatched data. Segment enumeration order is ignored; line endpoint reversal is
+  accepted, and an arc may reverse endpoints only when its rotation reverses too.
+  Both pre-save and managed post-save/reopen verification use this check, while
+  simulation explicitly refuses native-only readback. Focused readback-related
+  unit classes passed 83/83 with interop disabled and 83/83 with interop enabled.
+  Earlier native evidence remains valid for aggregate cut readback, but those
+  SOLIDWORKS 2020 runs predate exact segment matching: the four-cut plate passed
+  1/1 (`v2-cut-readback.trx`), the semicircle through-cut passed 1/1
+  (`v2-cut-contour-readback.trx`), and the V1 slot/hex pocket regression passed
+  1/1 (`v1-prismatic-readback-regression.trx`). They do not verify the new exact
+  segment matcher. Current attempts have not reached native model creation. The
+  four-cut and contour fixtures failed at AttachAsync; a retry after closing the
+  stale headless SOLIDWORKS process again failed at AttachAsync. The lifecycle
+  test launched a new SOLIDWORKS process but timed out after one minute waiting
+  for COM registration. Windows displayed an application error reporting a
+  breakpoint exception (`0x80000003`); only the test-launched process was closed.
+  The registered `SldWorks.Application` COM server points to the installed
+  `SLDWORKS.exe`, but this does not establish that startup is healthy. Evidence is
+  in `segment-readback-native-semicircle.trx` and
+  `segment-readback-native-lifecycle.trx`. The latest semicircle fixture left
+  only its unique `jobs.sqlite` test metadata under the capability-test workspace;
+  no model was created. The four-cut case was not retried. The exact segment
+  matcher therefore still needs live 2020 acceptance after startup/COM recovery.
+  Full unit runs now complete in both compile modes: 676/677 passed with interop
+  disabled and 676/677 with interop enabled, with no skips. The single failure in
+  each run is `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames`;
+  this environment throws `PlatformNotSupportedException` from `HttpListener`.
+  Earlier route/coordinator failures and a stalled concurrency test came from unit
+  fixtures acquiring the machine-wide CAD lease. The affected fake-executor tests
+  now use isolated per-test lease paths, while the route-only fake executor is
+  explicitly configured for Simulation. No production lease behavior changed.
+  TRX evidence: `segment-readback-full-disabled-final.trx` and
+  `segment-readback-full-native-enabled-final2.trx`. The focused readback groups
+  also passed 83/83 in each mode.
+- Multi-boss probe (11 October 2026): exploratory edge-joined rectangular boss
+  jobs on Top, Front and Right each created a single native body, but SOLIDWORKS
+  measured 2,540 mm³ against the 2,000 mm³ analytical expectation. The Host's
+  pre-save verifier blocked all three before save; the plans remain unsupported.
+  A disposable sketch-level probe isolated the defect to the first rectangle:
+  `CreateCenterRectangle` snapped its center from (1,2) mm to the origin but kept
+  the opposite corner, producing [-11,11] × [-7,7] and 1,540 mm³ for that boss.
+  `AddRectangleCommandHandler` now constructs the same requested center/size from
+  explicit min/max corners with `CreateCornerRectangle`. The native regression
+  checks four-edge bounds after each boss and confirms one body at 2,000 mm³.
+  The probe passes 1/1 on SOLIDWORKS 2020. Production V2 multi-boss admission
+  remains closed. Verification diagnostics continue to include observed volume
+  and bounds. The V2 end-to-end native rerun was blocked by the unavailable CAD
+  control lease; the V1 suite could not restore an original document because no
+  document was open at suite start.
+- Independent code review found no critical/important production defect; its
+  persistence-fixture weakness was corrected to use an admitted rectangular
+  base and a shallower blind pocket. Shared old/new boundary concurrency test passes.
+
+Native runtime: SOLIDWORKS 2020 SP0, revision 28.0.0, installed English origin-plane
+names/template. Retained expanded artifacts and journal databases are in unique
+`C:/SolidWorks-CAD-Agent/Workspace/capability-tests/v2-*` directories. TRX files
+are under the UnitTests/IntegrationTests TestResults folders.
+
+Windows candidate: `artifacts/v2-prismatic-expansion-20261011/SolidWorksCadAgent-Windows-Test-Bundle.zip`.
+Production bundle validation passed. ZIP SHA-256:
+`E20A9E9136BB374323E0D75F46929DCD71B5393F01865DB69B743290AFF5F4BA`.
+The candidate contains the preserved local RemoteHttpServer diagnostic edit.
+No installed applications were replaced and no physical phone acceptance was run.
+Remaining priorities:
+- P1: recover a stable SOLIDWORKS 2020 startup/COM session, then rerun the
+  semicircle and four-cut native acceptance tests with the exact segment matcher.
+  Current launches fail before native model creation with a breakpoint exception.
+- P1: extend beyond the admitted single-loop contour to multiple boss features,
+  supported edit operations and additional independently verified topology.
+- P2: migrate retired narrow persistence/boundary tests to the shared APIs, then
+  remove duplicated compatibility implementations; add driving dimensions/relations.
+- P2: install the candidate and run desktop/paired-phone request, approve, cancel,
+  renewal/reconnect and artifact-download acceptance. No physical Android test
+  or installed-service upgrade was performed during this increment.
+- Existing bundle-regression script restriction remains unresolved; production
+  bundle validation is a separate check and does not erase that limitation.
+
+## SOLIDWORKS launch failure diagnostics - 11 October 2026
+
+`SolidWorksSession.LaunchAsync` now observes the process it starts while waiting
+for COM registration and startup readiness. If that process exits first, the
+launch result reports its exit code immediately; it does not terminate or retry
+the process. This improves diagnostics for startup crashes but does not repair
+SOLIDWORKS startup.
+
+Verification:
+- Focused launch-helper tests passed 9/9 with interop disabled.
+- Full unit suites passed 677/678 with interop disabled and enabled. The sole
+  failure in each mode remains
+  `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames`,
+  where this environment throws `PlatformNotSupportedException` constructing
+  `HttpListener`.
+- SOLIDWORKS was not launched again. Available WER history contains older
+  SOLIDWORKS-related records, including a September 22 crash involving
+  `NETAPI32.dll`; those records do not establish the cause of the October 10
+  breakpoint exception. Native segment-matcher acceptance remains unverified.
+
+## SOLIDWORKS 2020 native acceptance and save-conflict correction - 10 October 2026
+
+The user authorized live testing and closure of open test documents. Six controlled native cases now pass on SOLIDWORKS 2020 SP0 (revision 28.0.0), using the reviewed Bridge and in-process Host components. Installed Host/Desktop/RemoteAgent binaries were not replaced.
+
+| Check | Executed result | Evidence |
+|---|---|---|
+| Hidden sole and additional solid, count/bounds and sole-body volume, before and after save/reopen | 2 passed | `review-live-prismatic-fixed.trx` |
+| Rotated slot through-cut plus hexagonal blind pocket; rotated hexagonal boss | 2 passed, native feature/profile/volume evidence before and after reopen | `review-live-prismatic-fixed.trx` |
+| Reject Save As when another open document uses that filename | 1 passed; no conflicting output, original saved document remains open, target stays unsaved | `review-live-prismatic-fixed.trx` |
+| Exact approved V2 rectangle boss through six commands, managed save/reopen, verification and artifact bytes | 1 passed | `review-live-approved-v2.trx` |
+| Complete Release solution builds, interop disabled and enabled | Both succeeded, 0 warnings/errors | Native build restored last |
+| Full Release unit suites, interop disabled and enabled | 630 passed in each mode, 0 failed/skipped | `review-live-fix-disabled-unit.trx`, `review-live-fix-native-unit.trx` |
+
+TRX files are under the corresponding IntegrationTests/UnitTests `TestResults` directories. Four successful prismatic geometry artifacts remain in unique folders under `C:/SolidWorks-CAD-Agent/Workspace/capability-tests/`; the V2 fixture intentionally cleans up its temporary database/part after checking delivery. V2 job `249fda62-43bd-44d4-ae98-7911d7b6695a` recorded artifact SHA-256 `1477e249ec916ca8fae2261bd12944510621f8fbf5f38f2baa6f477f271cb8be` before cleanup.
+
+The first native run had 2 passes and 2 failures (`review-live-prismatic.trx`): a reopen identity failure and loss of the original same-named hexagon test document from the open-document set. The fixture reused filenames across different directories; title-based native close/reopen is ambiguous in this situation. A focused native regression then demonstrated that SavePart incorrectly accepted another open document's filename (`review-save-collision-red.trx`, 1 expected failure). The Bridge now rejects a conflicting final or staging filename on its STA before SaveAs; the existing COM identity comparison exempts the same model. Test artifacts now receive unique filenames, not merely unique directories. The final successful tests assert original-document restoration. No existing CAD file was deliberately overwritten; the initial failure did close an existing test document, so this run must not be described as preserving every original open document.
+
+Updated native candidate: `artifacts/engineering-review-native-accepted-20261010/SolidWorksCadAgent-Windows-Test-Bundle.zip`, SHA-256 `F004FF9BCC1B837A6894D2D6FB909861AD27385E7593476650F287FEC6C05A1B`. Production bundle validation passed. It includes the new Bridge correction and the preserved RemoteHttpServer diagnostic edit. The earlier Windows candidate below is superseded; Android is unchanged. No deployment or publication occurred.
+
+Remaining gates: the missing packaging regression script is still unresolved; live Remote/manual-input exclusion and physical-phone lifecycle tests remain pending. Save conflict prevention does not certify arbitrary pre-existing duplicate-title documents opened outside the Agent: explicitly harden and test OpenPart/CloseDocument for that case before supporting broad existing-document workflows. Native acceptance covers these six cases, not all CAD capabilities or production readiness.
+
+## Acceptance preparation and local candidates - 10 October 2026
+
+Local candidates are under `artifacts/engineering-review-20261010/`. They have not been installed, published or used for live CAD acceptance. Running applications remain the October 9 installed builds.
+
+- Native Release solution build: succeeded, 0 warnings/errors, installed SOLIDWORKS 2020 interop. Production ZIP validation passed (`NativeSolidWorksInterop`).
+- Fresh Release unit suite: **630 passed, 0 failed/skipped**, evidence `tests/SolidWorksCadAgent.UnitTests/TestResults/rollout-release-unit.trx`. Bundle file-lock regression passed.
+- Windows ZIP SHA-256: `450EA1F3CACDF1E714E50CF47B92B619187645BBA549FA925BC3FCFAFBDF3B3A`. Source is review commit `782d6b4` plus the preserved RemoteHttpServer diagnostic edit, not a clean-HEAD-only release.
+- Android candidate `solidworks-cad-agent-android-0.4.3-review-c2ab52a.apk`: SHA-256 `550A31F35F7E0BFCE4916279AFA58A227D2A0CC99B164F9BA50B34DBFC4A641D`. Signature verification passed; certificate SHA-256 `c00c3f9daff94a963c6fab61ceae2488eb9af92466f145d714e2f03f319d1e63` matches earlier published previews. This is a debug-signed acceptance candidate. ADB reported no connected device; no installation or instrumentation run occurred.
+- Read-only installed-host checks reported real/native mode, SOLIDWORKS 2020 revision 28.0.0 and no executing/interpreting/approved/verifying jobs. An existing document was active. Native tests remain pending an idle-workstation window.
+
+Packaging regression blocker: `test-windows-bundle-validator.ps1` assumes compile-only input and always changes its marker to native, so it fails with an already-native ZIP without introducing a contradiction. Production validation correctly accepted the valid ZIP. The intended correction is to validate the source, switch to the opposite marker and require the specific compiled-capability mismatch. During that correction the tracked script became inaccessible and disappeared. Restoring the original HEAD version also failed with Windows Permission denied. Folder ACLs permit user writes; no matching Defender event was found. Bitdefender is running, but the cause is unconfirmed. The correction is not verified or committed. Do not commit the missing script as a deletion; resolve the workstation restriction and restore it before rerunning the regression. No security settings were changed.
+
+Next acceptance gates: hidden sole/additional solids before and after save/reopen; approved V2 six-step job with artifact hash and original-document restoration; legacy CAD/remote-input exclusion; paired-phone submit/approve/cancel/renew/reconnect/download. Obtain an idle window and prevent competing native input. Compilation and unit tests do not prove native geometry acceptance. Resolve the packaging regression blocker before promoting these candidates.
+
+## Engineering review completed in local review checkouts — 10 October 2026
+
+Baseline: desktop `abd11f1` on `feature/v2-face-sketches-and-finishing`; Android `7c636f5` on `feature/phone-first-v2`. Review checkouts are `solidworks` and `android` in the October 10 comprehensive-engineering-review workspace. Original checkouts and installed binaries remain unchanged. The original RemoteHttpServer edit and integration-test whitespace change are preserved separately from review commits. No push, merge, publication or deployment was performed.
+
+Read the new [engineering assessment](CAD_AGENT_ARCHITECTURE.md#engineering-review-and-corrections--10-october-2026) for the actual architecture, prioritized findings, unresolved issues and exact live acceptance sequence. The entries below this section are historical milestones, not current test counts.
+
+Implemented: restore the ignored existing CadV2SavePath source and correct its ignore rule; reject malformed/partial AI plans with bounded streamed responses, cancellation/deadlines and safe diagnostics; protect real legacy execution with the existing native-control lease; record terminal failure after thrown execution or cancelled planning without replacing Cancelled; rebuild before strict typed/finite observations; include hidden solids in native inspection. Android now permits the actual GUID job routes, clears definite rejection placeholders, and preserves session/action ownership through token renewal, reconnect and artifact download.
+
+Fresh verification (all tests use local fakes or ordinary production components, not a paid AI service):
+
+| Check | Result | Evidence |
+|---|---|---|
+| Complete solution, installed SOLIDWORKS interop enabled | Build succeeded, 0 warnings/errors | `dotnet build SolidWorksCadAgent.sln --no-restore -p:SolidWorksInteropAvailable=true --verbosity quiet`; includes native test compilation |
+| Unit suite, interop enabled | 630 passed, 0 failed/skipped | `tests/SolidWorksCadAgent.UnitTests/TestResults/review-native-unit.trx` |
+| Complete solution, interop disabled | Build succeeded; subsequent conditional test run executed | `dotnet build SolidWorksCadAgent.sln --no-restore -p:SolidWorksInteropAvailable=false --verbosity quiet` |
+| Unit suite, interop disabled | 630 passed, 0 failed/skipped | `tests/SolidWorksCadAgent.UnitTests/TestResults/review-disabled-final-unit.trx` |
+| Android JVM unit suite | 123 passed, 0 failed/errors/skipped, 20 suites | companion `app/build/test-results/testDebugUnitTest/TEST-*.xml` |
+| Android debug + instrumentation APK compilation and lint | BUILD SUCCESSFUL; lint 0 errors, 17 warnings | companion `build/review-logs/android-final-verification.log`, `app/build/reports/lint-results-debug.xml` |
+| Diff whitespace checks | Passed for both checkouts | `git diff --check` |
+
+Regression evidence: desktop `regressions-red.trx` had 41 expected failures/3 passes before parser and lease fixes; `verification-red.trx` had 6 legacy-verification failures/58 passes; `cancellation-red.trx` had 2 stranded-planning failures/1 pass. The initial clean clone failed compilation because CadV2SavePath was absent from Git. A later full run exposed one aggregate-token overflow (622 passes/1 failure), corrected before both final 630-test runs. Android targeted RED logs cover routing, rejection, renewal/reconnect and final artifact/placeholder consistency; final full suite is green. Intermediate build setup failures (sandbox restrictions, a duplicate test helper and unavailable net48 HttpStatusCode enum name) were corrected; they are not reported as passing tests.
+
+Native runtime acceptance was NOT executed. SOLIDWORKS and installed Host/RemoteAgent were running; this session did not take over that workstation or change user models. The new hidden-solid native tests were compiled with the installed 2020 interop only. Android instrumentation tests were compiled, not run on a device/emulator. No physical pairing, mobile-data, screen/input, live AI, manufacturing or image-to-native acceptance was performed. NuGet vulnerability audit was disabled for the available cached restore, so this is not a dependency security certification.
+
+Next: an idle-workstation acceptance window for hidden sole/extra solids, V1 remote exclusion, owned V2 build/save/reopen/hash regression and the paired-phone lifecycle through renewal. Then prioritize intent-derived verification and artifact integrity for V1, durable submission IDs, and constrained feature/dimension editing. Retain the existing strict capability gates.
+
+---
+
+Updated 2026-10-09. The bounded 7d-g5e through 7d-g5m source is committed locally as `3ea1436e2b3fb5c0dc2ab6f3be63ed6e1fac71ae` on `feature/v2-face-sketches-and-finishing`. The pre-existing unrelated whitespace-only change in `PrismaticCapabilityTests.cs` remains untouched. A side-by-side workstation rollout was performed. The SolidWorks repository was not pushed or merged; the Android 0.4.1 source and APK were published separately as recorded below.
+
+## Current release scope: Task 7d-g5m — exact approved v2 rectangle boss
+
+- **Capabilities:** `DOC-010`, `SK-003`, `FT-001` are real-SOLIDWORKS verified for the exact first v2 flow; `AG-003`, `AG-017`, `AG-018`, `AG-019` remain partial overall. An explicit prompt in the existing desktop/paired-phone CAD job input, `V2 rectangle boss: 20 x 10 x 5 mm; save as new-part.sldprt`, creates a normalized six-step real-mode plan. It requires separate revision-bound approval. `CadV2SixStepRunner` uses the existing journaled Host boundaries, records success/failure command history, compares the approved plan hash before steps, and requires post-save managed close/reopen, rebuild/body/bounds/volume/hash evidence before ReadyForReview and artifact download. The same-user cross-process native-control file lease excludes remote manual input during approval/execution. V1 jobs remain on their original path; simulated, offset, other-plane, overwrite and unsupported v2 plans remain closed. In-place v2 revision is explicitly unsupported.
+- **Evidence:** focused runner/coordinator/readiness/route/remote tests; complete unit suites **572/572** in both interop modes (`v2-release-final-native-unit.trx`, `v2-release-final-disabled-unit.trx`); both complete solution builds **0 warnings/errors**. Controlled owned SOLIDWORKS 2020 acceptance **1/1** through `/jobs` create, approve and artifact (`v2-release-final-native.trx`), with a 20 × 10 × 5 mm one-body part, 1000 mm³, exact saved bytes, managed reopen, verified output path in the job response and previous-document restoration. Final review corrected cancellation after approval and queued native-lease transfer; regression tests cover both. A prior route test failed because its fixture used `File.ReadAllBytes` against SOLIDWORKS' open handle; shared-read fixture correction passed. Matrix evidence E52.
+- **Workstation rollout:** the validated native Release bundle is installed side by side on this SOLIDWORKS 2020 workstation. The installed Host planned an exact V2 request with zero preapproval commands, then approved, executed, verified, saved, reopened and delivered an 83,883-byte native artifact whose SHA-256 matched the owned file. The original dirty document was restored, all 24 previous jobs remained accessible, and Remote Agent remained available through the private HTTPS mapping. Full details, hashes and rollback backup are in [the installed-build validation](windows-validation-v2-installed-2026-10-09.md). Android's V2-step rendering fix `f26fcf278c0d63a20d1896616262a4f2fc40c930` is pushed to `feature/phone-first-v2`; the tested **0.4.1 APK** is [published as a preview release](https://github.com/jhaago/SolidWorks-CAD-Agent-Android/releases/tag/android-v0.4.1-preview). GitHub reports the expected 12,293,031-byte asset and SHA-256. No physical device was connected, so phone installation and CAD Chat execution remain unverified.
+- **Remaining:** native evidence is SOLIDWORKS 2020 and this exact prompt shape; no Android-device UI interaction, image-to-CAD, arbitrary v2 planner, parametric editing or broad CAD release is claimed. The next release check is a paired physical-phone update and CAD Chat plan/approval/download smoke test. The next *development* slice is explicit durable feature identity and editing semantics for a second bounded operation, with its own native acceptance. The SolidWorks repository has not been pushed or merged.
+- **Phone pairing follow-up:** two Windows-approved Android 0.4.1 requests failed before the phone saved a pairing while on mobile data; the phone browser reached the private HTTPS Agent and received the expected authorization-required response. Android commit `a7882928cfb6d9a2cdcbc35bf52622584f2962de` changes only the pairing connect window and transient poll retry, with authorization failures and the two-minute deadline still fail-closed. Version 0.4.2 passed 106 unit tests, debug and Android-test APK builds, and lint with zero errors; the signed APK is [published for a phone retest](https://github.com/jhaago/SolidWorks-CAD-Agent-Android/releases/tag/android-v0.4.2-preview). At publication, phone pairing was pending; the successful retest is recorded below. No Windows binary was replaced for this fix.
+- **Phone pairing result:** on the 0.4.2 physical phone over mobile data, the user reported that a fresh Windows-approved pairing completed and CAD Chat connected. This verifies the user-visible pairing path, but no CAD plan approval, remote display, artifact download or new native model was tested in that phone session. The Windows Remote Agent was unchanged. The previous failed requests left two additional Android-named device entries; their credentials were not saved on the phone and cleanup has not yet been performed.
+
+## Completed bounded slice: Task 7d-g5l — guard v2 artifact delivery
+
+- **Capabilities:** partial `DOC-010`, `AG-017`, `AG-019`. `AgentRoutes.ArtifactAsync` retains the historical v1 path. For a v2 revision, it now requires the current plan hash, Applied final SavePart attempt, job-owned ActiveSaved model/state revision, exact planned/recorded path and latest passing post-reopen verification. It hashes the response bytes against the registered artifact hash before download. Missing/stale evidence and changed content fail closed. SQLite verification history is ordered deterministically for same-timestamp rows. No schema or persisted-plan change.
+- **Verification:** focused authorization and artifact-route tests **5/5**; full unit suites **559/559** in both modes (`task-7d-g5l-unit-disabled-final.trx`, `task-7d-g5l-unit-native-final.trx`); both complete solution builds **0 warnings/errors**. This is read-only route logic: no new native scenario was run or claimed. Evidence E51.
+- **Remaining:** the v2 coordinator still leaves candidates in clarification and rejects approval, so this delivery guard is not yet reachable from a normal v2 job. The next dependency-ready slice is an exact six-step, revision-bound v2 approval/execution gate reusing the existing Host attempt boundaries and recorder, with explicit failure/uncertainty transitions and controlled native approved-job acceptance before any UI advertisement. Remote manual-input exclusion during execution still needs a concrete interlock.
+
+## Completed bounded slice: Task 7d-g5k review corrections — document identity and saved-artifact reliability
+
+- **Capabilities:** partial `AG-017`, `AG-018`, `AG-019`, `DOC-010`. The reviewer found that managed commands could relabel a bound document, a missing saved file could escape without durable failed evidence, staging cleanup could block final readback, and direct copy could expose a partial final path. The Bridge now rejects mismatched bound model IDs before observation/close/save. The recorder owns close/reopen, records missing/unreadable artifact failure and treats owned staging cleanup as a warning. The v2 save now copies from the native staging file into an owned publish file and atomically renames to a new final path without overwrite. The narrow verifier also requires planned volume. V1 SavePart response/behavior and persisted schema remain unchanged.
+- **Verification:** the new locked-stage/missing-artifact unit case failed before implementation and passed afterward. Full unit suites **557/557** in both interop modes (`task-7d-g5k-review-unit-disabled-final.trx`, `task-7d-g5k-review-unit-native-final.trx`); both complete solution builds **0 warnings/errors** after the final Bridge adjustment. Controlled owned SOLIDWORKS 2020 test **1/1** (`task-7d-g5k-review-native-final.trx`) includes wrong-ID observe/close/save rejection, staged publication, managed close/reopen, artifact hash, bounds/volume and original-document restoration. Evidence E50.
+- **Remaining:** a crash may leave an owned stage/publish file; neither counts as a verified deliverable or permits retry of an uncertain mutation. JobCoordinator still rejects v2 approval and production planning/UI are v1-only. The exact next slice is revision-bound approved v2 JobCoordinator execution of the existing six steps, with durable command/verification evidence and final artifact hash checking before delivery. Keep unsupported plan shapes in review and do not advertise v2 until a controlled native approved-job test passes.
+
+## Completed bounded slice: Task 7d-g5k-c — persist post-reopen verification evidence
+
+- **Capabilities:** partial `AG-017`, `AG-018`, `AG-019`, `DOC-010`. `CadV2SavedVerificationRecorder` reuses the existing `VerificationResults` history (no schema migration) for the exact saved v2 plan after read-only post-reopen verification. The record carries the job revision number; expected JSON binds the immutable plan SHA-256, model ID/state revision, artifact path/hash and planned dimensions. Actual JSON includes independently rehashed file content and observed rebuild/body/bounds data or a failure reason. A changed artifact records failure, never a passing row. This does not itself approve, execute or transition a job.
+- **Verification:** focused positive/tamper record test **1/1**; controlled owned SOLIDWORKS 2020 run **1/1** (`task-7d-g5k-c-native.trx`), including a passing persisted row after managed reopen; full unit suites **555/555** in both interop modes outside sandbox; both solution builds **0 warnings/errors**. Evidence E49.
+- **Next dependency-ready slice:** connect exactly the six existing no-replay mutation boundaries and post-reopen recorder to a revision-bound approved v2 JobCoordinator flow. Keep unsupported plans in review, log successful SavePart command evidence for artifact delivery, and enforce current-hash comparison at the artifact endpoint. Then enable a narrow explicit v2 planning/UI entrypoint, run real approved-job acceptance and review exposure.
+
+## Completed bounded slice: Task 7d-g5k-b — read back saved artifact identity and geometry
+
+- **Capabilities:** partial `AG-018`, `AG-019`, `DOC-009`, `DOC-010`. `CadV2RectangleBossVerifier.VerifySavedAsync` requires the exact six-step current executing v2 plan, owned ActiveSaved part at the Applied SavePart state revision, planned workspace path and unchanged SHA-256 file content before asking the bound Bridge for rebuild errors, one solid body and the planned 20 × 10 × 5 mm bounds. A changed artifact fails before CAD observation; the existing pre-save verifier retains its ActiveUnsaved contract. This is read-only verification, not a durable result record or coordinator transition.
+- **Verification:** focused saved/changed-hash test **1/1**, controlled owned SOLIDWORKS 2020 post-reopen test **1/1** (`task-7d-g5k-b-native.trx`), full unit suites **555/555** in both interop modes outside sandbox, both solution builds **0 warnings/errors**. Evidence E48.
+- **Next dependency-ready slice:** persist a revision/model/state/hash-bound verification result using the existing verification history, then integrate exact six-step boundaries and post-reopen verification with v2 JobCoordinator approval/execution. Record successful SavePart command evidence so the existing artifact route can serve only the verified file; compare its current hash at delivery. Keep v1 behavior and the production planner unchanged until that execution gate passes native acceptance.
+
+## Completed bounded slice: Task 7d-g5k-a — narrow final-save readiness preview
+
+- **Capabilities:** partial `AG-003`, `AG-017`, `DOC-010`. The review-only whole-plan readiness check can now return a sixth bound `SavePart` request only for the exact final non-overwriting rectangle-boss shape and a registered native handler. It returns zero requests for overwrite or missing registration. This is a preview, not approval, workspace authorization or execution; v2 JobCoordinator remains closed and v1 unchanged.
+- **Verification:** test-first positive case failed before the change; focused readiness suite **7/7** afterward, full unit suites **555/555** in both interop modes outside sandbox, both solution builds **0 warnings/errors**. Evidence E47. No native action in this preview-only slice.
+- **Next dependency-ready slice:** define narrow v2 coordinator acceptance and persisted verification semantics against the existing job/verification tables, then connect the exact six owned mutation boundaries to approved execution with post-reopen artifact geometry verification. The production OpenAI planner is still v1-only; normal UI v2 exposure must follow the execution gate rather than precede it.
+
+## Completed bounded slice: Task 7d-g5j-c — controlled native save and managed reopen
+
+- **Capabilities:** bounded `DOC-010`, `DOC-009`, partial `AG-017`/`AG-019`. The existing owned-part Host scenario now uses the exact sixth v2 SavePart boundary, checks Applied attempt and ActiveSaved path/hash/state revision against the new file, closes it, reopens it through the managed registry, and checks reopened 20 × 10 × 5 mm bounds. Cleanup closes only the owned part and restores the original document.
+- **Verification:** opt-in SOLIDWORKS 2020 test **1/1** (`task-7d-g5j-c-native-final.trx`), after correcting a test-only sharing-mode failure in its file-hash assertion; native-enabled integration test build **0 warnings/errors**. Evidence E46. This certifies the isolated Host boundary sequence, not approved JobCoordinator execution or UI availability. No deployment, merge or push.
+- **Next dependency-ready slice:** define and implement a narrow coordinator gate that records verification evidence and excludes concurrent manual desktop mutation from geometry observation through save, then execute the exact six steps from approved plan. Confirm its persisted-state/restart semantics before changing the gate; keep v1 unchanged. Finally expose only this verified scope in normal UI.
+
+## Completed bounded slice: Task 7d-g5j-b — guarded final SavePart dispatch and commit
+
+- **Capabilities:** partial `DOC-010`, `AG-003`, `AG-017`, `AG-018`, `AG-019`. The isolated Host boundary requires the exact Prepared sixth SavePart, matching five Applied predecessors, owned unsaved part, plan hash and bounded sketch. Before native save it resolves the planned target under WorkspacePolicy with overwrite forbidden and verifies rebuild, one body and exact rectangle-boss bounds. It dispatches the existing managed SavePart, requires a successful exact-path result and new file, hashes the artifact, and atomically records ActiveSaved path/hash/state revision with Applied attempt. Ambiguous post-dispatch failures mark the attempt/model Uncertain and block replay. Historical v1 behavior, schema and coordinator gate are unchanged.
+- **Verification:** focused positive/existing-target/wrong-path/no-replay tests **3/3**; full unit suites **554/554** in both interop modes outside sandbox; both complete solution builds **0 warnings/errors**. Evidence E45. This is fake-executor and compilation evidence only; no native SavePart or reopen accepted yet. The outcome hash is checked after save; independent persisted geometry-verification evidence and manual-input interlock remain coordinator-gate decisions.
+- **Next dependency-ready slice:** controlled owned-file native Host sequence through the sixth SavePart, then close and reopen through the managed registry, recheck path/hash and geometry, leave unrelated documents untouched. After that, persist an appropriate verification result and connect the exact six-step flow to JobCoordinator approval/execution with an explicit manual-input exclusion rule before normal UI exposure.
+
+## Completed bounded slice: Task 7d-g5j-a — reserve final non-overwriting SavePart
+
+- **Capabilities:** partial `DOC-010`, `AG-003`, `AG-017`. The Host reserves only a sixth, final normalized v2 `SavePart` with `allowOverwrite` absent/false, after matching Applied NewPart/CreateSketch/AddRectangle/ExitSketch/boss attempts and the owned ActiveUnsaved model at the boss revision. No native save or path check occurs in this persistence-only slice. The unique v2 prospective revision is a **managed artifact-state revision**, even though saving does not change geometry; reservation leaves the committed revision unchanged. Existing v1 save semantics and schema v6 remain intact.
+- **Verification:** test-first API absence, then focused positive/negative/recovery checks **2/2**; full unit suites **551/551** in both interop modes outside sandbox; both complete solution builds **0 warnings/errors**. A first focused implementation run exposed the schema's unique `(ModelId, ProspectiveModelRevisionId)` rule; the state-revision decision corrected it without migration. Evidence E44. No native SavePart acceptance is claimed.
+- **Next dependency-ready slice:** dispatch only this Prepared sixth SavePart through the Bridge after workspace/no-overwrite validation and narrow geometry verification, require exact saved path/file/hash, atomically commit ActiveSaved path/hash/state revision with Applied attempt, and retain no-replay uncertainty. Then controlled owned-file save/reopen acceptance and coordinator/UI gate work.
+
+## Completed bounded slice: Task 7d-g5i-a — compare observed boss geometry with plan
+
+- **Capabilities:** partial `AG-018`, `AG-019`, `AG-017`. `CadV2RectangleBossVerifier` accepts only the current real executing, plan-validated normalized Top Plane centre-rectangle boss with an Applied fifth attempt and owned ActiveUnsaved part at its committed revision. It invokes rebuild/error inspection first, then requires exactly one solid body and precise bounding-box coordinates within 0.02 mm of the plan. The supported SOLIDWORKS Top Plane frame maps sketch X→model X, sketch Y→model Z and positive boss depth→model +Y. A failed/missing observation stops the check; this result is not a persisted verification record or save authorization.
+- **Verification:** two tests failed against the absent verifier, then focused pass/fail tests passed **2/2** (including null inspection, rebuild error, wrong bounds and command identity/order). Initial controlled native run failed because an assumed XY plane mapping was wrong; observed 2020 bounds established the actual XZ sketch frame, and the corrected opt-in owned-part run passed **1/1** (`task-7d-g5i-a-native-final.trx`). Full unit suites passed **549/549** in both interop modes outside sandbox; both solution builds passed with **0 warnings/errors**. Evidence E43. Native volume is still separately asserted in the fixture; the runtime check itself compares rebuild/body/bounds, not volume.
+- **Next dependency-ready slice:** bind a narrow non-overwriting `SavePart` step to the exact verified v2 model and workspace target, with atomic saved-path/hash outcome and no-replay uncertainty. Then run controlled native save/reopen and integrate the verifier/steps behind the approved v2 coordinator gate. Manual input mutation interlock and a persisted verification result must be considered at that gate.
+
+## Completed bounded slice: Task 7d-g5h-c — controlled native Host boss acceptance
+
+- **Capabilities:** bounded `FT-001`, partial `AG-003`, `AG-017`, geometry observation. The opt-in owned-part test extends the production Host boundary sequence through the fifth v2 boss. It checks the exact Applied boss attempt/model revision, one solid body, independent 20 × 10 × 5 mm bounds and 1000 mm³ native volume, clean rebuild, zero selection leak, no saved part, and owned-only closure/original-document restoration.
+- **Verification:** `HostManagedRectangleDispatch_VerifiesGeometryAndRejectsWrongActiveSketch` passed **1/1** on installed SOLIDWORKS 2020, TRX `tests/SolidWorksCadAgent.IntegrationTests/TestResults/task-7d-g5h-c-native.trx`; native-enabled test build 0 warnings/errors. The g5h-b full unit suites were 547/547 in both modes. Evidence E42. This is isolated Host boundary acceptance, not an approved v2 job or safe save/reopen.
+- **Next dependency-ready slice:** establish the exact v2 SavePart preconditions and persisted artifact outcome for this owned geometry, retaining workspace/non-overwrite protections and historical v1 behavior. Then controlled native save/reopen and whole-plan coordinator/UI gates.
+
+## Completed bounded slice: Task 7d-g5h-b — isolated bound boss dispatch and outcome
+
+- **Capabilities:** partial `FT-001`, `AG-003`, `AG-017`. The Host boundary checks the exact fifth normalized v2 boss, Prepared attempt, same plan hash, Applied predecessors, owned unsaved model at the ExitSketch revision and bounded Active sketch reference. It uses the existing `CadPlanV2ExecutionBinder` to dispatch the operation-version-2 managed-sketch `Extrude`. Only a successful result with the planned depth echo and nonempty feature-name diagnostic atomically marks the attempt Applied and advances the model revision. The name is not treated as durable identity or geometric proof. Failed/ambiguous executor outcomes become Uncertain without replay. JobCoordinator still cannot approve or execute v2.
+- **Verification:** two new dispatch tests failed against the absent boundary, then focused boss tests passed **8/8** including reservation, success, wrong-attempt rejection, depth mismatch/no-replay and injected commit rollback. Full unit suites passed **547/547** in each interop mode outside sandbox; both solution builds passed with **0 warnings/errors**. Evidence E41. Mock executor/compilation only; the production Host boss boundary has **not** yet run on SOLIDWORKS.
+- **Next dependency-ready slice:** 7d-g5h-c — extend the controlled owned-part Host native scenario through the boss dispatch. Verify one solid body, 20 × 10 × 5 mm bounds, 1000 mm³ volume or equivalent independent geometry, clean rebuild, exact Applied attempt/revision, zero selection leak and original-document restoration. Then address safe save/reopen as separate bounded slices.
+
+## Completed bounded slice: Task 7d-g5h-a — reserve exact fifth boss attempt
+
+- **Capabilities:** partial `FT-001`, `AG-003`, `AG-017`. `PrepareV2BossAttemptAsync` reserves only the fifth normalized operation-version-2 `Extrude` whose input resolves to the preceding plan-owned sketch, after Applied NewPart/CreateSketch/AddRectangle/ExitSketch attempts under the same plan hash. It requires the owned ActiveUnsaved part at the ExitSketch revision and a bounded Active sketch token. The current v2 schema assigns IDs only to sketches; the boss attempt has no output ID and does not advance the model until an observed native outcome is committed. This explicitly defers feature identity and later feature editing; no persisted schema changed.
+- **Verification:** two tests failed to compile against the absent API, then focused reservation/recovery checks passed **2/2**. Full unit suites passed **544/544** in each interop mode outside sandbox; both complete solution builds passed with **0 warnings/errors**. Evidence E40. No native feature execution in this slice.
+- **Next dependency-ready slice:** 7d-g5h-b — isolated Host dispatch of this exact Prepared boss through the existing v2 bound-sketch Extrude adapter; commit only an observed, correlated depth and verified feature creation outcome, preserving no-replay uncertainty. Follow with controlled owned-part native geometry acceptance before opening v2 approval/execution.
+
+## Completed bounded slice: Task 7d-g5g-c — controlled native ExitSketch acceptance
+
+- **Capabilities:** `SK-025` (bounded native closure), partial `AG-003` and `AG-017`. The owned-part integration fixture now runs production Host NewPart→CreateSketch→AddRectangle→ExitSketch with a fresh SQLite job. It verifies the exact exit attempt/model revision, no active sketch, persistent sketch-token resolution, clean rebuild, and `ACTIVE_SKETCH_MISMATCH`/`NO_ACTIVE_SKETCH` rejection without closing the wrong sketch. The part is never saved; cleanup closes only the test-owned document and restores the original document/path/save flag.
+- **Verification:** controlled opt-in `HostManagedRectangleDispatch_VerifiesGeometryAndRejectsWrongActiveSketch` passed **1/1** on installed SOLIDWORKS 2020, TRX `tests/SolidWorksCadAgent.IntegrationTests/TestResults/task-7d-g5g-c-native-final.trx`; native-enabled build had 0 warnings/errors. The g5g-b full unit suites had passed 542/542 in both interop modes. Evidence E39. This is isolated boundary acceptance, not a whole approved v2 job.
+- **Next dependency-ready slice:** 7d-g5h-a — reserve only the fifth v2 boss `Extrude` after Applied ExitSketch with the same immutable plan, owned model and persistent sketch input. Keep feature/output identity semantics explicit before committing any feature mutation. Then dispatch and native acceptance in bounded follow-up slices.
+
+## Completed bounded slice: Task 7d-g5g-b — bound ExitSketch dispatch and atomic outcome
+
+- **Capabilities:** partial `AG-003`, `AG-017`. The isolated Host boundary requires the exact fourth normalized `ExitSketch`, matching Prepared attempt/plan hash, Applied NewPart/CreateSketch/AddRectangle predecessors, owned ActiveUnsaved part at rectangle revision, and bounded Active sketch token. It sends an execution-only bound sketch ID. On the Bridge STA, the exact active sketch must match the resolved persistent token before exit; afterward the sketch must be closed and its token must still resolve. A true Boolean `exited` result allows one transaction to advance the model revision and mark the no-output attempt Applied. Failure after executor entry makes attempt/model Uncertain without replay. The legacy v1 handler retains its existing behavior; no schema or coordinator gate change.
+- **Verification:** focused dispatch/rollback/Bridge/readiness checks **6/6**; full unit suites **542/542** in each interop mode outside sandbox; full solution builds with interop enabled/disabled **0 warnings/errors**. The sandboxed dotnet invocation stalled; verification used the same working external environment as preceding slices. Evidence E38. These are mock/compile checks, **not native SOLIDWORKS verification**.
+- **Next dependency-ready slice:** 7d-g5g-c — run a controlled owned-part native Host NewPart→CreateSketch→AddRectangle→ExitSketch scenario. Check exact Applied exit/model revision, no active sketch, persistent sketch resolution after exit, clean rebuild, and wrong-active/no-active rejection without closing the wrong sketch. Preserve the original document and its save state. Do not open the coordinator v2 gate yet.
+
+## Completed bounded slice: Task 7d-g5g-a — reserve exact ExitSketch attempt
+
+- **Capabilities:** partial `AG-003`, `AG-017`. `PrepareV2ExitSketchAttemptAsync` reserves only the fourth normalized `ExitSketch` after Applied NewPart, CreateSketch and AddRectangle attempts for the same real executing job and plan hash. It requires the owned ActiveUnsaved part at the committed rectangle revision and the preceding sketch's bounded Active native reference. The no-output Prepared attempt receives a prospective revision; no current model revision or sketch binding changes. No schema, COM dispatch or JobCoordinator v2 gate changes.
+- **Failure/recovery:** duplicate/wrong-step/unapplied-rectangle and injected insert failure reject without advancing the model; startup recovery marks the unresolved attempt/model Uncertain while retaining the committed sketch token as historical evidence. Tests first failed to compile against the absent API. Focused reservation/recovery suite passed **3/3**; full unit suites passed **537/537** outside the restricted sandbox in each interop mode (`task-7d-g5g-a-interop-disabled.trx`, `task-7d-g5g-a-interop-enabled.trx`). Both complete solution builds passed with **0 warnings/errors**. Evidence E37. No native exit is claimed.
+- **Next dependency-ready slice:** 7d-g5g-b — isolated Host dispatch and atomic observed-outcome commit for this Prepared ExitSketch. Bind the trusted sketch ID; Bridge verifies that the exact sketch is active before exit and its persistent reference still resolves afterward. Require `exited=true`, retain no-replay uncertainty and test wrong-sketch/no-active failures. Then run controlled native acceptance as a separate substep before wiring feature consumers.
+
+## Completed bounded slice: Task 7d-g5f — native rectangle boundary acceptance
+
+- **Capabilities:** `SK-003` (bounded native Host path), partial `AG-003` and `AG-017`. An opt-in controlled SOLIDWORKS 2020 integration test runs the production Host NewPart → CreateSketch → AddRectangle dispatch/commit boundaries against fresh SQLite and an isolated unsaved owned part. It checks the exact rectangle attempt/model revision, four nonconstruction straight edges with the requested 20 × 10 mm corners, successful rebuild, and native rejection (`ACTIVE_SKETCH_MISMATCH`) when a later direct v2 request targets the committed sketch while a second sketch is active. Both sketches retain identical segment types, construction flags and endpoints after rejection. The fixture closes only its owned part and restores the original active document/path/save flag; no part file is saved.
+- **Verification:** `HostManagedRectangleDispatch_VerifiesGeometryAndRejectsWrongActiveSketch` passed **1/1** on installed SOLIDWORKS 2020 (`task-7d-g5f-native-final.trx`). Both complete solution builds passed with interop disabled and enabled, **0 warnings/errors**. No production behavior or persisted schema changed in this slice. Previous g5e unit suites passed 534/534 in each mode outside the sandbox; they were not rerun for this integration-test-only change. Evidence E36.
+- **Remaining:** this certifies only the isolated Host-to-Bridge rectangle scenario. It does not prove full v2 plan approval/execution, save/reopen, general sketch geometry, or a successful alternative modelling strategy. JobCoordinator v2 remains closed.
+- **Next dependency-ready slice:** 7d-g5g — reserve and dispatch only the following `ExitSketch` step for this exact committed rectangle provenance, verify native sketch exit and clean rebuild in a controlled owned-part run, and atomically commit its no-output model revision. Define the pre/postcondition for a finished sketch without treating feature display names or current selection as durable identity; retain no-replay uncertainty. Do not enable JobCoordinator v2 yet.
+
+## Completed bounded slice: Task 7d-g5e — isolated rectangle dispatch and outcome commit
+
+- **Capabilities:** `AG-003`, `AG-017` (partial), `SK-003` (existing native primitive; new Host path not yet native verified). The Host dispatch boundary accepts only the exact third normalized `AddRectangle` with a Prepared attempt, same plan hash, Applied NewPart/CreateSketch, owned ActiveUnsaved model at the sketch revision, and an Active bounded native sketch binding. It builds an execution-only request with the trusted sketch ID. The Bridge resolves that token and compares its COM identity to the active sketch on the STA before invoking the existing rectangle primitive; it rejects an absent or mismatched sketch without drawing. The observed successful parameter echo is correlated to the stored step, then one SQLite transaction advances the model revision and marks the no-output attempt Applied. This echo is **not** geometry readback.
+- **Failure rule:** executor failure, missing/mismatched result, or failed commit makes the attempt/model Uncertain without replay. If uncertainty persistence fails, the process retains the terminal attempt fence. The preceding committed sketch binding stays Active as historical evidence but model-status gates prevent reuse. No persisted plan/schema migration, simulation support, JobCoordinator v2 approval or whole-plan execution was added.
+- **Verification:** baseline attempt suites 28/28. New Host/Bridge tests were red before the guarded path, then focused tests passed 20/20. Full unit suites passed **534/534** in both interop modes outside the restricted sandbox (`task-7d-g5e-interop-disabled-outside-sandbox.trx`, `task-7d-g5e-interop-enabled-outside-sandbox.trx`); both full solution builds passed with **0 warnings/errors**. Restricted-sandbox full runs were 533/534 because the pre-existing RemoteHttp `HttpListener` test throws `PlatformNotSupportedException` there. The tests use real SQLite and a fake versioned executor; native Bridge code compiled but this rectangle Host-to-Bridge path was **not run against SOLIDWORKS**. Evidence E35.
+- **Historical next-slice record:** 7d-g5f was the controlled native Host-to-Bridge rectangle acceptance; it is complete above. The current next slice is 7d-g5g.
+
+## Completed bounded slice: Task 7d-g5d — reserve first rectangle mutation
+
+- **Capabilities:** `AG-003`, `AG-017` (partial). `PrepareV2RectangleAttemptAsync` reserves only the exact third normalized `AddRectangle` after Applied NewPart and CreateSketch attempts for the current real, validated, executing job. It requires matching stored plan hashes, the same job-owned ActiveUnsaved part at the sketch's committed revision, and that sketch's bounded Active native reference. It stores a Prepared attempt with no output entity ID and a fresh prospective revision; the model's current revision and sketch binding do not change. No COM dispatch, JobCoordinator v2 approval, or schema change is included.
+- **Uncertain-outcome rule:** because the rectangle has no output entity, an uncertain Prepared attempt makes the model Uncertain while preserving the previously committed sketch's Active identity and token as historical evidence. Model-status gates prevent further managed resolution/dispatch; the sketch binding does not by itself authorize reuse. Startup recovery follows this rule without a migration.
+- **Changed:** `SqliteJobRepository.V2Attempts.cs` and new `CadV2RectangleAttemptStoreTests.cs`. Tests cover successful durable reservation, duplicate/wrong-step/unapplied-sketch/cross-job/stale-plan/stale-revision rejection, missing Active binding, injected insert-failure rollback, and restart uncertainty. Historical unversioned plan reading remains unchanged and the v2 coordinator gate remains closed.
+- **Verification:** baseline prior attempt-store suite **23/23 passed**. Five new tests failed red against the missing API, then passed. Combined focused suite **28/28 passed** (`task-7d-g5d-focused-final.trx`). Consolidation reran full unit suites outside the restricted sandbox and passed **525/525** in each interop mode (`consolidation-full-interop-disabled.trx`, `consolidation-full-interop-enabled.trx`); both full solution builds passed with **0 warnings/errors**. Earlier restricted-sandbox runs were **524/525** in each mode, with only the pre-existing `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames` `HttpListener` `PlatformNotSupportedException`. An independent read-only review found no source-commit blocker. No new native SOLIDWORKS run was needed for this SQLite-only preparation and none is claimed. Evidence E34 in the matrix.
+- **Remaining limits:** no rectangle dispatch, observed-result correlation, model-revision commit, native geometry verification or whole-plan execution. Local restore remains unavailable; verification used the existing restored packages.
+- **Historical next-slice record:** 7d-g5e was the isolated rectangle dispatch/commit boundary; it is complete above. The current next slice is 7d-g5f native acceptance.
+
+## Completed preceding slice: Task 7d-g5c — controlled native Host-boundary acceptance
+
+- **Capabilities:** `AG-003`, `AG-017` (partial). An opt-in, owned-document test creates a fresh SQLite Host job/revision, runs the production NewPart and CreateSketch dispatch boundaries against the production Bridge, verifies the Host commits the returned logical ID and Bridge-persisted native token at the prospective revision, adds test-only rectangle geometry to retain the sketch, exits sketch mode, and resolves the committed token through the production Bridge resolver. It saves no model file and closes only the test-owned part before restoring the original active document/path/dirty state.
+- **Changed:** added the integration-test project references needed to exercise AgentHost persistence and SQLite directly; added `HostManagedCreateSketchDispatch_PersistsAndCommitsNativeReference` in `ModelReferenceCapabilityTests.cs`. JobCoordinator v2 approval/execution remains closed.
+- **Verification:** focused g5b mutation-attempt suite **23/23 passed** (`task-7d-g5c-focused-final.trx`). Integration-test project builds with interop enabled and disabled each passed with **0 warnings/errors** after the final fixture change. The controlled native test passed **1/1** on SOLIDWORKS 2020 outside the restricted sandbox (`task-7d-g5c-native-final.trx`): Host attempt Applied, model revision advanced, active native sketch token stored (20 bytes), production resolver returned success after ExitSketch, no part file saved, and original-document/path/dirty-state and owned-document cleanup assertions passed. Earlier sandbox runs could not attach to COM; the first outside-sandbox run exposed that leaving an empty sketch invalidated its native reference. Adding a test-only rectangle before ExitSketch made the fixture representative of a retained sketch. No production handler or coordinator code changed in g5c.
+- **Remaining limits:** local NuGet restore exits 1 after “Determining projects to restore…” without diagnostic output; cached x64/x86 `SQLite.Interop.dll` files were staged only into ignored test output for this run. The passing scenario certifies the isolated Host NewPart/CreateSketch boundary, not general v2 plan approval, AddRectangle dispatch, later feature mutations, save/reopen or an end-to-end approved CAD job. The JobCoordinator v2 gate remains closed.
+- **Historical next-slice record:** g5d was the no-output rectangle reservation; it is complete above. The current next dependency-ready slice is g5e.
+
+## Completed preceding slice: Task 7d-g5a — prepare the first sketch mutation
+
+- **Capabilities:** `AG-003`, `AG-017` (partial). The repository prepares the exact `CreateSketch` step immediately after NewPart only when the current persisted v2 plan belongs to a real, validated, executing job; its NewPart attempt is Applied with the same plan hash and model; and the model is active, unsaved, at that NewPart revision, and owned by the job. Output identity comes from the stored normalized plan, not caller input.
+- **Persistence decision:** reuse schema v6 `V2MutationAttempts` and `EntityReferenceBindings`; no migration. The attempt stores a fresh prospective model revision and the plan-assigned output entity ID. The transaction inserts a Pending, tokenless binding using the existing Bridge contract (`EntityKind=Sketch`, `NativeObjectKind=SketchFeature`, reference format 3) at that prospective revision. It does not advance the model's current revision until a later observed sketch result is committed. Startup recovery marks the Prepared attempt, owning model, and matching Pending binding Uncertain in the existing recovery transaction. This is the first CreateSketch only and does not authorize COM execution.
+- **Changed:** atomic sketch reservation method and startup recovery binding closure; tests for successful reservation, unapplied NewPart rejection, wrong step, cross-job model, duplicate attempt, injected binding-insert rollback, and restart recovery. No Bridge, planner, approval, executor, or schema changes.
+- **Verification:** focused attempt suite **19/19 passed**. Four g5 tests first failed against the missing operation; the Bridge kind/version assertion also failed before correction. Full unit suites passed **516/516** outside the sandbox in both interop modes; both full solution builds passed with **0 warnings/errors**. Independent review found and rechecked the contract correction with no remaining blocker. Evidence: `task-7d-g5-interop-disabled.trx`, `task-7d-g5-interop-enabled.trx`, and `task-7d-g5-focused-final.trx`.
+- **Limits:** preparation only; no native SOLIDWORKS scenario was run and no geometry was created. V2 JobCoordinator approval/dispatch remains closed.
+- **Outcome:** completed locally as a prerequisite to g5b. Its persistence behavior is summarized above; see E31 for evidence.
+
+## Completed preceding slice: Task 7d-g5b — correlate and commit the first sketch dispatch
+
+- **Capabilities:** `AG-003`, `AG-017` (partial). `CadV2CreateSketchDispatchBoundary` loads the current real, plan-validated executing revision, verifies the exact second normalized step, its Prepared attempt and matching plan hash, Applied NewPart provenance, owned ActiveUnsaved model and Pending tokenless Bridge binding. It constructs the sole versioned request itself with the persisted output ID and dispatches it once. Commit requires the Bridge's matching Active format-3 `SketchFeature` token (1–1,048,576 bytes) in the same configuration and prospective revision, plus the exact returned entity ID. A SQLite transaction advances the model revision and marks the attempt Applied atomically.
+- **Recovery decision:** Bridge persists the native reference before returning. A crash or failed Host commit can therefore leave an Active token paired with a Prepared attempt. Startup recovery and the uncertainty transition now close both Pending and Active matching bindings to Uncertain in the same transaction as the model/attempt, with no schema migration. Existing same-process no-replay fencing is retained at this new dispatch boundary.
+- **Changed:** added the isolated Host dispatch boundary and repository outcome commit; expanded startup/uncertainty binding closure; added positive dispatch/correlation, mismatched output/no-replay, active-binding restart recovery, missing-token rejection and transaction-rollback tests. No COM/Bridge, planner, approval, JobCoordinator or simulation execution path was enabled.
+- **Verification:** baseline g5a focused suite **19/19 passed**. During TDD the new tests failed to compile while the dispatch boundary was absent. Full unit suites in both interop modes each passed **519/520**; the sole failure is the pre-existing environment limitation `RemoteHttpTests.LoopbackServerCanRestartAndRejectUnauthenticatedFrames` (`HttpListener` throws `PlatformNotSupportedException` on this host). After the final predecessor-plan-hash guard, the focused mutation-attempt suite passed **23/23** (`tests/SolidWorksCadAgent.UnitTests/TestResults/task-7d-g5b-focused-final.trx`) and both full solution builds passed with interop disabled and enabled, **0 warnings/errors**. Independent read-only review found no issues in g5b. No native test was run; this Host-only boundary was exercised through a fake versioned executor, and does not prove end-to-end Host-to-SOLIDWORKS operation.
+- **Remaining acceptance:** the only full-suite failure is the host `HttpListener` platform limitation above; focused g5b tests and both solution build modes pass. A controlled native Host-to-Bridge/CreateSketch scenario remains unverified. JobCoordinator v2 approval/execution remains closed. No native SOLIDWORKS verification is claimed.
+- **Outcome:** completed as the prerequisite to g5c. Its v2 JobCoordinator approval/execution gate remains closed; native end-to-end evidence was not claimed.
+
+## Previous bounded slice: Task 7d-g4-r — fence unresolved NewPart dispatch
 
 - **Capabilities:** `AG-003`, `AG-017` (partial). Once executor invocation begins, the process-wide attempt guard is released only after the Applied commit or Uncertain transaction succeeds. Failed uncertainty persistence retains the fence for the process lifetime, blocking another boundary instance from repeating the mutation. Pre-dispatch rejection releases the claim normally. The original exception is rethrown with the secondary exception available in `Exception.Data["CadV2UncertainPersistenceFailure"]`; callers should include that diagnostic when reporting an unresolved outcome.
 - **Changed:** dispatch boundary and real-SQLite fault tests for null output, executor exception and failed Applied commit, each combined with failed Uncertain persistence, cross-instance retry and repository reopen/recovery. A positive pre-dispatch retry test protects normal claim release. No schema, COM, approval or deployment behavior changed.
@@ -86,14 +467,14 @@ Updated 2026-10-08. Current base revision: `820f2bfaff402c4977a9e9365ba8926ece4b
 - **Increment 2, Task 7a** (`FT-001`, `FT-002`, `AG-003`, `AG-016`, `AG-017`). Legacy `Extrude` now uses the planner's exact version-1 parameter validation in the Bridge and simulator. A direct request containing `sketchEntityId` fails before COM dispatch or simulated geometry mutation; a subsequent valid simulated extrude still succeeds. `CutExtrude` already rejected extra parameters. Historical unversioned feature JSON remains version 1 and validates unchanged. No v2 operation is executable or advertised.
 - The two direct-execution regression tests failed against the baseline and passed after the guard change. Full unit suite **454/454 passed**; both full solution build modes passed with **0 warnings/errors**. Controlled owned-document SOLIDWORKS 2020 `PrismaticCapabilityTests` passed **2/2** (TRX: `tests/SolidWorksCadAgent.IntegrationTests/TestResults/prismatic-v1-contract-regression.trx`), confirming established v1 extrusion/cut scenarios. This does not verify a v2 plan or consumer.
 
-## Current bounded slice and publication review
+## Earlier continuation record: selection scope and publication review
 
 - **Increment 2, Task 6: one managed-sketch selection scope** (`DOC-020`, `AG-016`). Added Bridge-internal `WithSelectedSketchAsync` and `SolidWorksSketchSelectionScope`: registry/context/configuration validation, native token resolution, clearing prior selection, selecting exactly one sketch feature at the requested mark, checking selected COM identity and count, and clearing selection in `finally`. No planner command, persisted-plan schema, or legacy extrude/cut path changed. This does not yet create a feature from the logical sketch ID.
 - Review of prior unpushed slices found two safety regressions and they were fixed: follow-up Host inspection no longer clears the binding established by managed `OpenPart`; persisted plans are revalidated against current lifecycle rules at approval and again before execution. Historical valid read-only `OpenPart` remains executable. Review found no other publication blocker; the unrelated one-line whitespace change in `PrismaticCapabilityTests.cs` remains in the worktree and is not part of the reviewed changes.
 - Verification after changes: approval positive/negative tests 2/2; full unit suite **451/451 passed** outside the restricted sandbox; full solution builds with interop disabled and enabled each passed with **0 warnings/errors**. Controlled native `ModelReferenceCapabilityTests` **3/3 passed** on SOLIDWORKS 2020 SP0.0 with owned documents. Selection mark 4, exactly one selected feature, cleanup after success/action failure and fail-closed wrong-document/deleted-sketch cases passed. TRX: `tests/SolidWorksCadAgent.IntegrationTests/TestResults/model-reference-selection-scope-final.trx`. The fixture also verified binding survives a Host-style `GetFeatureTree` after managed reopen. Native failure before the final run was a test assertion using `IsInstanceOfType` against a COM runtime wrapper; the corrected interface-cast assertion passed. No simulation or build result is presented as native evidence.
 - Remaining native acceptance: a typed feature command consuming the logical sketch ID, downstream feature mutation blocking, suppression, move/missing-property/hash mismatch, SaveAs lineage, broader topology and recovery are not complete.
 
-## Completed in this continuation
+## Earlier continuation work
 
 - **Increment 2, Task 3: managed model identity lifecycle** (`DOC-036`; foundation for `DOC-020`, `AG-003`, `AG-016`). Host assigns a model GUID for approved real `NewPart`, persists `Pending` before dispatch, gives managed sketches a logical output GUID and pending binding, advances model revision/status after successful managed mutations, stores path/SHA-256 after save, and marks uncertain outcomes without retry. Execution IDs stay out of serialized plans and parameters. Preflight keeps explicitly opened existing parts read-only until an approved managed-copy path is implemented.
 - The production Host injects its SQLite reference store into `SolidWorksBridgeFacade`. Managed `NewPart` adds `SolidWorksCadAgent.ModelId` with `Add3(...OnlyIfNew)`, reads it back using `Get6`, and closes the newly-created document on mismatch. `OpenPart` reads property values on the STA, then checks registry ID/path/file hash outside the COM callback and binds only after validation. Registered paths missing their property, unregistered IDs, ID/path collisions and hash mismatches fail closed. Legacy documents without managed records remain unstamped and use the old open path.
@@ -120,4 +501,4 @@ The v2 Extrude handler now consumes a managed sketch ID in a controlled SOLIDWOR
 
 **Consolidation scope:** reviewed source 7d-f / 7d-g1–g4-r on the existing feature branch; preserve the unrelated Prismatic whitespace change locally. Do not deploy or merge main as part of source consolidation.
 
-**Exact next development slice — Task 7d-g5:** prepare a CreateSketch output under an Applied owned model. Require the current normalized CreateSketch step, exact Applied NewPart attempt, matching job/revision/plan hash and ActiveUnsaved owned model; create its mutation attempt and Pending binding atomically before COM, with startup recovery making both Uncertain. Reject stale, repeated, wrong-step and cross-job attempts. Keep approval/general v2 dispatch closed. SavePart authorization/finalization remains separate.
+**Historical next-slice record — Task 7d-g5a:** prepare the first normalized CreateSketch output under an Applied owned model, with an atomic Prepared attempt and Pending binding. This was completed as E31; current progress and the next dependency-ready slice are recorded at the top of this handoff.
