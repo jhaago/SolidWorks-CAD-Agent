@@ -35,6 +35,7 @@ namespace SolidWorksCadAgent.UnitTests
                 var response = client.Forward("GET", "status", null);
                 Assert.AreEqual(200, response.Status);
                 Assert.IsTrue((bool)JObject.Parse(response.Body)["jobInputImages"]);
+                Assert.IsTrue((bool)JObject.Parse(response.Body)["clientSubmissionIds"]);
                 var active = (JObject)JObject.Parse(response.Body)["activeJob"];
                 Assert.AreEqual("AwaitingClarification", (string)active["state"]);
                 Assert.AreEqual(revision.ToString("D"), (string)active["currentRevisionId"]);
@@ -73,7 +74,7 @@ namespace SolidWorksCadAgent.UnitTests
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("{}") });
                 var body = path == "/jobs" ? "{\"items\":[{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\"}]}" :
                     path == "/jobs/" + id ? "{\"id\":\"" + id + "\",\"prompt\":\"Make a plate\",\"state\":\"AwaitingClarification\",\"currentRevisionId\":\"" + revision + "\",\"currentRevisionNumber\":1,\"plan\":{\"Ambiguities\":[\"Which diameter?\"]},\"revisions\":[{\"prompt\":\"old work\"}]}" :
-                    path == "/health" ? "{\"jobInputImages\":true}" :
+                    path == "/health" ? "{\"jobInputImages\":true,\"clientSubmissionIds\":true}" :
                     path == "/settings" ? "{\"settings\":{}}" :
                     path == "/solidworks/status" ? "{\"runtime\":null}" : "{}";
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });

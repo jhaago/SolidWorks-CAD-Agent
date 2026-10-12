@@ -137,13 +137,21 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             prompt = prompt?.Trim();
             if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 2000)
                 throw Error(400, "prompt_invalid", "Enter a CAD instruction of 1–2000 characters.");
-            if (payload["image"] == null) return JsonConvert.SerializeObject(new { prompt }, RemoteJson.Settings);
+            var forwarded = new JObject { ["prompt"] = prompt };
+            if (payload.TryGetValue("clientSubmissionId", StringComparison.OrdinalIgnoreCase, out var identity))
+            {
+                if (identity.Type != JTokenType.String || !Guid.TryParse((string)identity, out var id) || id == Guid.Empty)
+                    throw Error(400, "INVALID_SUBMISSION_ID", "A nonempty submission UUID is required.");
+                forwarded["clientSubmissionId"] = id.ToString("D");
+            }
+            if (payload["image"] == null) return forwarded.ToString(Formatting.None);
             var image = payload["image"] as JObject;
             var mediaType = image?["mediaType"]?.Type == JTokenType.String ? (string)image["mediaType"] : null;
             var encoded = image?["dataBase64"]?.Type == JTokenType.String ? (string)image["dataBase64"] : null;
             if ((mediaType != "image/jpeg" && mediaType != "image/png") || string.IsNullOrEmpty(encoded) || encoded.Length > 5592408)
                 throw Error(400, "image_invalid", "Attach one JPEG or PNG image of at most 4 MiB.");
-            return JsonConvert.SerializeObject(new { prompt, image = new { mediaType, dataBase64 = encoded } }, RemoteJson.Settings);
+            forwarded["image"] = new JObject { ["mediaType"] = mediaType, ["dataBase64"] = encoded };
+            return forwarded.ToString(Formatting.None);
         }
 
         private static string LifecycleBody(RemoteRequest request, string action)

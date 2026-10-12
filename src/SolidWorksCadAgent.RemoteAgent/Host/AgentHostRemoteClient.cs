@@ -88,6 +88,7 @@ namespace SolidWorksCadAgent.RemoteAgent.Host
             {
                 agentHostAvailable = true,
                 jobInputImages = (bool?)health["jobInputImages"] == true,
+                clientSubmissionIds = (bool?)health["clientSubmissionIds"] == true,
                 executionMode = (string)settings["executionMode"] ?? (string)health["executionMode"],
                 model = (string)settings["openAiModel"],
                 solidWorks = new
