@@ -1,5 +1,35 @@
 # Current state review — 11 October 2026
 
+## Submission recovery followup — 12 October 2026
+
+Product commit `7a52698` adds optional `clientSubmissionId` support across Host
+and the authenticated RemoteAgent. A phone UUID becomes the job ID. SQLite
+schema 7 atomically binds it to an immutable fingerprint of the initial trimmed
+prompt and validated image input. Matching repeats return the current persisted
+receipt; changed input or a legacy ID returns `409 SUBMISSION_CONFLICT`.
+Only the atomic creator plans. Full queues, terminal jobs, Host restart-required
+settings and changed planner capabilities do not prevent receipt recovery.
+Health/status advertise `clientSubmissionIds`; omission preserves older clients.
+Approval, STA execution, owned-document checks and native fail-stop remain intact.
+
+Validation: full Release build has zero warnings/errors, and 710 unit tests pass
+in both interop modes. SOLIDWORKS 2020 startup passes 1/1 and native V2 acceptance
+passes 9/9 with no skips. Native results and nine retained model hashes are in
+`artifacts/submission-recovery/`; see the native verification followup.
+The native-capable bundle at `artifacts/submission-bundle/` passes positive and
+negative capability checks and file-lock regressions. Its SHA-256 is
+`9FA24594F17279DEE422442D18E6652B0C5CF2C0AECF58D7D77E710653E1F82C`.
+Hosted Windows checks passed on the product commit:
+https://github.com/jhaago/SolidWorks-CAD-Agent/actions/runs/38189437795
+
+Independent review found no material Host/proxy defect and three Android lifecycle
+issues; their regressions were reproduced and fixed in the companion repository.
+An extra route regression using two different valid image fixtures remains a
+minor coverage followup; input-hash byte distinction and image route validation
+are already tested. Current hosted companion results are recorded in draft PR 2.
+Physical-phone/cloud/network acceptance and merge/release remain deferred.
+The original review below is retained as historical evidence.
+
 ## Source consolidation
 
 The review branch preserves the latest Windows history through `63100d4` and

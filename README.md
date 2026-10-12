@@ -45,6 +45,13 @@ Image interpretation, assemblies, drawings and arbitrary macros are not enabled 
 
 ## Manual remote workstation test build
 
+Current Host/RemoteAgent builds advertise `clientSubmissionIds` for compatible
+phone builds: the optional `clientSubmissionId` UUID creates or recovers one
+persisted job, and changed input for that UUID returns `SUBMISSION_CONFLICT`.
+Creation without an ID still works. Recovery returns existing state without
+repeating planning or native commands; approval remains required. The SQLite
+schema advances to 7, so older Host binaries cannot open an upgraded database.
+
 The separate `SolidWorksCadAgent.RemoteAgent.exe` serves primary-monitor JPEG viewing and allowlisted manual input on `127.0.0.1:5079`, via private Tailscale Serve HTTPS. Pairing needs local Windows approval; every connection starts view-only. V2 also provides authenticated paired job submission, status, approval, revisions, completion and bounded native artifact download. Android UI availability depends on the companion build. Image-design intake remains desktop/loopback-only in this milestone. See [setup and physical tests](docs/live-remote-windows-testing.md). The CAD Host remains unexposed, and native plate and millimetre-scale acceptance passed on the SOLIDWORKS 2020 PC; see [Windows validation](docs/windows-validation-2026-10-05.md).
 
 ## Prerequisites

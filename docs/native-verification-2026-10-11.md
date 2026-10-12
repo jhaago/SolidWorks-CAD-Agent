@@ -88,6 +88,21 @@ transitions, or a phone-to-native-artifact download. The user explicitly chose
 to continue without a physical phone for now. Those device-dependent checks
 remain deferred; the source review PRs remain drafts.
 
-Submission recovery still reconciles uncertain receipts by prompt text. The next
-development phase is an agreed durable submission identity across Android,
-RemoteAgent and Host, with exact-ID recovery and no replay of native mutations.
+## Submission recovery native rerun — 12 October 2026
+
+Windows product commit `7a52698` was built with native interop enabled. Startup
+again passed 1/1 (29 seconds), followed by all nine V2 prismatic acceptance cases
+passing without skips (3 minutes 30 seconds). These use fixed planners and owned
+fixture documents, and verify native profiles/features, volume/bounds and saved
+reopened models. No cloud requests were made. Approval and native boundaries
+remain enforced after the submission protocol changes.
+
+Evidence: `artifacts/submission-recovery/startup.trx`, `v2-native.trx`, and
+`native-artifacts.json` (nine nonempty retained models with paths and SHA-256).
+The test-launched SOLIDWORKS instance, PID 11988, was retained; no user process or
+document was terminated. Recheck its state before future operations.
+
+Supported companion builds now recover uncertain submissions by exact persisted
+UUID. Older workstations retain the legacy prompt-matching limitation. This
+native rerun certifies the named geometry fixtures, not physical-phone, live
+cloud planning, deployment or end-to-end mobile network behavior.
