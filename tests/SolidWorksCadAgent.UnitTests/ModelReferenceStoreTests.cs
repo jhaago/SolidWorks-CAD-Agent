@@ -27,7 +27,7 @@ namespace SolidWorksCadAgent.UnitTests
                     await repository.InitializeAsync();
                 }
 
-                Assert.AreEqual(6L, ReadUserVersion(path));
+                Assert.AreEqual(7L, ReadUserVersion(path));
                 Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
                 Assert.AreEqual(1L, ReadScalar(path, "SELECT COUNT(*) FROM CommandExecutions WHERE JobId = @JobId;", jobId));
                 Assert.IsTrue(TableExists(path, "V2ModelOwnerships"));
@@ -67,7 +67,7 @@ namespace SolidWorksCadAgent.UnitTests
                 CreateVersionFiveFixture(path, jobId, false);
                 using (var repository = new SqliteJobRepository(path))
                     await repository.InitializeAsync();
-                Assert.AreEqual(6L, ReadUserVersion(path));
+                Assert.AreEqual(7L, ReadUserVersion(path));
                 Assert.AreEqual(HistoricalPlanJson, ReadPlanJson(path, jobId));
                 Assert.AreEqual(1L, ReadScalar(path, "SELECT COUNT(*) FROM CommandExecutions WHERE JobId = @JobId;", jobId));
                 Assert.IsTrue(TableExists(path, "V2MutationAttempts"));
