@@ -9,9 +9,10 @@ namespace SolidWorksCadAgent.Core.References
     public static class CadParametricIdentity
     {
         public static readonly string[] Roles = { "width", "length", "thickness", "bottom", "right", "top", "left", "centreDiagonal", "boss" };
+        public static readonly System.Collections.Generic.IReadOnlyList<string> HoleRoles = Array.AsReadOnly(new[]{"holeCircle","holeDiameter","holeX","holeY"});
         public static Guid For(Guid modelId, Guid sketchEntityId, string role)
         {
-            if(modelId==Guid.Empty || sketchEntityId==Guid.Empty || !Roles.Contains(role))
+            if(modelId==Guid.Empty || sketchEntityId==Guid.Empty || !(Roles.Contains(role)||HoleRoles.Contains(role)))
                 throw new ArgumentException("Trusted model, sketch and supported semantic role are required.");
             using(var stream=new MemoryStream())
             using(var writer=new BinaryWriter(stream,Encoding.UTF8,true))

@@ -11,7 +11,8 @@ Create one new origin-centred Top Plane plate and one through-all circular hole.
 Preserve native AgentWidth, AgentLength and AgentThickness. The hole has driving
 AgentHoleDiameter, AgentHoleX and AgentHoleY, with X/Y measured in the Top Plane
 sketch from its origin. First-increment offsets are positive and greater than
-0.001mm; diameter is finite and positive, and the circle stays at least0.001mm
+0.001mm; diameter is finite and greater than0.000002mm for native representation,
+and the circle stays at least0.001mm
 inside both positive rectangle edges. Negative/zero offsets, multiple holes,
 patterns, production-model editing and arbitrary constraints remain future work.
 
@@ -32,8 +33,9 @@ CutExtrude v2. AddCircle v2 is new; v1 retains its existing semantics.
 
 The exact normalized ten-step sequence is NewPart1, CreateSketch1,
 AddRectangle2, ExitSketch1, Extrude3, CreateSketch1, AddCircle2, ExitSketch1,
-CutExtrude2 and SavePart1. Both sketches are Top Plane. Hole radius in the existing
-circle parameter shape is half the reviewed diameter. Save is a new relative
+CutExtrude2 and SavePart1. Both sketches are Top Plane. The existing circle
+diameter parameter retains the reviewed diameter; native creation uses half of it
+as radius. Save is a new relative
 `.sldprt` path with overwrite disabled. Existing schema7, sequential reservation,
 prospective revisions, uncertainty fence and no-replay behavior remain intact.
 
@@ -102,3 +104,4 @@ installed upgrade acceptance remain unverified.
 Self-review: intent, positive-offset boundary, native semantic proof, atomicity,
 saved hash provenance, recovery and legacy compatibility are explicit. No general
 editing engine or new credentials/dependencies are required.
+

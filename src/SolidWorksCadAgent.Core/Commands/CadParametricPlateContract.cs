@@ -10,12 +10,13 @@ namespace SolidWorksCadAgent.Core.Commands
     public static class CadParametricPlateContract
     {
         public static bool IsParametric(CadPlanV2Document plan) => plan?.Steps?.Any(s=>s!=null &&
-            ((s.Command=="AddRectangle" && s.OperationVersion==2)||(s.Command=="Extrude" && s.OperationVersion==3)))==true;
+            ((s.Command=="AddRectangle" && s.OperationVersion==2)||(s.Command=="Extrude" && s.OperationVersion==3)||(s.Command=="AddCircle"&&s.OperationVersion==2)))==true;
         public static bool AllowsOperationVersion(string command,int version) =>
-            (command=="AddRectangle" && version==2)||(command=="Extrude" && version==3)||
+            (command=="AddRectangle" && version==2)||(command=="Extrude" && version==3)||(command=="AddCircle"&&version==2)||
             (command=="Extrude"||command=="CutExtrude" ? version==2 : CadOperationCatalog.Find(command)?.OperationVersion==version);
         public static IReadOnlyList<string> Validate(CadPlanV2Document plan)
         {
+            if(CadParametricHoleContract.IsHole(plan))return CadParametricHoleContract.Validate(plan);
             var errors=new List<string>();
             var commands=new[]{"NewPart","CreateSketch","AddRectangle","ExitSketch","Extrude","SavePart"};
             var versions=new[]{1,1,2,1,3,1};
@@ -38,6 +39,7 @@ namespace SolidWorksCadAgent.Core.Commands
         public static CadParametricPlateIntent ReadIntent(CadPlanV2Document plan)
         {
             var errors=Validate(plan);if(errors.Count>0)throw new ArgumentException(string.Join(" ",errors),nameof(plan));
+            if(CadParametricHoleContract.IsHole(plan))plan=CadParametricHoleContract.BasePlatePlan(plan);
             return new CadParametricPlateIntent { WidthMm=Number(plan.Steps[2].Parameters["widthMm"]),LengthMm=Number(plan.Steps[2].Parameters["heightMm"]),
                 ThicknessMm=Number(plan.Steps[4].Parameters["depthMm"]),SavePath=plan.Steps[5].Parameters.Value<string>("path") };
         }

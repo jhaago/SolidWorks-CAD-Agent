@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - One new origin-centred Top Plane plate and one through-all circular hole.
-- Positive X/Y greater than0.001mm; finite positive diameter and at least0.001mm edge clearance.
+- Positive X/Y greater than0.001mm; finite diameter greater than0.000002mm and at least0.001mm edge clearance.
 - Exact ten-step version sequence1,1,2,1,3,1,2,1,2,1; new relative.sldprt with overwrite false.
 - Schema7 and plate serialized fields unchanged; plate role IDs/set retain their meaning.
 - Native driving dimensions and full solve; no Fix, arbitrary edits, replay or name-based rebinding.
