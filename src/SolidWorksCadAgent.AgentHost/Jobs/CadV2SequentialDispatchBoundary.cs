@@ -85,7 +85,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                             !string.Equals(result.Data.Value<string>("stagingPath"), stage, StringComparison.OrdinalIgnoreCase) ||
                             result.Data["errors"]?.Type != JTokenType.Integer || result.Data.Value<int>("errors") != 0 ||
                             !File.Exists(path) || !File.Exists(stage))
-                            throw new InvalidOperationException("Save did not identify the exact new staged artifact; its outcome is uncertain.");
+                            throw new InvalidOperationException("Save did not identify the exact new staged artifact; its outcome is uncertain. " + result?.Error?.Code + ": " + result?.Error?.Message);
                         string sha;
                         using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                         using (var algorithm = SHA256.Create())

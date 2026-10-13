@@ -50,8 +50,15 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                     boss=owner as Feature;
                     var type=boss?.GetTypeName2();if(type=="ICE")type=boss.GetTypeName();
                     var definition=boss?.GetDefinition() as ExtrudeFeatureData2;
-                    if(boss==null||(type!="Boss"&&type!="Extrusion")||definition==null||!definition.IsBossFeature())
-                        throw new InvalidOperationException("Captured boss feature is missing or of another kind: "+type);
+                    if(boss==null||(type!="Boss"&&type!="Extrusion")||definition==null||(!definition.IsBossFeature()&&!boss.IsBase2()))
+                        throw new InvalidOperationException("Captured base extrusion or boss definition is missing or of another kind: "+type);
+                    if(!definition.AccessSelections(model,null))throw new InvalidOperationException("Native extrusion definition selections unavailable.");
+                    try
+                    {
+                        if(definition.GetEndCondition(true)!=(int)swEndConditions_e.swEndCondBlind||definition.IsThinFeature()||definition.BothDirections)
+                            throw new InvalidOperationException("Only a one-direction non-thin blind base extrusion is supported.");
+                    }
+                    finally{definition.ReleaseSelectionAccess();}
                     continue;
                 }
                 if(role!="width"&&role!="length"&&role!="thickness")

@@ -19,8 +19,8 @@ namespace SolidWorksCadAgent.IntegrationTests
     [TestClass,DoNotParallelize,TestCategory("SolidWorksIntegration")]
     public class ParametricPlateNativeRecipeTests
     {
-        [DataTestMethod,DataRow(false),DataRow(true),Timeout(180000)]
-        public async Task AsymmetricRectangleIsFullyDefinedAndWidthAndThicknessDriven(bool changeWidth)
+        [DataTestMethod,DataRow(false,false),DataRow(true,false),DataRow(false,true),Timeout(180000)]
+        public async Task AsymmetricRectangleIsFullyDefinedAndWidthAndThicknessDriven(bool changeWidth,bool disableSolver)
         {
             if(System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS")!="1") Assert.Inconclusive("Native opt-in required.");
 #if SOLIDWORKS_INTEROP
@@ -40,7 +40,24 @@ namespace SolidWorksCadAgent.IntegrationTests
                     {
                         var app=(SldWorks)a;var model=app.IActiveDoc2;
                         bool preference=app.GetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate);
+                        if(disableSolver)
+                        {
+                            bool solve=model.SketchManager.AutoSolve,add=model.SketchManager.AddToDB,display=model.SketchManager.DisplayWhenAdded;
+                            try
+                            {
+                                model.SketchManager.AutoSolve=false;
+                                Exception failure=null;
+                                try{ParametricRectangleBuilder.Build(app,model,Guid.NewGuid(),Guid.NewGuid(),120,60);}catch(Exception ex){failure=ex;}
+                                Assert.IsNotNull(failure,"A disabled native solver must not claim a fully defined driving sketch.");
+                                Assert.AreEqual(preference,app.GetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate));
+                                Assert.AreEqual(add,model.SketchManager.AddToDB);Assert.AreEqual(display,model.SketchManager.DisplayWhenAdded);
+                                Assert.AreEqual(0,((SelectionMgr)model.SelectionManager).GetSelectedObjectCount2(-1));
+                            }
+                            finally{model.SketchManager.AutoSolve=solve;}
+                            return true;
+                        }
                         var observed=ParametricRectangleBuilder.Build(app,model,Guid.NewGuid(),Guid.NewGuid(),120,60);
+                        Assert.IsNotNull(model.SketchManager.ActiveSketch,"Rectangle creation must leave the owned sketch active for the journalled ExitSketch step.");
                         Assert.IsTrue(observed.FullyDefined,"Native sketch must be fully defined.");
                         Assert.IsTrue(observed.RequiredRelationsPresent);Assert.IsFalse(observed.HasFixedContourEntities);
                         Assert.AreEqual(4,observed.ContourEdgeCount);Assert.AreEqual(1,observed.ConstructionEdgeCount);
@@ -70,6 +87,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                         Assert.AreEqual(-0.030,ys.Min(),0.000001);Assert.AreEqual(0.030,ys.Max(),0.000001);
                         return true;
                     },CancellationToken.None);
+                    if(disableSolver)return;
                     await session.InvokeWithApplicationAsync(a=>
                     {
                         var model=((SldWorks)a).IActiveDoc2;int nativeStatus;
