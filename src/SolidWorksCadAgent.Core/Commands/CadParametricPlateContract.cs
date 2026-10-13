@@ -20,7 +20,7 @@ namespace SolidWorksCadAgent.Core.Commands
             var commands=new[]{"NewPart","CreateSketch","AddRectangle","ExitSketch","Extrude","SavePart"};
             var versions=new[]{1,1,2,1,3,1};
             if(plan?.PlanVersion!=2 || plan.Steps?.Count!=6 || plan.Steps.Any(s=>s?.Parameters==null))
-            { errors.Add("PARAMETRIC_PLATE_SCOPE: A complete six-step Top Plane plate plan is required.");return errors; }
+            { errors.Add("PARAMETRIC_PLATE_SCOPE: Unsupported operationVersion outside a complete six-step Top Plane plate plan.");return errors; }
             for(int i=0;i<6;i++) if(plan.Steps[i].Command!=commands[i]||plan.Steps[i].OperationVersion!=versions[i])
                 errors.Add("PARAMETRIC_PLATE_SCOPE: Unsupported step or operation version.");
             var sketch=plan.Steps[1].Parameters;var rectangle=plan.Steps[2].Parameters;var boss=plan.Steps[4].Parameters;var save=plan.Steps[5].Parameters;
