@@ -41,7 +41,7 @@ All edits require fresh explicit approval even in AutoMode.
 ## Recovery and publication
 
 SQLite schema 8 adds an edit-attempt journal with checkpoint identity/path/hash
-and durable states Prepared, Checkpointed, MutationStarted, Applied, Restoring,
+and durable states Prepared, Checkpointed, MutationStarted, Applied, Saving, Saved, Restoring,
 Restored, Published and Uncertain. Persist MutationStarted before native mutation.
 Never replay an interrupted or ambiguous mutation. On failure, close only the
 owned copy, reopen its exact checkpoint and verify the complete baseline before

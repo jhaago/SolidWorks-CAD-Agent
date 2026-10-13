@@ -138,6 +138,28 @@ CREATE TABLE IF NOT EXISTS V2MutationAttempts (
     UNIQUE (ModelId, ProspectiveModelRevisionId)
 );
 
+CREATE TABLE IF NOT EXISTS ParametricEditAttempts (
+    Id TEXT PRIMARY KEY NOT NULL,
+    JobId TEXT NOT NULL,
+    RevisionId TEXT NOT NULL,
+    ModelId TEXT NOT NULL,
+    CheckpointModelRevisionId TEXT NOT NULL,
+    ModelRevisionId TEXT NOT NULL,
+    PlanSha256 TEXT NOT NULL,
+    WorkingPath TEXT NOT NULL,
+    CheckpointPath TEXT NOT NULL,
+    CheckpointSha256 TEXT NULL,
+    OutputPath TEXT NOT NULL,
+    SavedSha256 TEXT NULL,
+    FailureReason TEXT NULL,
+    Status TEXT NOT NULL CHECK(Status IN ('Prepared','Checkpointed','MutationStarted','Applied','Saving','Saved','Restoring','Restored','Published','Uncertain')),
+    CreatedUtc TEXT NOT NULL,
+    UpdatedUtc TEXT NOT NULL,
+    FOREIGN KEY (ModelId,JobId) REFERENCES V2ModelOwnerships(ModelId,JobId) ON DELETE CASCADE,
+    FOREIGN KEY (RevisionId,JobId) REFERENCES Revisions(Id,JobId) ON DELETE CASCADE,
+    UNIQUE(JobId,RevisionId)
+);
+
 CREATE INDEX IF NOT EXISTS IX_Revisions_JobId_RevisionNumber
     ON Revisions(JobId, RevisionNumber);
 CREATE UNIQUE INDEX IF NOT EXISTS IX_Revisions_Id_JobId
