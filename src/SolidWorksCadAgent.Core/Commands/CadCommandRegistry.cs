@@ -158,13 +158,14 @@ namespace SolidWorksCadAgent.Core.Commands
 
             if (request.PlanVersion == 1 && request.OperationVersion != 1)
                 return Failure("INVALID_EXECUTION_REQUEST", "Registry", "Version-1 plans use version-1 operations.", null);
-            if (request.PlanVersion == 2 && IsFeatureConsumer(request.Command.Command) && request.OperationVersion != 2)
+            if (request.PlanVersion == 2 && IsFeatureConsumer(request.Command.Command) && request.OperationVersion != 2 &&
+                !(request.Command.Command == CadCommandNames.Extrude && request.OperationVersion == 3))
                 return Failure("INVALID_EXECUTION_REQUEST", "Registry", "Version-2 feature consumers require operation version 2.", null);
             if (request.ProfileSketchEntityId.HasValue &&
-                (request.PlanVersion != 2 || request.OperationVersion != 2 ||
+                (request.PlanVersion != 2 || (request.OperationVersion != 2 && !(request.Command.Command == CadCommandNames.Extrude && request.OperationVersion == 3)) ||
                  (request.Command.Command != CadCommandNames.Extrude && request.Command.Command != CadCommandNames.CutExtrude)))
                 return Failure("INVALID_EXECUTION_CONTEXT", "Registry", "A profile-sketch reference is valid only for a version-2 feature operation.", null);
-            if (request.PlanVersion == 2 && request.OperationVersion == 2 &&
+            if (request.PlanVersion == 2 && (request.OperationVersion == 2 || request.OperationVersion == 3) &&
                 (request.Command.Command == CadCommandNames.Extrude || request.Command.Command == CadCommandNames.CutExtrude) &&
                 (!request.Command.ManagedModelId.HasValue || request.Command.ManagedModelId.Value == Guid.Empty ||
                  !request.ProfileSketchEntityId.HasValue || request.ProfileSketchEntityId.Value == Guid.Empty))

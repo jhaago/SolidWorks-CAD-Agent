@@ -107,6 +107,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             }, new IVersionedCadCommandHandler[]
             {
                 new VersionTwoExtrudeCommandHandler(this),
+                new ParametricRectangleCommandHandler(this),
+                new ParametricExtrudeCommandHandler(this),
                 new VersionTwoCutCommandHandler(this)
             });
         }
@@ -165,6 +167,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             // envelope path. Version-2 consumers go through explicit registry
             // dispatch and cannot fall through to the name-only v1 handlers.
             var legacyCommand = request?.Command?.Command;
+            if (request?.PlanVersion == 2 && request.OperationVersion == 2 && legacyCommand == CadCommandNames.AddRectangle)
+            {
+                var handler = new ParametricRectangleCommandHandler(this);
+                var error = handler.Validate(request);
+                if (error != null) return new CadCommandResult { Success = false, Error = error, Data = new Newtonsoft.Json.Linq.JObject() };
+                return await handler.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            }
             var versionOneFeature = legacyCommand == CadCommandNames.Extrude || legacyCommand == CadCommandNames.CutExtrude;
             if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
                 IsSketchPrimitive(legacyCommand))
@@ -277,7 +286,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.
         internal async Task<CadCommandResult> WithActiveSketchAsync(Guid modelId, Guid entityId,
             Func<object, CadCommandResult> action, CancellationToken cancellationToken, Guid executionId,
-            bool verifyClosedReference = false)
+            bool verifyClosedReference = false, Func<object, object, CadCommandResult> applicationAction = null)
         {
             await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -306,7 +315,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                     return SolidWorksSketchSelectionScope.RunActive(model, prepared.Binding.NativeReferenceBytes,
                         native =>
                         {
-                            var result = action(native);
+                            var result = applicationAction == null ? action(native) : applicationAction(application, native);
                             if (!verifyClosedReference || result == null || !result.Success) return result;
                             if (model.SketchManager.ActiveSketch != null)
                                 return IdentityFailure("SKETCH_EXIT_FAILED", "SOLIDWORKS remained in sketch edit mode.", "Verify");
