@@ -17,7 +17,7 @@ using SolidWorks.Interop.sldworks;
 
 namespace SolidWorksCadAgent.SolidWorksBridge
 {
-    public sealed class SolidWorksBridgeFacade : ICadCommandExecutor, IVersionedCadCommandExecutor, ICadOperationAvailability, IDisposable
+    public sealed partial class SolidWorksBridgeFacade : ICadCommandExecutor, IVersionedCadCommandExecutor, ICadOperationAvailability, ICheckpointedParametricEditExecutor, IDisposable
     {
         private readonly ISolidWorksSession _session;
         private readonly ISolidWorksSession _commandSession;
@@ -80,6 +80,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             }
 
             _ownsSession = ownsSession;
+            _editWorkspace = workspacePolicy;
             _modelReferenceStore = modelReferenceStore;
             _commandSession = new DocumentScopedSession(_session);
             _savePartHandler = new SavePartCommandHandler(_commandSession, workspacePolicy);
