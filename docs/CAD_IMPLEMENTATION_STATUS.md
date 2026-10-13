@@ -1,5 +1,15 @@
 # CAD implementation handoff
 
+## Dimensioned hole — 13 October 2026
+
+Branch `feature/parametric-hole` adds AddCircle v2 and four second-sketch role
+bindings without a schema migration. AgentHoleDiameter/HoleX/HoleY are native
+driving dimensions with independent type, attachment and actual-circle readback.
+The full saved geometry, plate and hole checks gate review completion/download.
+Explicit intake requires current-revision approval and avoids provider calls.
+Native capability is false for simulation, unavailable interop or pending mode restart.
+See the [verification record and limits](parametric-hole-verification-2026-10-13.md).
+
 ## Parametric plate — 13 October 2026
 
 Branch `feature/parametric-plate` adds AddRectangle v2 and Extrude v3 without

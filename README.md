@@ -2,6 +2,21 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## Dimensioned hole capability
+
+Native-enabled builds on `feature/parametric-hole` accept:
+
+`V2 parametric plate with hole: 120 x 60 x 10 mm; hole diameter 8 mm at x=20 mm, y=10 mm; save as parametric/hole.sldprt`
+
+Review and approve the current plan revision. The new plate has driving width,
+length and thickness, plus one through-hole with driving diameter and X/Y offsets
+from the origin. Both offsets must exceed 0.001 mm, the diameter must exceed
+0.000002 mm, and the circle must remain at least 0.001 mm inside the plate edges.
+Native ownership, constraints, parameters and solid geometry are checked before
+save and after reopening. Required saved evidence also gates downloads.
+Simulation does not advertise this capability. See
+[evidence and scope](docs/parametric-hole-verification-2026-10-13.md).
+
 ## Parametric plate capability
 
 Native-enabled SOLIDWORKS 2020 builds on `feature/parametric-plate` support:
