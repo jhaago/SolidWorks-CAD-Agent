@@ -87,8 +87,14 @@ namespace SolidWorksCadAgent.Core.Commands
             var duplicate = FindCaseInsensitiveDuplicate(root, "$");
             if (duplicate != null) return duplicate;
 
-            var error = FindSchemaAlias(root, "$", "planVersion", "summary", "assumptions", "ambiguities", "steps");
+            var error = FindSchemaAlias(root, "$", "planVersion", "summary", "assumptions", "ambiguities", "steps", "parametricEdit");
             if (error != null) return error;
+            if (root["parametricEdit"] is JObject edit)
+            {
+                error = FindSchemaAlias(edit, "$.parametricEdit", "jobId", "revisionId", "modelId", "modelRevisionId",
+                    "configurationKey", "path", "sha256", "planSha256", "sourcePlanJson");
+                if (error != null) return error;
+            }
             if (!(root["steps"] is JArray steps)) return null;
             for (var index = 0; index < steps.Count; index++)
             {

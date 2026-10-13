@@ -13,6 +13,7 @@ namespace SolidWorksCadAgent.Core.Commands
         [JsonProperty("assumptions")] public List<string> Assumptions { get; set; }
         [JsonProperty("ambiguities")] public List<string> Ambiguities { get; set; }
         [JsonProperty("steps", Required = Required.Always)] public List<CadPlanV2Step> Steps { get; set; }
+        [JsonProperty("parametricEdit", NullValueHandling = NullValueHandling.Ignore)] public CadParametricEditSource ParametricEdit { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> AdditionalProperties { get; set; }
     }
 

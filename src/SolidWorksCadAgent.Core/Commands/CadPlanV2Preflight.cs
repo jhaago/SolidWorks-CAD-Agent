@@ -22,6 +22,9 @@ namespace SolidWorksCadAgent.Core.Commands
         {
             var errors = new List<string>();
             if (plan == null) return new[] { "INVALID_PLAN: The version-2 plan is missing." };
+            if (plan.ParametricEdit != null)
+                return requireNormalizedOutputIds ? CadParametricEditContract.Validate(plan) :
+                    new[] { "PARAMETRIC_EDIT_HOST_ONLY: Verified source identity must be constructed by the Host." };
             if (plan.PlanVersion != 2) errors.Add("UNSUPPORTED_PLAN_VERSION: Candidate plans must declare planVersion 2.");
             if (plan.AdditionalProperties != null && plan.AdditionalProperties.Count > 0)
                 errors.Add("INVALID_PLAN: Unexpected version-2 root property '" + plan.AdditionalProperties.Keys.First() + "'.");
