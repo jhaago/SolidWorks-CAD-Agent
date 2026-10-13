@@ -1,5 +1,21 @@
 # CAD implementation handoff
 
+## Parametric plate — 13 October 2026
+
+Branch `feature/parametric-plate` adds AddRectangle v2 and Extrude v3 without
+reinterpreting older operations. Schema7 role bindings and journal outcomes commit
+atomically. Native parameter inspection gates pre-save and post-reopen completion
+and artifact delivery. Explicit intake is `V2 parametric plate: 120 x 60 x 10 mm;
+save as parametric/plate.sldprt`. Simulation never advertises native parameters.
+
+727 unit tests pass in both interop modes. New native recipe cases cover driving
+width/thickness regeneration and failure-path transient preference restoration;
+the real Host fixture passes save/reopen, owned-copy parameter changes, missing
+named-dimension rejection, source hash preservation and artifact-evidence denial.
+All nine existing V2 prismatic native cases pass. See
+[exact evidence and limitations](parametric-plate-verification-2026-10-13.md).
+Independent review and final GitHub CI are recorded in the PR when complete.
+
 ## Native followup after current-state review — 11 October 2026
 
 The current reviewed source (`42d61ab`) passed the unrestricted SOLIDWORKS 2020

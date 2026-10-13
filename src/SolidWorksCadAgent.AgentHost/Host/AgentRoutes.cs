@@ -116,6 +116,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     schemaVersion = 1,
                     jobInputImages = _coordinator?.SupportsImageInputs == true,
                     clientSubmissionIds = _coordinator != null,
+                    parametricPlateDimensions = _coordinator?.SupportsParametricPlateDimensions == true && _settingsService?.ExecutionModeRestartRequired != true,
                     executionMode = (_settingsService?.ActiveExecutionMode ?? ExecutionMode.Real).ToString(),
                     bridgeCapability = BridgeBuildCapabilities.Capability
                 });

@@ -1,5 +1,15 @@
 # Master CAD capability matrix
 
+Latest increment (13 October 2026): the bounded parametric plate on
+`feature/parametric-plate` creates a fully constrained centred Top Plane rectangle
+and a blind base extrusion, with named driving width/length/thickness. Native
+readback and stable owner/segment references survive managed save/reopen; owned-copy
+width/thickness changes regenerate correctly. This verifies creation and inspection,
+not a production existing-model edit workflow or general dimensions/constraints.
+Schema 7 and older operation meanings are retained. See the
+[verification report](parametric-plate-verification-2026-10-13.md). Historical rows
+below retain their recorded scopes; do not generalize this slice to every dimension type.
+
 October 11 V2 expansion: E57 extends bounded Top Plane prismatic execution using the existing V1 primitives and cut implementation. See CAD_IMPLEMENTATION_STATUS.md for scope, native evidence and remaining parity gaps. Broad PARTIAL statuses remain partial.
 
 October 10 review: see CAD_IMPLEMENTATION_STATUS.md for current automated evidence. Hidden-solid inspection is corrected and native regression fixtures compile; no capability is promoted to native-certified by this review. The dated baseline below records earlier capability milestones.

@@ -70,7 +70,7 @@ namespace SolidWorksCadAgent.Core.Commands
                     else
                     {
                         var expectedVersion = IsFeatureConsumer(step.Command) ? 2 : descriptor.OperationVersion;
-                        if (step.OperationVersion.Value != expectedVersion)
+                        if (!CadParametricPlateContract.AllowsOperationVersion(step.Command, step.OperationVersion.Value))
                             errors.Add("STEP_" + index + ": Unsupported operationVersion " + step.OperationVersion.Value + " for " + step.Command + "; expected " + expectedVersion + ".");
                     }
                 }
@@ -202,6 +202,7 @@ namespace SolidWorksCadAgent.Core.Commands
             if (activeSketchKey != null)
                 errors.Add("PLAN: Exit the final open sketch before the plan ends.");
             errors.AddRange(CadPlanLifecycleValidator.ValidateReferenceAware(envelopes));
+            if (CadParametricPlateContract.IsParametric(plan)) errors.AddRange(CadParametricPlateContract.Validate(plan));
             return errors;
         }
 

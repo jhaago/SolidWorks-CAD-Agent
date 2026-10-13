@@ -155,12 +155,20 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 after.CurrentModelRevisionId != expectedRevision ||
                 savedWorkspace != null && (after.CanonicalPath != model.CanonicalPath || after.LastSavedSha256 != model.LastSavedSha256))
                 return CadV2RectangleBossVerification.Fail("The managed model changed during geometry observation.");
+            JObject parameterObservation = null;
+            if (CadParametricPlateContract.IsParametric(parsed.CandidateV2))
+            {
+                var parameters = await new CadParametricPlateVerifier(_repository, _executor).VerifyAsync(jobId, revisionId, modelId, token).ConfigureAwait(false);
+                if (!parameters.Passed) return parameters;
+                parameterObservation = parameters.Observed;
+            }
             return CadV2RectangleBossVerification.Pass(new JObject
             {
                 ["rebuild"] = rebuild.Data.DeepClone(),
                 ["bodies"] = bodies.Data.DeepClone(),
                 ["bounds"] = bounds.Data.DeepClone(),
-                ["nativeCuts"] = cutArray.DeepClone()
+                ["nativeCuts"] = cutArray.DeepClone(),
+                ["parametricPlate"] = parameterObservation?["parametricPlate"]?.DeepClone()
             });
         }
 

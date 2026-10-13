@@ -113,7 +113,9 @@ VALUES (@ModelId, @EntityId, 'Sketch', @Configuration, 'SketchFeature', 3,
             {
                 var context = ReadV2SequentialContext(connection, transaction, jobId, revisionId, stepKey, modelId);
                 RequireV2SequentialPrepared(context);
-                if (context.Step.Command == CadCommandNames.SavePart || !MatchesV2SequentialOutcome(context.Step, result))
+                if (context.Step.Command == CadCommandNames.SavePart ||
+                    (context.Step.Command == CadCommandNames.AddRectangle && context.Step.OperationVersion == 2) ||
+                    (context.Step.Command == CadCommandNames.Extrude && context.Step.OperationVersion == 3) || !MatchesV2SequentialOutcome(context.Step, result))
                     throw new InvalidOperationException("The observed result does not match the exact persisted v2 mutation contract.");
                 if (context.Step.Command == CadCommandNames.CreateSketch)
                     RequireV2SequentialBinding(connection, transaction, context.Model, context.Attempt, true);
@@ -154,6 +156,7 @@ VALUES (@ModelId, @EntityId, 'Sketch', @Configuration, 'SketchFeature', 3,
             internal CadModelIdentityRecord Model;
             internal CadV2MutationAttemptRecord Attempt;
             internal string PlanHash;
+            internal CadPlanV2Document Plan;
         }
 
         private static V2SequentialContext ReadV2SequentialContext(SQLiteConnection connection,
@@ -185,7 +188,7 @@ AND r.Id = (SELECT Id FROM Revisions WHERE JobId = @JobId ORDER BY RevisionNumbe
                 var allowed = i == 0 ? step.Command == CadCommandNames.NewPart :
                     step.Command == CadCommandNames.CreateSketch || IsV2SequentialPrimitive(step.Command) ||
                     step.Command == CadCommandNames.ExitSketch || feature || step.Command == CadCommandNames.SavePart;
-                if (!allowed || step.OperationVersion != (feature ? 2 : 1) ||
+                if (!allowed || !CadParametricPlateContract.AllowsOperationVersion(step.Command, step.OperationVersion.Value) ||
                     (step.Command == CadCommandNames.SavePart &&
                      (i != steps.Count - 1 || string.IsNullOrWhiteSpace(step.Parameters.Value<string>("path")) ||
                       step.Parameters.Value<bool?>("allowOverwrite") == true)))
@@ -241,7 +244,7 @@ FROM ManagedModels WHERE ModelId = @ModelId;";
             }
             return new V2SequentialContext
             {
-                Step = target, Model = model, PlanHash = hash,
+                Step = target, Model = model, PlanHash = hash, Plan = parsed.CandidateV2,
                 Attempt = FindV2MutationAttemptInTransaction(connection, transaction, jobId, revisionId, stepKey)
             };
         }

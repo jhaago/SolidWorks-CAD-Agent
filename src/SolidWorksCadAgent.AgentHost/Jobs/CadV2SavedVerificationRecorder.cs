@@ -152,6 +152,13 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 ExpectedJson = expected.ToString(Formatting.None),
                 ActualJson = actual.ToString(Formatting.None), CreatedUtc = DateTime.UtcNow
             }, token).ConfigureAwait(false);
+            if (CadParametricPlateContract.IsParametric(parsed.CandidateV2))
+                await _repository.AppendVerificationAsync(new VerificationResultRecord
+                {
+                    Id = Guid.NewGuid(), JobId = jobId, RevisionNumber = revision.RevisionNumber,
+                    CheckName = "V2SavedParametricPlate", Passed = passed,
+                    ExpectedJson = expected.ToString(Formatting.None), ActualJson = actual.ToString(Formatting.None), CreatedUtc = DateTime.UtcNow
+                }, token).ConfigureAwait(false);
             return passed;
         }
 

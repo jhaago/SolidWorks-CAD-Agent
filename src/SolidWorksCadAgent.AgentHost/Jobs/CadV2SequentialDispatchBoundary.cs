@@ -71,7 +71,10 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 {
                     release = false;
                     var result = await _versioned.ExecuteVersionedAsync(request, token).ConfigureAwait(false);
-                    if (path == null)
+                    if ((request.Command.Command == CadCommandNames.AddRectangle && request.OperationVersion == 2) ||
+                        (request.Command.Command == CadCommandNames.Extrude && request.OperationVersion == 3))
+                        await _repository.CommitV2ParametricOutcomeAsync(jobId, revisionId, stepKey, attempt.ModelId, result, token).ConfigureAwait(false);
+                    else if (path == null)
                         await _repository.CommitV2SequentialOutcomeAsync(jobId, revisionId, stepKey, attempt.ModelId, result, token).ConfigureAwait(false);
                     else
                     {
@@ -82,7 +85,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                             !string.Equals(result.Data.Value<string>("stagingPath"), stage, StringComparison.OrdinalIgnoreCase) ||
                             result.Data["errors"]?.Type != JTokenType.Integer || result.Data.Value<int>("errors") != 0 ||
                             !File.Exists(path) || !File.Exists(stage))
-                            throw new InvalidOperationException("Save did not identify the exact new staged artifact; its outcome is uncertain.");
+                            throw new InvalidOperationException("Save did not identify the exact new staged artifact; its outcome is uncertain. " + result?.Error?.Code + ": " + result?.Error?.Message);
                         string sha;
                         using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                         using (var algorithm = SHA256.Create())

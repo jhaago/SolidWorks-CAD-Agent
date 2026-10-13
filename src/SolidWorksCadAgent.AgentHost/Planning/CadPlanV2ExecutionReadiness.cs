@@ -61,13 +61,13 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     errors.Add("STEP_" + step.StepKey + ": SavePart must be final and explicitly non-overwriting.");
                     continue;
                 }
-                if (version == 2 && (step.Command == CadCommandNames.Extrude || step.Command == CadCommandNames.CutExtrude))
+                if ((version == 2 || version == 3) && (step.Command == CadCommandNames.Extrude || step.Command == CadCommandNames.CutExtrude))
                 {
                     try { requests.Add(CadPlanV2ExecutionBinder.BindFeature(persistedPlanJson, step.StepKey, executionId, managedModelId)); }
                     catch (ArgumentException ex) { errors.Add("STEP_" + step.StepKey + ": " + ex.Message); }
                     continue;
                 }
-                if (version != 1)
+                if (version != 1 && !(step.Command == CadCommandNames.AddRectangle && version == 2))
                 {
                     errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command + ".");
                     continue;
@@ -79,7 +79,7 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     errors.Add("STEP_" + step.StepKey + ": No open managed sketch is available.");
                     continue;
                 }
-                requests.Add(new CadVersionedCommandRequest(2, 1, new CadCommandEnvelope
+                requests.Add(new CadVersionedCommandRequest(2, version, new CadCommandEnvelope
                 {
                     Command = step.Command, Parameters = (JObject)step.Parameters.DeepClone(),
                     ExecutionId = executionId, ManagedModelId = managedModelId,

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,6 +108,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             }, new IVersionedCadCommandHandler[]
             {
                 new VersionTwoExtrudeCommandHandler(this),
+                new ParametricRectangleCommandHandler(this),
+                new ParametricExtrudeCommandHandler(this),
                 new VersionTwoCutCommandHandler(this)
             });
         }
@@ -145,6 +148,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                     if (!identityMatches)
                         return IdentityFailure("DOCUMENT_IDENTITY_MISMATCH", "The bound document belongs to another managed model.");
                 }
+                if (command?.Command == "InspectParametricPlate")
+                    return await InspectParametricPlateAsync(command, cancellationToken).ConfigureAwait(false);
                 return await _registry.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally { _commandGate.Release(); }
@@ -165,6 +170,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             // envelope path. Version-2 consumers go through explicit registry
             // dispatch and cannot fall through to the name-only v1 handlers.
             var legacyCommand = request?.Command?.Command;
+            if (request?.PlanVersion == 2 && request.OperationVersion == 2 && legacyCommand == CadCommandNames.AddRectangle)
+            {
+                var handler = new ParametricRectangleCommandHandler(this);
+                var error = handler.Validate(request);
+                if (error != null) return new CadCommandResult { Success = false, Error = error, Data = new Newtonsoft.Json.Linq.JObject() };
+                return await handler.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            }
             var versionOneFeature = legacyCommand == CadCommandNames.Extrude || legacyCommand == CadCommandNames.CutExtrude;
             if (request?.PlanVersion == 2 && request.OperationVersion == 1 &&
                 IsSketchPrimitive(legacyCommand))
@@ -274,10 +286,39 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             return await _registry.ExecuteVersionedAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
+        private async Task<CadCommandResult> InspectParametricPlateAsync(CadCommandEnvelope command, CancellationToken token)
+        {
+            if (_modelReferenceStore == null || !command.ManagedModelId.HasValue || !command.ExecutionId.HasValue ||
+                !Guid.TryParse(command.Parameters?.Value<string>("sketchEntityId"), out var sketchId) || sketchId == Guid.Empty)
+                return IdentityFailure("INVALID_EXECUTION_CONTEXT", "Trusted parametric inspection identities required.");
+            try
+            {
+                var identity = await _modelReferenceStore.GetModelAsync(command.ManagedModelId.Value, token).ConfigureAwait(false);
+                if (identity == null) return IdentityFailure("MODEL_REFERENCE_STORE_UNAVAILABLE", "Managed model missing.");
+                var bindings = new System.Collections.Generic.List<CadEntityReferenceBinding>();
+                bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, sketchId, identity.ConfigurationKey, token).ConfigureAwait(false));
+                foreach (var role in Core.References.CadParametricIdentity.Roles)
+                    bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, Core.References.CadParametricIdentity.For(identity.ModelId, sketchId, role), identity.ConfigurationKey, token).ConfigureAwait(false));
+                if (bindings.Any(b => b == null)) return IdentityFailure("PARAMETRIC_BINDING_MISSING", "Required parameter or segment binding missing.", "Inspect");
+                return await _session.InvokeWithApplicationAsync(application =>
+                {
+#if SOLIDWORKS_INTEROP
+                    var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
+                    var model = context.RequireActive((application as SldWorks)?.ActiveDoc);
+                    return CadCommandResult.Ok(new { parametricPlate = Parametric.ParametricPlateInspector.Inspect(model, identity, sketchId, bindings) });
+#else
+                    return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "Native interop required.");
+#endif
+                }, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            { return IdentityFailure("PARAMETRIC_INSPECTION_FAILED", ex.Message, "Inspect"); }
+        }
+
         // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.
         internal async Task<CadCommandResult> WithActiveSketchAsync(Guid modelId, Guid entityId,
             Func<object, CadCommandResult> action, CancellationToken cancellationToken, Guid executionId,
-            bool verifyClosedReference = false)
+            bool verifyClosedReference = false, Func<object, object, CadCommandResult> applicationAction = null)
         {
             await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -306,7 +347,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                     return SolidWorksSketchSelectionScope.RunActive(model, prepared.Binding.NativeReferenceBytes,
                         native =>
                         {
-                            var result = action(native);
+                            var result = applicationAction == null ? action(native) : applicationAction(application, native);
                             if (!verifyClosedReference || result == null || !result.Success) return result;
                             if (model.SketchManager.ActiveSketch != null)
                                 return IdentityFailure("SKETCH_EXIT_FAILED", "SOLIDWORKS remained in sketch edit mode.", "Verify");
