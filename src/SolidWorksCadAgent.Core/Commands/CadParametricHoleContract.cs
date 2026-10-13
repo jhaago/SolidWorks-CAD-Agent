@@ -8,6 +8,7 @@ namespace SolidWorksCadAgent.Core.Commands
 {
     public static class CadParametricHoleContract
     {
+        public const double MinimumEdgeClearanceMm=0.001;
         public static bool IsHole(CadPlanV2Document plan)=>plan?.Steps?.Any(s=>s?.Command=="AddCircle"&&s.OperationVersion==2)==true;
         public static CadPlanV2Document BasePlatePlan(CadPlanV2Document plan)=>new CadPlanV2Document{
             PlanVersion=plan.PlanVersion,Summary=plan.Summary,Steps=plan.Steps.Take(5).Concat(new[]{plan.Steps[9]}).ToList()};
@@ -27,7 +28,7 @@ namespace SolidWorksCadAgent.Core.Commands
             var p=plan.Steps[6].Parameters;double x=Number(p["centerXmm"]),y=Number(p["centerYmm"]),r=Number(p["diameterMm"])/2;
             double width=Number(plan.Steps[2].Parameters["widthMm"]),length=Number(plan.Steps[2].Parameters["heightMm"]);
             if(!Finite(x)||!Finite(y)||!Finite(r)||x<=0.001||y<=0.001||r<=0.000001||!Finite(r*2)||
-                !Finite(x+r)||!Finite(y+r)||x+r>width/2-0.001||y+r>length/2-0.001)
+                !Finite(x+r)||!Finite(y+r)||x+r>width/2-MinimumEdgeClearanceMm||y+r>length/2-MinimumEdgeClearanceMm)
                 errors.Add("PARAMETRIC_HOLE_SIZE: Positive offsets and a finite circle fully inside the plate with0.001mm clearance are required.");
             var path=plan.Steps[9].Parameters.Value<string>("path");
             if(path!=null&&path.Split(new[]{'/','\\'}).Any(segment=>segment==".."||segment=="."))errors.Add("PARAMETRIC_HOLE_SAVE: Path traversal is unsupported.");

@@ -106,9 +106,18 @@ namespace SolidWorksCadAgent.Core.Commands
                 else
                 {
                     Require(boss.IsRectangle, "Cuts require a rectangular base boss.");
-                    Require(profile.MinX > boss.MinX + InteriorMarginMm && profile.MaxX < boss.MaxX - InteriorMarginMm &&
-                        profile.MinY > boss.MinY + InteriorMarginMm && profile.MaxY < boss.MaxY - InteriorMarginMm,
-                        "Cut bounds must be strictly interior to the base with more than 0.02 mm clearance.");
+                    if (CadParametricHoleContract.IsHole(plan))
+                    {
+                        // Whole-plan preflight above has validated the exact dimensioned-hole scope.
+                        var margin=CadParametricHoleContract.MinimumEdgeClearanceMm;
+                        Require(profile.MinX >= boss.MinX + margin && profile.MaxX <= boss.MaxX - margin &&
+                            profile.MinY >= boss.MinY + margin && profile.MaxY <= boss.MaxY - margin,
+                            "Dimensioned hole bounds must retain at least 0.001 mm clearance.");
+                    }
+                    else
+                        Require(profile.MinX > boss.MinX + InteriorMarginMm && profile.MaxX < boss.MaxX - InteriorMarginMm &&
+                            profile.MinY > boss.MinY + InteriorMarginMm && profile.MaxY < boss.MaxY - InteriorMarginMm,
+                            "Cut bounds must be strictly interior to the base with more than 0.02 mm clearance.");
                     foreach (var previous in cuts)
                         Require(profile.MaxX < previous.MinX || profile.MinX > previous.MaxX ||
                             profile.MaxY < previous.MinY || profile.MinY > previous.MaxY,

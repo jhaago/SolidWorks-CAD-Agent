@@ -32,7 +32,9 @@ namespace SolidWorksCadAgent.IntegrationTests
     public class ParametricHoleAcceptanceTests
     {
         [DataTestMethod,DataRow(false,false),DataRow(true,false),DataRow(false,true),Timeout(240000)]
-        public async Task ApprovedHoleHasAllSixDrivingParametersAfterReopen(bool square,bool corruptReadback)
+        public Task ApprovedHoleHasAllSixDrivingParametersAfterReopen(bool square,bool corruptReadback)=>BuildAndVerify(square,corruptReadback,false);
+        [TestMethod,Timeout(240000)] public Task MinimumEdgeClearanceHoleCompletesNativeSaveAndDownload()=>BuildAndVerify(false,false,true);
+        private async Task BuildAndVerify(bool square,bool corruptReadback,bool nearEdge)
         {
             if(System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS")!="1")Assert.Inconclusive("Native opt-in required.");
 #if SOLIDWORKS_INTEROP
@@ -53,7 +55,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                     var coordinator=new JobCoordinator(repository,new FixedPlanner(),executor,new AgentSettings{WorkspaceRoot=root,ExecutionMode=ExecutionMode.Real});
                     var routes=new AgentRoutes(repository,session,coordinator);
                     var length=square?120.0:60.0;
-                    var created=await routes.HandleAsync(new AgentRequest("POST","/jobs",new JObject{["prompt"]="V2 parametric plate with hole: 120 x "+(square?120:60)+" x 10 mm; hole diameter "+(square?20:8)+" mm at x=20 mm, y="+(square?20:10)+" mm; save as "+filename}.ToString()),CancellationToken.None);
+                    var created=await routes.HandleAsync(new AgentRequest("POST","/jobs",new JObject{["prompt"]="V2 parametric plate with hole: 120 x "+(square?120:60)+" x 10 mm; hole diameter "+(square?20:8)+" mm at x="+(nearEdge?"55.999":"20")+" mm, y="+(nearEdge?"25.999":square?"20":"10")+" mm; save as "+filename}.ToString()),CancellationToken.None);
                     Assert.AreEqual(201,created.StatusCode,created.JsonBody);
                     var id=Guid.Parse(JObject.Parse(created.JsonBody).Value<string>("id"));
                     jobId=id;
@@ -84,7 +86,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                     var artifact=await routes.HandleAsync(new AgentRequest("GET","/jobs/"+id+"/artifact",null),CancellationToken.None);
                     Assert.AreEqual(200,artifact.StatusCode,artifact.JsonBody);
                     var modelId=Guid.Parse(JObject.Parse(first.ResultJson).Value<string>("modelId"));
-                    await CheckSavedCopies(repository,session,bridge,id,modelId,planned.Revisions.Single().PlanJson,root,filename,square);
+                    if(!nearEdge)await CheckSavedCopies(repository,session,bridge,id,modelId,planned.Revisions.Single().PlanJson,root,filename,square);
                     // A completion record alone cannot replace saved parameter evidence.
                     await repository.AppendVerificationAsync(new VerificationResultRecord{Id=Guid.NewGuid(),JobId=id,RevisionNumber=1,CheckName="V2SavedParametricHole",Passed=false,ExpectedJson=check.ExpectedJson,ActualJson="{}",CreatedUtc=DateTime.UtcNow});
                     artifact=await routes.HandleAsync(new AgentRequest("GET","/jobs/"+id+"/artifact",null),CancellationToken.None);

@@ -16,6 +16,32 @@ namespace SolidWorksCadAgent.UnitTests
     [TestClass] public class ParametricHoleCoordinatorTests
     {
         private const string Prompt="V2 parametric plate with hole: 120 x 60 x 10 mm; hole diameter 8 mm at x=20 mm, y=10 mm; save as hole.sldprt";
+        [DataTestMethod,DataRow(55.99,10.0),DataRow(55.999,10.0),DataRow(20.0,25.99),DataRow(20.0,25.999)]
+        public async Task AdvertisedClearanceReachesReadinessAndApprovalWithoutChangingLegacyLimits(double x,double y)
+        {
+            await Fixture(async repository=>{
+                var coordinator=new JobCoordinator(repository,new NeverPlanner(),new RegisteredExecutor(),new AgentSettings{WorkspaceRoot=Path.GetTempPath(),ExecutionMode=ExecutionMode.Real});
+                var prompt=Prompt.Replace("x=20","x="+x.ToString(System.Globalization.CultureInfo.InvariantCulture)).Replace("y=10","y="+y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                var snapshot=await coordinator.CreateAndPlanAsync(prompt,CancellationToken.None);
+                Assert.AreEqual(JobState.AwaitingApproval,snapshot.Job.State,snapshot.Job.AmbiguityMessage);
+                var planJson=snapshot.Revisions[0].PlanJson;var plan=CadPlanDocumentReader.ReadPersisted(planJson).CandidateV2;
+                Assert.AreEqual(72000-Math.PI*16*10,CadV2PrismaticGeometry.Analyze(plan).VolumeMm3,0.000001);
+                var readiness=SolidWorksCadAgent.AgentHost.Planning.CadPlanV2ExecutionReadiness.Assess(planJson,ExecutionMode.Real,new RegisteredExecutor(),snapshot.Job.Id,Guid.NewGuid());
+                Assert.IsTrue(readiness.IsReady,string.Join(" ",readiness.Errors));Assert.AreEqual(10,readiness.Requests.Count);
+                plan.Steps[2].OperationVersion=1;plan.Steps[4].OperationVersion=2;plan.Steps[6].OperationVersion=1;
+                Assert.ThrowsException<ArgumentException>(()=>CadV2PrismaticGeometry.Analyze(plan),"Legacy cuts retain strict >0.02mm clearance.");
+            });
+        }
+        [DataTestMethod,DataRow(55.9991,10.0),DataRow(20.0,25.9991)]
+        public async Task BelowAdvertisedClearanceFailsBeforeProviderOrExecution(double x,double y)
+        {
+            await Fixture(async repository=>{
+                var coordinator=new JobCoordinator(repository,new NeverPlanner(),new RegisteredExecutor(),new AgentSettings{WorkspaceRoot=Path.GetTempPath(),ExecutionMode=ExecutionMode.Real});
+                var prompt=Prompt.Replace("x=20","x="+x.ToString(System.Globalization.CultureInfo.InvariantCulture)).Replace("y=10","y="+y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                var error=await Assert.ThrowsExceptionAsync<JobCoordinatorException>(()=>coordinator.CreateAndPlanAsync(prompt,CancellationToken.None));
+                Assert.AreEqual("PARAMETRIC_REQUEST_INVALID",error.Code);
+            });
+        }
         [TestMethod] public async Task ExplicitNativeIntakeRequiresCurrentApprovalEvenInAutoModeAndNeverCallsPlanner()
         {
             await Fixture(async repository=>{

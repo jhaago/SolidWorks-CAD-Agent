@@ -23,14 +23,14 @@ Missing, failed or mismatched latest evidence blocks artifact delivery.
 
 ## Verification record
 
-- Contract4 and intake3 tests cover valid scope, malformed/nonfinite/tangent/outside
+- Contract4 and intake9 tests cover valid scope, malformed/nonfinite/tangent/outside
   geometry, version combinations, role separation, no provider call, mandatory
   current approval and simulation/unsupported rejection.
 - SQLite4 tests exercise four-role atomic commit, foreign/missing/duplicate/wrong
   names/owners/values, forced journal failure rollback, generic bypass and no replay.
 - Pure verifier3 tests require actual circle geometry and all three driving dimensions.
-- Complete unit suite:741/741 in both native-enabled and disabled-interop modes,
-  no failures/skips (`task4-units-native.trx`, `task4-units-disabled.trx`).
+- Final post-fix complete unit suite:747/747 in both native-enabled and disabled-interop
+  modes, no failures/skips (`review-units-native.trx`, `review-units-disabled.trx`).
 - Native recipe3/3 on installed SOLIDWORKS2020 SP0: driving diameter/X/Y regenerate
   actual circle geometry, equal-valued X/Y name swaps fail, and solver-disabled
   failure restores temporary preference/manager/selection state.
@@ -43,11 +43,47 @@ Missing, failed or mismatched latest evidence blocks artifact delivery.
   Equal diameter/X/Y20 rejects both X/Y and diameter/X name swaps. Missing hole
   names and duplicate managed IDs fail closed. After raw copy probes, the exact
   immutable managed source is restored before collision/inspection checks.
-- Retained asymmetric/equal source identities and matching registered file hashes
+- Post-review native1/1,1m2 (`clearance-native.trx`): a hole at X55.999/Y25.999
+  retains exactly0.001mm clearance on both axes and passes creation, managed save,
+  reopen and download. Native10 distinct cases pass across the recorded9+1 runs.
+- Retained asymmetric/equal/boundary identities and matching registered file hashes
   are in `artifacts/parametric-hole/hole-native-artifacts.json`.
 - Complete native Release solution/bundle build:0 warnings/errors. Bundle
   validation, rejection of false native claims and file-lock checks pass.
-- Independent review and GitHub CI are being finalized; update before publication.
+- Final post-fix native Release solution/bundle:0warnings/errors; validator,
+  false-native capability rejection and file-lock checks pass (`review-bundle-*`).
+  GitHub CI is recorded in the draft PR after push; no automatic merge/release.
+
+## Independent review and one fix pass
+
+One fresh reviewer found0Critical,1Important and0Minor findings. The hole contract
+allowed0.001mm edge clearance, but the legacy prismatic analyzer required strictly
+more than0.02mm. Four accepted near-boundary cases reproduced readiness rejection
+on both axes. The analyzer now uses the shared0.001mm minimum only after exact
+dimensioned-hole preflight; legacy cuts retain their existing strict limit.
+All six accepted/below-limit/legacy boundary tests pass. Native exact-clearance
+save/reopen/download also passes. There was one fix pass and no repeat review.
+
+## Rulings made
+
+- Proceed through design/plan under the user's explicit authorization, overriding
+  repeated skill approval handoffs. Cost if wrong: scope can be corrected on an
+  isolated reviewable branch; positive-offset scope remains deliberately bounded.
+- Keep existing `diameterMm` and halve only for native radius. Initial reader
+  rejected `radiusMm`. Cost if wrong: circle size could differ; independent
+  diameter and volume tests cover the conversion.
+- Push a stacked draft PR using existing GitHub-update authorization, without
+  repeating the finishing menu. Cost if wrong: the branch/PR can be reviewed or
+  closed without merging or releasing it.
+- Physical phone behavior remains deferred as explicitly requested; Android is
+  unchanged. Cost: device-specific acceptance remains unverified.
+- Live cloud/network acceptance remains deferred; deterministic intake avoids
+  provider calls. Cost: deployed network behavior may require later fixes.
+- Installed upgrades and other SOLIDWORKS releases are outside this certification.
+  Cost: upgrade/runtime compatibility remains unverified beyond installed2020 SP0.
+
+Deferred minors: none. The last three rulings address the reviewer's complete
+declined-to-judge list, with the recorded boundaries retained.
 
 Logs/TRX and retained model identities/hashes belong under ignored
 `artifacts/parametric-hole`. Native fixtures create only unique owned documents,
