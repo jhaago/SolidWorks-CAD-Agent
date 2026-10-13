@@ -42,6 +42,15 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                 errors.Add("VERSIONED_DISPATCH_UNAVAILABLE: The active executor cannot dispatch versioned operations.");
             if (errors.Count > 0) return CadPlanV2ExecutionReadinessResult.Fail(errors);
 
+            if (CadParametricEditContract.IsEdit(parsed.CandidateV2))
+            {
+                if (!(executor is Core.References.ICheckpointedParametricEditExecutor edit) || !edit.SupportsCheckpointedParametricEditing ||
+                    !availability.IsOperationRegistered(CadCommandNames.SavePart, 1))
+                    return CadPlanV2ExecutionReadinessResult.Fail(new[]{"PARAMETRIC_EDIT_UNAVAILABLE: Native checkpointed editing and managed save are required."});
+                // Fork and parameter changes use the bounded edit interface, not the generic command registry.
+                return CadPlanV2ExecutionReadinessResult.Ready(Array.Empty<CadVersionedCommandRequest>());
+            }
+
             var requests = new List<CadVersionedCommandRequest>();
             var steps = parsed.CandidateV2.Steps;
             Guid? activeSketch = null;

@@ -15,6 +15,7 @@ using SolidWorksCadAgent.Contracts.Jobs;
 using SolidWorksCadAgent.Core;
 using SolidWorksCadAgent.Core.Ai;
 using SolidWorksCadAgent.Core.Commands;
+using SolidWorksCadAgent.Core.References;
 using SolidWorksCadAgent.Core.Jobs;
 using SolidWorksCadAgent.Core.Remote;
 using SolidWorksCadAgent.Core.Workspace;
@@ -71,6 +72,10 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         }
 
         public string WorkspaceRoot => _settings.WorkspaceRoot;
+        public bool SupportsCheckpointedParametricEditing => _executionMode == ExecutionMode.Real &&
+            _executor is ICheckpointedParametricEditExecutor editor && editor.SupportsCheckpointedParametricEditing &&
+            _executor is ICadOperationAvailability operations && operations.SupportsManagedReferences &&
+            _executor is IVersionedCadCommandExecutor && operations.IsOperationRegistered(CadCommandNames.SavePart, 1);
         public bool SupportsImageInputs => _planningProvider is IImageCadPlanningProvider;
         public bool SupportsParametricPlateDimensions => _executionMode == ExecutionMode.Real &&
             _executor is ICadOperationAvailability availability && availability.SupportsManagedReferences &&
@@ -160,6 +165,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            if (CadParametricEditPrompt.IsRequest(prompt))
+            {
+                if (image != null) throw new JobCoordinatorException("V2_IMAGE_UNSUPPORTED", "Explicit parameter edits do not interpret images.");
+                try { CadParametricEditPrompt.Parse(prompt); }
+                catch (ArgumentException ex) { throw new JobCoordinatorException("PARAMETRIC_REQUEST_INVALID", ex.Message); }
+            }
             if (CadParametricHolePrompt.IsRequest(prompt))
             {
                 if (image != null) throw new JobCoordinatorException("V2_IMAGE_UNSUPPORTED", "Explicit dimensioned holes do not interpret images.");
@@ -218,7 +229,19 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 };
                 if (CadV2LegacyPlanAdapter.IsRequest(job.Prompt))
                     request.Clarifications = new[] { CadV2LegacyPlanAdapter.PlanningContext }.Concat(request.Clarifications).ToList();
-                if (CadParametricHolePrompt.IsRequest(job.Prompt))
+                if (CadParametricEditPrompt.IsRequest(job.Prompt))
+                {
+                    try
+                    {
+                        var edit = CadParametricEditPrompt.Parse(job.Prompt);
+                        var source = await CadParametricEditSourceAuthorization.ResolveAsync(_repository,
+                            new WorkspacePolicy(_settings.WorkspaceRoot), edit.JobId, cancellationToken).ConfigureAwait(false);
+                        version2Plan = CadParametricEditContract.Build(source, edit.Parameter, edit.ValueMm, edit.OutputPath);
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException || ex is IOException || ex is WorkspacePolicyException)
+                    { throw new JobCoordinatorException("PARAMETRIC_EDIT_SOURCE_UNAVAILABLE", ex.Message); }
+                }
+                else if (CadParametricHolePrompt.IsRequest(job.Prompt))
                     version2Plan = NormalizeVersion2Candidate(CadParametricHolePrompt.BuildCandidate(job.Prompt));
                 else if (CadParametricPlatePrompt.IsRequest(job.Prompt))
                     version2Plan = NormalizeVersion2Candidate(CadParametricPlatePrompt.BuildCandidate(job.Prompt));
@@ -346,6 +369,14 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 }
                 catch (WorkspacePolicyException ex)
                 { throw new JobCoordinatorException("INVALID_PLAN", "The version-2 output path is unavailable: " + ex.Message); }
+
+                if (CadParametricEditContract.IsEdit(parsedPlan.CandidateV2))
+                {
+                    try { await CadParametricEditSourceAuthorization.RequireAsync(_repository,
+                        new WorkspacePolicy(_settings.WorkspaceRoot), parsedPlan.CandidateV2.ParametricEdit, cancellationToken).ConfigureAwait(false); }
+                    catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException || ex is IOException || ex is WorkspacePolicyException)
+                    { throw new JobCoordinatorException("PARAMETRIC_EDIT_SOURCE_UNAVAILABLE", ex.Message); }
+                }
 
                 var nativeControl = _nativeControlLeaseFactory();
                 if (nativeControl == null)
@@ -832,9 +863,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                         if (!await TransitionAsync(current, JobState.Executing, token, revision.Id).ConfigureAwait(false))
                             return await SnapshotAsync(job.Id, token).ConfigureAwait(false);
 
-                        var passed = await new CadV2SixStepRunner(_repository, _executor,
-                            new WorkspacePolicy(_settings.WorkspaceRoot)).RunAsync(job.Id, revision.Id, token,
-                                approvedPlanSha256).ConfigureAwait(false);
+                        var editPlan = CadParametricEditContract.IsEdit(CadPlanDocumentReader.ReadPersisted(revision.PlanJson).CandidateV2);
+                        var passed = editPlan
+                            ? await new CadParametricEditRunner(_repository, _executor, new WorkspacePolicy(_settings.WorkspaceRoot))
+                                .RunAsync(job.Id, revision.Id, approvedPlanSha256, token).ConfigureAwait(false)
+                            : await new CadV2SixStepRunner(_repository, _executor, new WorkspacePolicy(_settings.WorkspaceRoot))
+                                .RunAsync(job.Id, revision.Id, token, approvedPlanSha256).ConfigureAwait(false);
                         current = await _repository.GetAsync(job.Id, token).ConfigureAwait(false);
                         if (current == null || current.State == JobState.Cancelled)
                             return await SnapshotAsync(job.Id, token).ConfigureAwait(false);

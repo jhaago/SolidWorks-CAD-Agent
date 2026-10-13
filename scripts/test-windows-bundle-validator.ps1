@@ -30,6 +30,8 @@ try {
     try { & $validatorPath -ZipPath $missingZip } catch { $missingRejected = $_.Exception.Message -like '*RemoteAgent*' }
     if (-not $missingRejected) { throw "Validator accepted a bundle without RemoteAgent." }
     [System.IO.File]::WriteAllBytes($remoteExe, $remoteBytes)
+    $interopPath = Join-Path $expanded "AgentHost\SolidWorks.Interop.swconst.dll"
+    if (Test-Path -LiteralPath $interopPath) { Remove-Item -LiteralPath $interopPath }
     Set-Content -LiteralPath (Join-Path $expanded "BUILD-CAPABILITY.txt") -Value "NativeSolidWorksInterop" -Encoding ASCII
     Compress-Archive -Path (Join-Path $expanded "*") -DestinationPath $tamperedZip -CompressionLevel Optimal
 
@@ -38,7 +40,7 @@ try {
         & $validatorPath -ZipPath $tamperedZip
     }
     catch {
-        $rejected = $true
+        $rejected = $_.Exception.Message -like '*interop*' -or $_.Exception.Message -like '*capability*'
         Write-Host "Validator correctly rejected a false native capability claim: $($_.Exception.Message)"
     }
 
@@ -48,6 +50,11 @@ try {
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {
+        $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        $resolvedTarget = [System.IO.Path]::GetFullPath($testRoot)
+        if (-not $resolvedTarget.StartsWith($temporaryRoot + 'SolidWorksCadAgent-BundleValidatorTest-', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing cleanup outside the generated bundle-validation fixture.'
+        }
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }

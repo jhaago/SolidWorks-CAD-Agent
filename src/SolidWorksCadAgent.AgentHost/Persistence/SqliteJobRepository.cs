@@ -85,6 +85,7 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
             using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
             {
                 var now = DateText(DateTime.UtcNow);
+                RecoverParametricEdits(connection, transaction, now);
                 using (var bindings = connection.CreateCommand())
                 {
                     bindings.Transaction = transaction;
@@ -1102,8 +1103,8 @@ VALUES
         private static void EnsureSchemaVersion(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             var currentVersion = GetSchemaVersion(connection, transaction);
-            if (currentVersion > 7)
-                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (7).");
+            if (currentVersion > 8)
+                throw new InvalidOperationException("Database schema version " + currentVersion + " is newer than this Agent supports (8).");
 
             if (!HasColumn(connection, transaction, "Jobs", "SubmissionInputHash"))
                 using (var command = connection.CreateCommand())
@@ -1140,7 +1141,7 @@ VALUES
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
-                command.CommandText = "PRAGMA user_version = 7;";
+                command.CommandText = "PRAGMA user_version = 8;";
                 command.ExecuteNonQuery();
             }
         }

@@ -118,6 +118,7 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     clientSubmissionIds = _coordinator != null,
                     parametricPlateDimensions = _coordinator?.SupportsParametricPlateDimensions == true && _settingsService?.ExecutionModeRestartRequired != true,
                     parametricHoleDimensions = _coordinator?.SupportsParametricHoleDimensions == true && _settingsService?.ExecutionModeRestartRequired != true,
+                    checkpointedParametricEditing = _coordinator?.SupportsCheckpointedParametricEditing == true && _settingsService?.ExecutionModeRestartRequired != true,
                     executionMode = (_settingsService?.ActiveExecutionMode ?? ExecutionMode.Real).ToString(),
                     bridgeCapability = BridgeBuildCapabilities.Capability
                 });
@@ -245,8 +246,12 @@ namespace SolidWorksCadAgent.AgentHost.Host
                     var owner = await _repository.GetV2ModelOwnerAsync(modelId, cancellationToken).ConfigureAwait(false);
                     var attempt = await _repository.FindV2MutationAttemptAsync(id, currentRevision.Id,
                         parsedPlan.CandidateV2?.Steps.LastOrDefault()?.StepKey ?? "missing", cancellationToken).ConfigureAwait(false);
-                    if (!CadV2ArtifactAuthorization.IsAuthorized(snapshot, currentRevision, save,
-                        attempt, model, owner, path, policy))
+                    var editAttempt = CadParametricEditContract.IsEdit(parsedPlan.CandidateV2)
+                        ? await _repository.GetParametricEditAttemptAsync(id, currentRevision.Id, cancellationToken).ConfigureAwait(false) : null;
+                    var authorized = editAttempt != null
+                        ? CadParametricEditArtifactAuthorization.IsAuthorized(snapshot, currentRevision, save, editAttempt, model, owner, path, policy)
+                        : CadV2ArtifactAuthorization.IsAuthorized(snapshot, currentRevision, save, attempt, model, owner, path, policy);
+                    if (!authorized)
                         return Error(409, "ARTIFACT_NOT_READY", "The version-2 artifact is not bound to passing owned-model evidence.");
                     expectedV2Hash = model.LastSavedSha256;
                 }

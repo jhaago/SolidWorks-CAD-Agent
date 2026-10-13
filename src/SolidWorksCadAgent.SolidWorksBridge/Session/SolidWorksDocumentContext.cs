@@ -18,6 +18,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         private Guid? _executionId;
         public Guid? ManagedModelId { get; private set; }
         public Guid? OutputEntityId { get; private set; }
+        internal bool IsClosedForExecution(Guid executionId) => _executionId == executionId &&
+            _document == null && _pendingOpenDocument == null && !ManagedModelId.HasValue;
         public void BeginExecution(Guid? executionId)
         {
             if (_executionId != executionId) Clear();
