@@ -103,7 +103,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
         }
         private static bool Same(object a,object b)
         { var x=Marshal.GetIUnknownForObject(a);var y=Marshal.GetIUnknownForObject(b);try{return x==y;}finally{Marshal.Release(x);Marshal.Release(y);} }
-        private static SketchPoint Origin(ModelDoc2 model)
+        internal static SketchPoint Origin(ModelDoc2 model)
         {
             for(var feature=(Feature)model.FirstFeature();feature!=null;feature=(Feature)feature.GetNextFeature())
             {

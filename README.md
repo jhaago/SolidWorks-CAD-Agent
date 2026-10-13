@@ -2,6 +2,20 @@
 
 AI-assisted native CAD automation for SOLIDWORKS.
 
+## Parametric plate capability
+
+Native-enabled SOLIDWORKS 2020 builds on `feature/parametric-plate` support:
+
+`V2 parametric plate: 120 x 60 x 10 mm; save as parametric/plate.sldprt`
+
+Review and approve the current revision. This creates a fully defined, origin-centred
+Top Plane plate with named driving width, length and thickness. Native parameter,
+reference and physical geometry checks run before save and after managed reopening;
+missing or incorrect parameter evidence blocks completion and download.
+Simulation does not advertise this capability. Existing V1/V2 workflows retain
+their contracts. Editing a previously saved production model remains a later step.
+See [native evidence and limits](docs/parametric-plate-verification-2026-10-13.md).
+
 ## Current reviewed source
 
 `feature/current-state-reviewed` combines the latest CAD/backend work through
