@@ -79,6 +79,19 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                             observation.SketchEntityId != parsed.CandidateV2.Steps[1].OutputEntityId ||
                             CadParametricPlateVerifier.Check(CadParametricPlateContract.ReadIntent(parsed.CandidateV2), observation).Count != 0) return false;
                     }
+                    if (CadParametricHoleContract.IsHole(parsed.CandidateV2))
+                    {
+                        var parameterCheck = snapshot.Verifications?.Where(item => item.JobId == snapshot.Job.Id &&
+                            item.RevisionNumber == revision.RevisionNumber && item.CheckName == "V2SavedParametricHole").LastOrDefault();
+                        if (parameterCheck == null || !parameterCheck.Passed) return false;
+                        var parameterExpected = JObject.Parse(parameterCheck.ExpectedJson);
+                        var parameterActual = JObject.Parse(parameterCheck.ActualJson);
+                        if (!JToken.DeepEquals(parameterExpected, expected) || parameterActual.Value<string>("sha256") != model.LastSavedSha256) return false;
+                        var observation = parameterActual["observed"]?["parametricHole"]?.ToObject<CadParametricHoleObservation>();
+                        if (observation == null || observation.ModelId != model.ModelId || observation.ConfigurationKey != model.ConfigurationKey ||
+                            observation.SketchEntityId != parsed.CandidateV2.Steps[5].OutputEntityId ||
+                            CadParametricHoleVerifier.Check(CadParametricHoleContract.ReadIntent(parsed.CandidateV2), observation).Count != 0) return false;
+                    }
                     return expected.Value<string>("planSha256") == planHash &&
                         expected.Value<string>("modelId") == model.ModelId.ToString("D") &&
                         expected.Value<string>("modelRevisionId") == model.CurrentModelRevisionId.ToString("D") &&

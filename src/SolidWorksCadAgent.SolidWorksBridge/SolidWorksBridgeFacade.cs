@@ -109,6 +109,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             {
                 new VersionTwoExtrudeCommandHandler(this),
                 new ParametricRectangleCommandHandler(this),
+                new ParametricCircleCommandHandler(this),
                 new ParametricExtrudeCommandHandler(this),
                 new VersionTwoCutCommandHandler(this)
             });
@@ -150,6 +151,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 }
                 if (command?.Command == "InspectParametricPlate")
                     return await InspectParametricPlateAsync(command, cancellationToken).ConfigureAwait(false);
+                if (command?.Command == "InspectParametricHole")
+                    return await InspectParametricPlateAsync(command, cancellationToken, true).ConfigureAwait(false);
                 return await _registry.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally { _commandGate.Release(); }
@@ -173,6 +176,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             if (request?.PlanVersion == 2 && request.OperationVersion == 2 && legacyCommand == CadCommandNames.AddRectangle)
             {
                 var handler = new ParametricRectangleCommandHandler(this);
+                var error = handler.Validate(request);
+                if (error != null) return new CadCommandResult { Success = false, Error = error, Data = new Newtonsoft.Json.Linq.JObject() };
+                return await handler.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            if (request?.PlanVersion == 2 && request.OperationVersion == 2 && legacyCommand == CadCommandNames.AddCircle)
+            {
+                var handler = new ParametricCircleCommandHandler(this);
                 var error = handler.Validate(request);
                 if (error != null) return new CadCommandResult { Success = false, Error = error, Data = new Newtonsoft.Json.Linq.JObject() };
                 return await handler.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
@@ -286,7 +296,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             return await _registry.ExecuteVersionedAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<CadCommandResult> InspectParametricPlateAsync(CadCommandEnvelope command, CancellationToken token)
+        private async Task<CadCommandResult> InspectParametricPlateAsync(CadCommandEnvelope command, CancellationToken token, bool hole = false)
         {
             if (_modelReferenceStore == null || !command.ManagedModelId.HasValue || !command.ExecutionId.HasValue ||
                 !Guid.TryParse(command.Parameters?.Value<string>("sketchEntityId"), out var sketchId) || sketchId == Guid.Empty)
@@ -297,7 +307,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 if (identity == null) return IdentityFailure("MODEL_REFERENCE_STORE_UNAVAILABLE", "Managed model missing.");
                 var bindings = new System.Collections.Generic.List<CadEntityReferenceBinding>();
                 bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, sketchId, identity.ConfigurationKey, token).ConfigureAwait(false));
-                foreach (var role in Core.References.CadParametricIdentity.Roles)
+                foreach (var role in hole ? Core.References.CadParametricIdentity.HoleRoles : Core.References.CadParametricIdentity.Roles)
                     bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, Core.References.CadParametricIdentity.For(identity.ModelId, sketchId, role), identity.ConfigurationKey, token).ConfigureAwait(false));
                 if (bindings.Any(b => b == null)) return IdentityFailure("PARAMETRIC_BINDING_MISSING", "Required parameter or segment binding missing.", "Inspect");
                 return await _session.InvokeWithApplicationAsync(application =>
@@ -305,6 +315,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
 #if SOLIDWORKS_INTEROP
                     var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
                     var model = context.RequireActive((application as SldWorks)?.ActiveDoc);
+                    if (hole) return CadCommandResult.Ok(new { parametricHole = Parametric.ParametricHoleInspector.Inspect(model, identity, sketchId, bindings) });
                     return CadCommandResult.Ok(new { parametricPlate = Parametric.ParametricPlateInspector.Inspect(model, identity, sketchId, bindings) });
 #else
                     return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "Native interop required.");

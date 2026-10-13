@@ -115,6 +115,7 @@ VALUES (@ModelId, @EntityId, 'Sketch', @Configuration, 'SketchFeature', 3,
                 RequireV2SequentialPrepared(context);
                 if (context.Step.Command == CadCommandNames.SavePart ||
                     (context.Step.Command == CadCommandNames.AddRectangle && context.Step.OperationVersion == 2) ||
+                    (context.Step.Command == CadCommandNames.AddCircle && context.Step.OperationVersion == 2) ||
                     (context.Step.Command == CadCommandNames.Extrude && context.Step.OperationVersion == 3) || !MatchesV2SequentialOutcome(context.Step, result))
                     throw new InvalidOperationException("The observed result does not match the exact persisted v2 mutation contract.");
                 if (context.Step.Command == CadCommandNames.CreateSketch)

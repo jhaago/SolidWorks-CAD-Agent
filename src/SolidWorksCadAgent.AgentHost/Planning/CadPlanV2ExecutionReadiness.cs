@@ -67,7 +67,7 @@ namespace SolidWorksCadAgent.AgentHost.Planning
                     catch (ArgumentException ex) { errors.Add("STEP_" + step.StepKey + ": " + ex.Message); }
                     continue;
                 }
-                if (version != 1 && !(step.Command == CadCommandNames.AddRectangle && version == 2))
+                if (version != 1 && !((step.Command == CadCommandNames.AddRectangle || step.Command == CadCommandNames.AddCircle) && version == 2))
                 {
                     errors.Add("STEP_" + step.StepKey + ": No Host binder exists for " + step.Command + ".");
                     continue;
