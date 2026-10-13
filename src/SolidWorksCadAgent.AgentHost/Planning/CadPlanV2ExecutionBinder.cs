@@ -36,11 +36,12 @@ namespace SolidWorksCadAgent.AgentHost.Planning
 
             var step = parsed.CandidateV2.Steps.SingleOrDefault(item =>
                 string.Equals(item.StepKey, stepKey, StringComparison.Ordinal));
-            if (step == null || (step.Command != CadCommandNames.Extrude && step.Command != CadCommandNames.CutExtrude) || step.OperationVersion != 2 ||
+            if (step == null || (step.Command != CadCommandNames.Extrude && step.Command != CadCommandNames.CutExtrude) ||
+                (step.OperationVersion != 2 && !(step.Command == CadCommandNames.Extrude && step.OperationVersion == 3)) ||
                 step.Inputs?.ProfileSketch?.EntityId == null)
                 throw new ArgumentException("The selected step is not a normalized version-2 feature operation.", nameof(stepKey));
 
-            return new CadVersionedCommandRequest(2, 2, new CadCommandEnvelope
+            return new CadVersionedCommandRequest(2, step.OperationVersion.Value, new CadCommandEnvelope
             {
                 Command = step.Command,
                 Parameters = (JObject)step.Parameters.DeepClone(),
