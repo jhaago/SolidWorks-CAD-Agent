@@ -23,7 +23,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge
         {
             await _commandGate.WaitAsync(token).ConfigureAwait(false);
             try {
-                if(_disposed||!SupportsCheckpointedParametricEditing||request?.Source==null||request.ExecutionId==Guid.Empty||request.ChildModelId==Guid.Empty)
+                if(_disposed||!SupportsCheckpointedParametricEditing||request?.Source==null||request.AuthorizeSideEffect==null||request.ExecutionId==Guid.Empty||request.ChildModelId==Guid.Empty)
                     throw new InvalidOperationException("A native managed edit context is required.");
                 var source=await _modelReferenceStore.GetModelAsync(request.Source.ModelId,token).ConfigureAwait(false);
                 var child=await _modelReferenceStore.GetModelAsync(request.ChildModelId,token).ConfigureAwait(false);

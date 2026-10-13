@@ -23,7 +23,7 @@ namespace SolidWorksCadAgent.IntegrationTests
     [TestClass,DoNotParallelize,TestCategory("SolidWorksIntegration")]
     public class CheckpointedParametricEditNativeTests
     {
-        [DataTestMethod,DataRow("width",150.0),DataRow("thickness",12.0),DataRow("holeDiameter",12.0),Timeout(240000)]
+        [DataTestMethod,DataRow("width",150.0),DataRow("length",90.0),DataRow("thickness",12.0),DataRow("holeDiameter",12.0),DataRow("holeY",15.0),Timeout(240000)]
         public async Task ForkEditsExistingFeaturesAndRestoresExactCheckpoint(string role,double value)
         {
             if(Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_REFERENCE_TESTS")!="1")Assert.Inconclusive("Native opt-in required.");
@@ -55,7 +55,8 @@ namespace SolidWorksCadAgent.IntegrationTests
                 var edit=CadParametricEditContract.Build(metadata,role,value,"result-"+id+".sldprt");
                 var editor=(ICheckpointedParametricEditExecutor)bridge;
                 var checkpoint=await editor.ForkParametricPartAsync(new CadParametricEditNativeRequest{ExecutionId=execution,ChildModelId=child.ModelId,Source=metadata,
-                    WorkingPath=".agent-edits/"+id+"-work.sldprt",CheckpointPath=".agent-edits/"+id+"-checkpoint.sldprt"},token);
+                    WorkingPath=".agent-edits/"+id+"-work.sldprt",CheckpointPath=".agent-edits/"+id+"-checkpoint.sldprt",
+                    AuthorizeSideEffect=()=>CadParametricEditSourceAuthorization.RequireAsync(repository,new WorkspacePolicy(root),metadata,token).GetAwaiter().GetResult()},token);
                 Assert.AreEqual(child.ModelId,checkpoint.ModelId);
                 Assert.AreNotEqual(source.LastSavedSha256,checkpoint.Sha256,"Fork stamps a fresh model ID before checkpointing.");
                 Assert.AreEqual(15,checkpoint.Bindings.Count);
@@ -64,10 +65,12 @@ namespace SolidWorksCadAgent.IntegrationTests
                 Assert.AreEqual(value,observations.Single(d=>d.Value<string>("role")==role).Value<double>("valueMm"),0.001);
                 Assert.ThrowsException<InvalidOperationException>(()=>editor.ApplyCheckpointedParameterAsync(execution,child.ModelId,edit,token).GetAwaiter().GetResult(),"An edit cannot replay its mutation.");
                 var restored=await editor.RestoreParametricCheckpointAsync(execution,child.ModelId,checkpoint.Sha256,token);
-                Assert.AreEqual(role=="width"?120.0:role=="thickness"?10.0:8.0,
+                Assert.AreEqual(role=="width"?120.0:role=="length"?60.0:role=="thickness"||role=="holeY"?10.0:8.0,
                     restored[role.StartsWith("hole")?"parametricHole":"parametricPlate"]["dimensions"].Single(d=>d.Value<string>("role")==role).Value<double>("valueMm"),0.001);
                 Assert.AreEqual(source.LastSavedSha256,CheckpointedParametricEditorHash.HashFile(source.CanonicalPath));
                 await bridge.ExecuteAsync(new CadCommandEnvelope{Command="CloseDocument",ExecutionId=execution,ManagedModelId=child.ModelId,Parameters=new JObject()},token);
+                Assert.IsTrue((await bridge.ExecuteAsync(new CadCommandEnvelope{Command="OpenPart",ExecutionId=sourceJob.Job.Id,Parameters=new JObject{{"path",filename}}},token)).Success);
+                Assert.IsTrue((await bridge.ExecuteAsync(new CadCommandEnvelope{Command="CloseDocument",ExecutionId=sourceJob.Job.Id,ManagedModelId=modelId,Parameters=new JObject()},token)).Success);
             }
         }
         internal sealed class NoPlanner:IVersionedCadPlanningProvider {

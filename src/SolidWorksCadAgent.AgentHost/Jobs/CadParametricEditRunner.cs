@@ -38,7 +38,8 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
             try {
                 var id=attempt.ModelId.ToString("N");
                 checkpoint=await editor.ForkParametricPartAsync(new CadParametricEditNativeRequest{ExecutionId=jobId,ChildModelId=attempt.ModelId,Source=plan.ParametricEdit,
-                    WorkingPath=".agent-edits/"+id+"-work.sldprt",CheckpointPath=".agent-edits/"+id+"-checkpoint.sldprt"},token).ConfigureAwait(false);
+                    WorkingPath=".agent-edits/"+id+"-work.sldprt",CheckpointPath=".agent-edits/"+id+"-checkpoint.sldprt",
+                    AuthorizeSideEffect=()=>RequireCurrentAsync(jobId,revisionId,approvedHash,plan,token).GetAwaiter().GetResult()},token).ConfigureAwait(false);
                 if(CheckpointedParametricEditorHash.HashFile(_workspace.ResolveForRead(checkpoint.CheckpointPath))!=checkpoint.Sha256||
                     CheckpointedParametricEditorHash.HashFile(_workspace.ResolveForRead(checkpoint.WorkingPath))!=checkpoint.Sha256)
                     throw new InvalidOperationException("The saved owned checkpoint bytes changed before commit.");

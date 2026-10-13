@@ -44,6 +44,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                 throw new InvalidOperationException("Source file changed before fork.");
             Directory.CreateDirectory(Path.GetDirectoryName(working));
             workspace.ResolveForWrite(working,false);workspace.ResolveForWrite(checkpoint,false);
+            request.AuthorizeSideEffect();
             CopyNew(source.CanonicalPath,working);
             if(CheckpointedParametricEditorHash.HashFile(working)!=request.Source.Sha256||CheckpointedParametricEditorHash.HashFile(source.CanonicalPath)!=request.Source.Sha256)
                 throw new InvalidOperationException("Source changed while its owned copy was created.");
@@ -66,6 +67,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                 if(CheckpointedParametricEditorHash.HashFile(source.CanonicalPath)!=request.Source.Sha256)throw new InvalidOperationException("Source changed during fork.");
                 context.BeginExecution(request.ExecutionId);context.SetExecutionIdentity(child.ModelId,null);context.Bind(document);
                 _request=JObject.FromObject(request).ToObject<CadParametricEditNativeRequest>();
+                _request.AuthorizeSideEffect=request.AuthorizeSideEffect;
                 _child=child;_baseline=baseline;_bindings=rebased;_workspace=workspace;
                 _sourcePath=source.CanonicalPath;_workingPath=working;_checkpointPath=checkpoint;_checkpointHash=hash;_mutationInvoked=false;_restored=false;
                 return new CadParametricEditCheckpoint{ModelId=child.ModelId,WorkingPath=working,CheckpointPath=checkpoint,Sha256=hash,Bindings=rebased,Observed=observed};
@@ -101,6 +103,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
             }
             if(dimensions.Count!=1||dimensions[0].DrivenState!=(int)swDimensionDrivenState_e.swDimensionDriving)
                 throw new InvalidOperationException("Exactly one independently inspected captured driving dimension is required.");
+            RequireSourceHash();
+            _request.AuthorizeSideEffect();
             _mutationInvoked=true; // Also prevents retry if COM returns an ambiguous outcome.
             if(dimensions[0].SetSystemValue3(value/1000,(int)swSetValueInConfiguration_e.swSetValue_InThisConfiguration,null)!=0||!document.ForceRebuild3(false))
                 throw new InvalidOperationException("Native driving parameter change or regeneration failed.");
@@ -121,12 +125,24 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
         public JObject Restore(object appObject,SolidWorksDocumentContext context,Guid execution,Guid child,string hash)
         {
 #if SOLIDWORKS_INTEROP
-            var document=Require(appObject,context,execution,child);
-            if(_restored||hash!=_checkpointHash||CheckpointedParametricEditorHash.HashFile(_workspace.ResolveForRead(_checkpointPath))!=hash)
+            if(_request==null||_request.ExecutionId!=execution||_request.ChildModelId!=child||
+                _restored||hash!=_checkpointHash||CheckpointedParametricEditorHash.HashFile(_workspace.ResolveForRead(_checkpointPath))!=hash)
                 throw new InvalidOperationException("Checkpoint identity/hash differs or restoration already occurred.");
             RequireSourceHash();
             var app=(SldWorks)appObject;
-            app.CloseDoc(document.GetTitle());context.Clear();
+            if(context.IsClosedForExecution(execution)) {
+                // A successful owned close clears the binding. Do not close whichever
+                // unrelated document SOLIDWORKS made active after that close.
+                RejectOpenFilename(app,_workingPath);
+                RejectOpenFilename(app,_checkpointPath);
+                foreach(var open in (app.GetDocuments() as object[]??Array.Empty<object>()).OfType<ModelDoc2>()) {
+                    open.Extension.CustomPropertyManager[""].Get6("SolidWorksCadAgent.ModelId",false,out var value,out _,out _,out _);
+                    if(Guid.TryParse(value,out var id)&&id==child)throw new InvalidOperationException("An unbound open document conflicts with the checkpointed child.");
+                }
+            }else {
+                var document=Require(appObject,context,execution,child);
+                app.CloseDoc(document.GetTitle());context.Clear();
+            }
             _workspace.ResolveForWrite(_workingPath,true);
             File.Copy(_checkpointPath,_workingPath,true);
             if(CheckpointedParametricEditorHash.HashFile(_workingPath)!=hash)throw new InvalidOperationException("Restored child bytes differ from the checkpoint.");

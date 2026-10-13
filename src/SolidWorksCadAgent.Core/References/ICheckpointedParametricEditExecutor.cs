@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Commands;
@@ -25,6 +26,9 @@ namespace SolidWorksCadAgent.Core.References
         public CadParametricEditSource Source {get;set;}
         public string WorkingPath {get;set;}
         public string CheckpointPath {get;set;}
+        // Trusted Host callback, never persisted or accepted from a plan/provider.
+        // Runs on the native STA immediately before copy and parameter mutation.
+        [JsonIgnore] public Action AuthorizeSideEffect {get;set;}
     }
     public sealed class CadParametricEditCheckpoint
     {

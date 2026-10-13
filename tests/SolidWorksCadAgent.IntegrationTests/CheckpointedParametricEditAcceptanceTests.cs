@@ -77,6 +77,9 @@ namespace SolidWorksCadAgent.IntegrationTests
                     artifact=await routes.HandleAsync(new AgentRequest("GET","/jobs/"+edit.Job.Id+"/artifact",null),token);Assert.AreEqual(409,artifact.StatusCode);
                 }
                 await bridge.ExecuteAsync(new CadCommandEnvelope{Command="CloseDocument",ExecutionId=edit.Job.Id,ManagedModelId=attempt.ModelId,Parameters=new JObject()},token);
+                Assert.IsTrue((await bridge.ExecuteAsync(new CadCommandEnvelope{Command="OpenPart",ExecutionId=source.Job.Id,Parameters=new JObject{{"path",filename}}},token)).Success);
+                var sourceModel=CadPlanDocumentReader.ReadPersisted(edit.Revisions.Single().PlanJson).CandidateV2.ParametricEdit.ModelId;
+                Assert.IsTrue((await bridge.ExecuteAsync(new CadCommandEnvelope{Command="CloseDocument",ExecutionId=source.Job.Id,ManagedModelId=sourceModel,Parameters=new JObject()},token)).Success);
             }
         }
         private sealed class SavedFaultExecutor:ICadCommandExecutor,IVersionedCadCommandExecutor,ICadOperationAvailability,ICheckpointedParametricEditExecutor
