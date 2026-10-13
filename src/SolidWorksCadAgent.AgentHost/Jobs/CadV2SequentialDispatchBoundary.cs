@@ -72,6 +72,7 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                     release = false;
                     var result = await _versioned.ExecuteVersionedAsync(request, token).ConfigureAwait(false);
                     if ((request.Command.Command == CadCommandNames.AddRectangle && request.OperationVersion == 2) ||
+                        (request.Command.Command == CadCommandNames.AddCircle && request.OperationVersion == 2) ||
                         (request.Command.Command == CadCommandNames.Extrude && request.OperationVersion == 3))
                         await _repository.CommitV2ParametricOutcomeAsync(jobId, revisionId, stepKey, attempt.ModelId, result, token).ConfigureAwait(false);
                     else if (path == null)

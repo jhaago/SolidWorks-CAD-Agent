@@ -114,7 +114,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
             }
             throw new InvalidOperationException("The actual native origin point could not be resolved.");
         }
-        private static Dimension Dimension(object display,string name,double mm)
+        internal static Dimension Dimension(object display,string name,double mm)
         {
             var dimension=((DisplayDimension)display)?.GetDimension2(0) as Dimension;
             if(dimension==null)throw new InvalidOperationException("Native driving dimension creation failed.");

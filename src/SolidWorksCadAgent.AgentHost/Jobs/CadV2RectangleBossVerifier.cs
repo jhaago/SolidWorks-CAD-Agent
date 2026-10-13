@@ -162,13 +162,21 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 if (!parameters.Passed) return parameters;
                 parameterObservation = parameters.Observed;
             }
+            JObject holeObservation = null;
+            if (CadParametricHoleContract.IsHole(parsed.CandidateV2))
+            {
+                var parameters = await new CadParametricHoleVerifier(_repository, _executor).VerifyAsync(jobId, revisionId, modelId, token).ConfigureAwait(false);
+                if (!parameters.Passed) return parameters;
+                holeObservation = parameters.Observed;
+            }
             return CadV2RectangleBossVerification.Pass(new JObject
             {
                 ["rebuild"] = rebuild.Data.DeepClone(),
                 ["bodies"] = bodies.Data.DeepClone(),
                 ["bounds"] = bounds.Data.DeepClone(),
                 ["nativeCuts"] = cutArray.DeepClone(),
-                ["parametricPlate"] = parameterObservation?["parametricPlate"]?.DeepClone()
+                ["parametricPlate"] = parameterObservation?["parametricPlate"]?.DeepClone(),
+                ["parametricHole"] = holeObservation?["parametricHole"]?.DeepClone()
             });
         }
 

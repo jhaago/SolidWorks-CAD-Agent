@@ -27,7 +27,8 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public double ValueMm { get; set; }
         public bool IsDriving { get; set; }
     }
-    public sealed class CadParametricPlateObservation
+    public sealed class CadParametricPlateObservation : CadParametricSketchObservation { }
+    public class CadParametricSketchObservation
     {
         public int EvidenceVersion { get; set; }
         public Guid ModelId { get; set; }

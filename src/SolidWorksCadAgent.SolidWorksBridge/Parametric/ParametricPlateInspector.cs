@@ -113,7 +113,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
 #endif
         }
 #if SOLIDWORKS_INTEROP
-        private static object Resolve(ModelDoc2 model,CadEntityReferenceBinding binding)
+        internal static object Resolve(ModelDoc2 model,CadEntityReferenceBinding binding)
         {
             if(binding?.NativeReferenceBytes==null||binding.Status!=CadEntityReferenceStatus.Active)throw new InvalidOperationException("Active captured native owner required.");
             int status;var value=model.Extension.GetObjectByPersistReference3(binding.NativeReferenceBytes,out status);
@@ -150,7 +150,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
         private static bool HasRelation(ModelDoc2 model,SketchRelation[] relations,swConstraintType_e type,params object[] expected)=>
             relations.Any(r=>r.GetRelationType()==(int)type&&
                 (ContainsExactly(model,r.GetDefinitionEntities2() as object[],expected)||ContainsExactly(model,r.GetEntities() as object[],expected)));
-        private static bool ContainsExactly(ModelDoc2 model,object[] entities,object[] expected)=>entities!=null&&entities.Length==expected.Length&&expected.All(e=>entities.Any(n=>SameNative(model,e,n)));
+        internal static bool ContainsExactly(ModelDoc2 model,object[] entities,object[] expected)=>entities!=null&&entities.Length==expected.Length&&expected.All(e=>entities.Any(n=>SameNative(model,e,n)));
         private static void ValidateDimensionAttachment(ModelDoc2 model,SketchRelation[] relations,Dimension dimension,SketchLine edge)
         {
             var matches=relations.Where(r=>r.GetDisplayDimension() is DisplayDimension display&&
@@ -162,7 +162,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                   ContainsExactly(model,matches[0].GetDefinitionEntities2() as object[],new object[]{edge})))
                 throw new InvalidOperationException("Named dimension controls a different native edge or direction: "+dimension.FullName);
         }
-        private static bool SameNative(ModelDoc2 model,object a,object b)
+        internal static bool SameNative(ModelDoc2 model,object a,object b)
         {
             if(Same(a,b))return true;if(a==null||b==null)return false;
             var first=model.Extension.GetPersistReference3(a) as byte[];var second=model.Extension.GetPersistReference3(b) as byte[];

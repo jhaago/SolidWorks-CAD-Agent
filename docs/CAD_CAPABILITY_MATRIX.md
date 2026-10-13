@@ -1,5 +1,13 @@
 # Master CAD capability matrix
 
+Dimensioned-hole increment (13 October 2026): `feature/parametric-hole` adds a
+second owned Top Plane circle with native driving diameter and positive X/Y
+offsets, followed by the existing through-all cut. Plate and hole parameter
+readback, complete physical evidence and immutable saved provenance gate
+completion/download. Scope and final validation are recorded in the
+[hole verification report](parametric-hole-verification-2026-10-13.md).
+This does not complete production existing-model edits or the broader hole families.
+
 Latest increment (13 October 2026): the bounded parametric plate on
 `feature/parametric-plate` creates a fully constrained centred Top Plane rectangle
 and a blind base extrusion, with named driving width/length/thickness. Native

@@ -3,8 +3,9 @@
 Latest priority (13 October 2026): durable submissions and native startup/prismatic
 acceptance are complete. The first explicit parametric plate slice now creates and
 verifies driving width/length/thickness with intended sketch constraints; it does
-not complete every relation/parameter/edit increment below. Next authorized slice:
-dimensioned hole placement on a new parametric plate, then checkpointed existing-model
+not complete every relation/parameter/edit increment below. The following slice
+on `feature/parametric-hole` adds driving hole diameter and positive X/Y placement
+with independent saved evidence. Next candidate is checkpointed existing-model
 edits. Phone testing remains deferred. See the newest verification/status entry.
 
 Current priority update (10 October 2026): the bounded V2 identity/attempt/save pipeline is implemented; do not restart those completed increments. The comprehensive review fixed build reproducibility, AI parsing, V1 execution/observation safeguards and Android lifecycle defects. Follow the current review and evidence in CAD_AGENT_ARCHITECTURE.md and CAD_IMPLEMENTATION_STATUS.md. Next gates are fresh 2020/phone acceptance, V1 intent/artifact verification, durable remote submission IDs, then constrained parametric editing. The October 6 dependency blueprint below remains historical context.

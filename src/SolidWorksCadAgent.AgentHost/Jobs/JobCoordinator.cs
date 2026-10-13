@@ -75,6 +75,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         public bool SupportsParametricPlateDimensions => _executionMode == ExecutionMode.Real &&
             _executor is ICadOperationAvailability availability && availability.SupportsManagedReferences &&
             availability.IsOperationRegistered(CadCommandNames.AddRectangle, 2) && availability.IsOperationRegistered(CadCommandNames.Extrude, 3);
+        public bool SupportsParametricHoleDimensions => SupportsParametricPlateDimensions &&
+            _executor is IVersionedCadCommandExecutor && _executor is ICadOperationAvailability availability &&
+            availability.IsOperationRegistered(CadCommandNames.AddCircle, 2) && availability.IsOperationRegistered(CadCommandNames.CutExtrude, 2);
 
         public async Task<JobSnapshot> CreateAndPlanAsync(string prompt, CancellationToken cancellationToken, bool requiresExplicitApproval = false, CadPlanningImage image = null, Guid? clientSubmissionId = null)
         {
@@ -157,6 +160,12 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 throw new JobCoordinatorException("PROMPT_REQUIRED", "A non-empty CAD prompt is required.");
+            if (CadParametricHolePrompt.IsRequest(prompt))
+            {
+                if (image != null) throw new JobCoordinatorException("V2_IMAGE_UNSUPPORTED", "Explicit dimensioned holes do not interpret images.");
+                try { CadParametricHolePrompt.BuildCandidate(prompt); }
+                catch (ArgumentException ex) { throw new JobCoordinatorException("PARAMETRIC_REQUEST_INVALID", ex.Message); }
+            }
             if (CadParametricPlatePrompt.IsRequest(prompt))
             {
                 if (image != null) throw new JobCoordinatorException("V2_IMAGE_UNSUPPORTED", "Explicit parametric plate dimensions do not interpret images.");
@@ -209,7 +218,9 @@ namespace SolidWorksCadAgent.AgentHost.Jobs
                 };
                 if (CadV2LegacyPlanAdapter.IsRequest(job.Prompt))
                     request.Clarifications = new[] { CadV2LegacyPlanAdapter.PlanningContext }.Concat(request.Clarifications).ToList();
-                if (CadParametricPlatePrompt.IsRequest(job.Prompt))
+                if (CadParametricHolePrompt.IsRequest(job.Prompt))
+                    version2Plan = NormalizeVersion2Candidate(CadParametricHolePrompt.BuildCandidate(job.Prompt));
+                else if (CadParametricPlatePrompt.IsRequest(job.Prompt))
                     version2Plan = NormalizeVersion2Candidate(CadParametricPlatePrompt.BuildCandidate(job.Prompt));
                 else if (CadV2RectangleBossPrompt.IsRequest(job.Prompt))
                     version2Plan = NormalizeVersion2Candidate(CadV2RectangleBossPrompt.BuildCandidate(job.Prompt));

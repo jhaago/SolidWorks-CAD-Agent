@@ -22,14 +22,17 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                 RequireV2SequentialPrepared(context);
                 bool rectangle=context.Step.Command=="AddRectangle"&&context.Step.OperationVersion==2;
                 bool boss=context.Step.Command=="Extrude"&&context.Step.OperationVersion==3;
-                if((!rectangle&&!boss)||!MatchesV2SequentialOutcome(context.Step,result))throw new InvalidOperationException("Parametric native result does not match its reserved step.");
+                bool circle=context.Step.Command=="AddCircle"&&context.Step.OperationVersion==2;
+                if((!rectangle&&!boss&&!circle)||!MatchesV2SequentialOutcome(context.Step,result))throw new InvalidOperationException("Parametric native result does not match its reserved step.");
                 var plan=context.Plan;
-                var intent=CadParametricPlateContract.ReadIntent(plan);var sketch=plan.Steps[1].OutputEntityId.Value;
-                CadParametricPlateObservation captured;
-                try{captured=result.Data["parametricCapture"]?.ToObject<CadParametricPlateObservation>();}
+                var intent=CadParametricPlateContract.ReadIntent(plan);
+                var hole=circle?CadParametricHoleContract.ReadIntent(plan):null;
+                var sketch=plan.Steps[circle?5:1].OutputEntityId.Value;
+                CadParametricSketchObservation captured;
+                try{captured=result.Data["parametricCapture"]?.ToObject<CadParametricSketchObservation>();}
                 catch(Exception ex){throw new InvalidOperationException("Invalid parametric capture.",ex);}
-                string[] roles=rectangle?new[]{"bottom","right","top","left","centreDiagonal","width","length"}:new[]{"boss","thickness"};
-                string[] dimensions=rectangle?new[]{"width","length"}:new[]{"thickness"};
+                string[] roles=circle?CadParametricIdentity.HoleRoles.ToArray():rectangle?new[]{"bottom","right","top","left","centreDiagonal","width","length"}:new[]{"boss","thickness"};
+                string[] dimensions=circle?new[]{"holeDiameter","holeX","holeY"}:rectangle?new[]{"width","length"}:new[]{"thickness"};
                 if(captured==null||captured.EvidenceVersion!=1||captured.ModelId!=modelId||captured.SketchEntityId!=sketch||
                     captured.ConfigurationKey!=context.Model.ConfigurationKey||captured.Roles==null||captured.Dimensions==null||
                     captured.Roles.Count!=roles.Length||captured.Roles.Select(r=>r?.Role).Distinct().Count()!=roles.Length||
@@ -38,13 +41,15 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                     throw new InvalidOperationException("Parametric capture ownership, configuration or role set is invalid.");
                 if(rectangle&&(!captured.FullyDefined||!captured.RequiredRelationsPresent||captured.HasFixedContourEntities||captured.ContourEdgeCount!=4||captured.ConstructionEdgeCount!=1))
                     throw new InvalidOperationException("The native rectangle has not established its required constraints.");
+                if(circle&&(!captured.FullyDefined||!captured.RequiredRelationsPresent||captured.HasFixedContourEntities||captured.ContourEdgeCount!=1||captured.ConstructionEdgeCount!=0))
+                    throw new InvalidOperationException("The native circle has not established its required constraints.");
                 foreach(var dimension in captured.Dimensions)
                 {
                     if(dimension==null||!dimensions.Contains(dimension.Role)||!dimension.IsDriving||double.IsNaN(dimension.ValueMm)||double.IsInfinity(dimension.ValueMm)||
                         dimension.EntityId!=CadParametricIdentity.For(modelId,sketch,dimension.Role)||
-                        dimension.OwnerEntityId!=(rectangle?sketch:CadParametricIdentity.For(modelId,sketch,"boss")))
+                        dimension.OwnerEntityId!=(!boss?sketch:CadParametricIdentity.For(modelId,sketch,"boss")))
                         throw new InvalidOperationException("Required driving dimension ownership is invalid.");
-                    var expected=dimension.Role=="width"?intent.WidthMm:dimension.Role=="length"?intent.LengthMm:intent.ThicknessMm;
+                    var expected=circle?(dimension.Role=="holeDiameter"?hole.DiameterMm:dimension.Role=="holeX"?hole.Xmm:hole.Ymm):dimension.Role=="width"?intent.WidthMm:dimension.Role=="length"?intent.LengthMm:intent.ThicknessMm;
                     if(Math.Abs(dimension.ValueMm-expected)>0.001)throw new InvalidOperationException("Native dimension differs from approved intent.");
                 }
                 foreach(var role in captured.Roles)
@@ -53,10 +58,12 @@ namespace SolidWorksCadAgent.AgentHost.Persistence
                     if((dimension&&(role.OwnerKind!="DimensionOwnerFeature"||string.IsNullOrWhiteSpace(role.NativeDimensionFullName)))||
                         (!dimension&&role.OwnerKind!=(role.Role=="boss"?"Feature":"SketchSegment")))
                         throw new InvalidOperationException("Captured role owner kind is invalid.");
+                    if(circle&&dimension&&role.NativeDimensionFullName.Split('@')[0]!=(role.Role=="holeDiameter"?"AgentHoleDiameter":role.Role=="holeX"?"AgentHoleX":"AgentHoleY"))
+                        throw new InvalidOperationException("Captured hole dimension name is invalid.");
                     var now=DateTime.UtcNow;
                     var fingerprint=new JObject { ["evidenceVersion"]=1,["role"]=role.Role,["modelId"]=modelId.ToString("D"),
                         ["sketchEntityId"]=sketch.ToString("D"),["configurationKey"]=captured.ConfigurationKey,
-                        ["ownerEntityId"]=(rectangle?sketch:CadParametricIdentity.For(modelId,sketch,"boss")).ToString("D"),
+                        ["ownerEntityId"]=(!boss?sketch:CadParametricIdentity.For(modelId,sketch,"boss")).ToString("D"),
                         ["nativeDimensionFullName"]=role.NativeDimensionFullName,
                         ["nativeDimensionName"]=dimension?role.NativeDimensionFullName.Split('@')[0]:null };
                     var binding=new CadEntityReferenceBinding { ModelId=modelId,EntityId=role.EntityId,EntityKind=dimension?"DrivingDimension":role.Role=="boss"?"Feature":"SketchSegment",
