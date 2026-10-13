@@ -52,7 +52,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                 var width=Dimension(model.AddDimension2(0,-y-0.01,0),"AgentWidth",widthMm);
                 model.ClearSelection2(true);if(!lines[1].Select4(false,null))throw new InvalidOperationException("Length edge selection failed.");
                 var length=Dimension(model.AddDimension2(x+0.01,0,0),"AgentLength",lengthMm);
-                model.ClearSelection2(true);model.EditRebuild3();
+                model.ClearSelection2(true);
                 Feature feature=null;
                 for(var candidate=(Feature)model.FirstFeature();candidate!=null;candidate=(Feature)candidate.GetNextFeature())
                 {

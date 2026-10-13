@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -147,6 +148,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                     if (!identityMatches)
                         return IdentityFailure("DOCUMENT_IDENTITY_MISMATCH", "The bound document belongs to another managed model.");
                 }
+                if (command?.Command == "InspectParametricPlate")
+                    return await InspectParametricPlateAsync(command, cancellationToken).ConfigureAwait(false);
                 return await _registry.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally { _commandGate.Release(); }
@@ -281,6 +284,35 @@ namespace SolidWorksCadAgent.SolidWorksBridge
             // resolving and consuming the sketch in one STA operation. Unsupported
             // versions are rejected by the registry without entering the STA.
             return await _registry.ExecuteVersionedAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<CadCommandResult> InspectParametricPlateAsync(CadCommandEnvelope command, CancellationToken token)
+        {
+            if (_modelReferenceStore == null || !command.ManagedModelId.HasValue || !command.ExecutionId.HasValue ||
+                !Guid.TryParse(command.Parameters?.Value<string>("sketchEntityId"), out var sketchId) || sketchId == Guid.Empty)
+                return IdentityFailure("INVALID_EXECUTION_CONTEXT", "Trusted parametric inspection identities required.");
+            try
+            {
+                var identity = await _modelReferenceStore.GetModelAsync(command.ManagedModelId.Value, token).ConfigureAwait(false);
+                if (identity == null) return IdentityFailure("MODEL_REFERENCE_STORE_UNAVAILABLE", "Managed model missing.");
+                var bindings = new System.Collections.Generic.List<CadEntityReferenceBinding>();
+                bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, sketchId, identity.ConfigurationKey, token).ConfigureAwait(false));
+                foreach (var role in Core.References.CadParametricIdentity.Roles)
+                    bindings.Add(await _modelReferenceStore.GetEntityBindingAsync(identity.ModelId, Core.References.CadParametricIdentity.For(identity.ModelId, sketchId, role), identity.ConfigurationKey, token).ConfigureAwait(false));
+                if (bindings.Any(b => b == null)) return IdentityFailure("PARAMETRIC_BINDING_MISSING", "Required parameter or segment binding missing.", "Inspect");
+                return await _session.InvokeWithApplicationAsync(application =>
+                {
+#if SOLIDWORKS_INTEROP
+                    var context = SolidWorksCommandHandlerBase.DocumentContext(_commandSession);
+                    var model = context.RequireActive((application as SldWorks)?.ActiveDoc);
+                    return CadCommandResult.Ok(new { parametricPlate = Parametric.ParametricPlateInspector.Inspect(model, identity, sketchId, bindings) });
+#else
+                    return IdentityFailure("SOLIDWORKS_INTEROP_UNAVAILABLE", "Native interop required.");
+#endif
+                }, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            { return IdentityFailure("PARAMETRIC_INSPECTION_FAILED", ex.Message, "Inspect"); }
         }
 
         // Bridge-only reference probe for future consumers. No native object or token leaves this boundary.
