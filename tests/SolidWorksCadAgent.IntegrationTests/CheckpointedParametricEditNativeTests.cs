@@ -61,6 +61,7 @@ namespace SolidWorksCadAgent.IntegrationTests
                 Assert.AreNotEqual(source.LastSavedSha256,checkpoint.Sha256,"Fork stamps a fresh model ID before checkpointing.");
                 Assert.AreEqual(15,checkpoint.Bindings.Count);
                 var applied=await editor.ApplyCheckpointedParameterAsync(execution,child.ModelId,edit,token);
+                Assert.IsTrue(applied["featureInventoryCheck"].Value<bool>("matches"),"Changing a driving dimension must preserve feature names/types.");
                 var observations=applied[role.StartsWith("hole")?"parametricHole":"parametricPlate"]["dimensions"];
                 Assert.AreEqual(value,observations.Single(d=>d.Value<string>("role")==role).Value<double>("valueMm"),0.001);
                 Assert.ThrowsException<InvalidOperationException>(()=>editor.ApplyCheckpointedParameterAsync(execution,child.ModelId,edit,token).GetAwaiter().GetResult(),"An edit cannot replay its mutation.");

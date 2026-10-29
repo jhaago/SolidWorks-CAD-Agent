@@ -161,6 +161,8 @@ New-Item -ItemType Directory -Path $launcherDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\start-desktop.ps1") -Destination $launcherDirectory -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "Launch CAD Agent.cmd") -Destination $bundleRoot -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs\desktop-modernisation.md") -Destination (Join-Path $bundleRoot "UI-GUIDE.md") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD-PARTY-NOTICES.md") -Destination $bundleRoot -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "third_party") -Destination $bundleRoot -Recurse -Force
 
 Set-Content -LiteralPath (Join-Path $bundleRoot "BUILD-CAPABILITY.txt") -Value $capability -Encoding ASCII
 

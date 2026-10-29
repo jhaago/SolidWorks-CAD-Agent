@@ -27,5 +27,7 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetRebuildErrors = "GetRebuildErrors";
         public const string GetFeatureTree = "GetFeatureTree";
         public const string GetPrismaticCutReadback = "GetPrismaticCutReadback";
+        public const string InspectTopology = "InspectTopology";
+        public const string ValidateSketchConstraintGraph = "ValidateSketchConstraintGraph";
     }
 }

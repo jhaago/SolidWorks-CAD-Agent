@@ -46,7 +46,12 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Threading
 
                     try
                     {
-                        completion.TrySetResult(operation());
+                        T result;
+                        using (OleMessageFilterScope.Register(cancellationToken))
+                        {
+                            result = operation();
+                        }
+                        completion.TrySetResult(result);
                     }
                     catch (Exception ex)
                     {

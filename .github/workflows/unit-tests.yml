@@ -80,6 +80,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-bundle-capability.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
 
+      - name: Verify distributed source licences and notice enforcement
+        shell: pwsh
+        run: .\scripts\test-bundle-third-party-notices.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
       - name: Upload Windows test bundle
         uses: actions/upload-artifact@v4
         with:

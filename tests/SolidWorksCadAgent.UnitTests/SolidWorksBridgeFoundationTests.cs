@@ -10,6 +10,17 @@ namespace SolidWorksCadAgent.UnitTests
     public class SolidWorksBridgeFoundationTests
     {
         [TestMethod]
+        public async Task InvokeAsync_OperationFailureRestoresScopeAndAllowsNextOperation()
+        {
+            using(var dispatcher=new SolidWorksStaDispatcher())
+            {
+                await Assert.ThrowsExceptionAsync<System.InvalidOperationException>(()=>dispatcher.InvokeAsync<int>(
+                    ()=>throw new System.InvalidOperationException("expected test failure"),CancellationToken.None));
+                Assert.AreEqual(42,await dispatcher.InvokeAsync(()=>42,CancellationToken.None));
+            }
+        }
+
+        [TestMethod]
         public async Task InvokeAsync_Twice_UsesSameStaThread()
         {
             using (var dispatcher = new SolidWorksStaDispatcher())

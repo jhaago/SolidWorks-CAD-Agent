@@ -36,7 +36,11 @@ try {
         "Setup\register-remote-agent-url.ps1",
         "LIVE-REMOTE.txt",
         "BUILD-CAPABILITY.txt",
-        "START-HERE.txt"
+        "START-HERE.txt",
+        "THIRD-PARTY-NOTICES.md",
+        "third_party\solidworks-mcp\LICENSE",
+        "third_party\SolidworksMCP\LICENSE",
+        "third_party\reuse-manifest.json"
     )
 
     $missing = @(

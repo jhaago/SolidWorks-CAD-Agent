@@ -1,4 +1,5 @@
 using System;
+using SolidWorksCadAgent.Core.Geometry;
 
 namespace SolidWorksCadAgent.Core.Commands
 {
@@ -37,12 +38,10 @@ namespace SolidWorksCadAgent.Core.Commands
             double nX, double nY, double nZ)
         {
             PlaneName = planeName;
-            _xX = xX; _xY = xY; _xZ = xZ;
-            _yX = yX; _yY = yY; _yZ = yZ;
-            _nX = nX; _nY = nY; _nZ = nZ;
+            _transform = new Xform(new[]{xX,xY,xZ,yX,yY,yZ,nX,nY,nZ,0,0,0,1,0,0,0});
         }
 
-        private readonly double _xX, _xY, _xZ, _yX, _yY, _yZ, _nX, _nY, _nZ;
+        private readonly Xform _transform;
         public string PlaneName { get; }
 
         public static CadStandardPlaneFrame FromPlaneName(string planeName)
@@ -64,10 +63,8 @@ namespace SolidWorksCadAgent.Core.Commands
             RequireFinite(sketchXmm, nameof(sketchXmm));
             RequireFinite(sketchYmm, nameof(sketchYmm));
             RequireFinite(normalDepthMm, nameof(normalDepthMm));
-            return new CadModelPointMm(
-                sketchXmm * _xX + sketchYmm * _yX + normalDepthMm * _nX,
-                sketchXmm * _xY + sketchYmm * _yY + normalDepthMm * _nY,
-                sketchXmm * _xZ + sketchYmm * _yZ + normalDepthMm * _nZ);
+            var point = _transform.ApplyPoint(new Vec3(sketchXmm,sketchYmm,normalDepthMm));
+            return new CadModelPointMm(point.X,point.Y,point.Z);
         }
 
         public CadModelBoundsMm TransformBounds(double minSketchXmm, double maxSketchXmm,

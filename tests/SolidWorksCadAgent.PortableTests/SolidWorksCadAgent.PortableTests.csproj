@@ -25,5 +25,15 @@
     <Compile Include="../../src/SolidWorksCadAgent.Contracts/Cad/CadError.cs" Link="CadError.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/CadResultJsonRegressionTests.cs" Link="CadResultJsonRegressionTests.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/PreciseBoundsTests.cs" Link="PreciseBoundsTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Geometry/*.cs" Link="Geometry/%(Filename)%(Extension)" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/ImportedGeometryTests.cs" Link="ImportedGeometryTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/TopologyQueryTests.cs" Link="TopologyQueryTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/SketchConstraintGraph.cs" Link="SketchConstraintGraph.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/SketchConstraintGraphTests.cs" Link="SketchConstraintGraphTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FeatureInventoryTests.cs" Link="FeatureInventoryTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Interop/ComBusyRetryPolicy.cs" Link="ComBusyRetryPolicy.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/ComBusyRetryPolicyTests.cs" Link="ComBusyRetryPolicyTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Interop/NativeEdgeEvaluation.cs" Link="NativeEdgeEvaluation.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/NativeEdgeEvaluationTests.cs" Link="NativeEdgeEvaluationTests.cs" />
   </ItemGroup>
 </Project>

@@ -73,6 +73,32 @@ namespace SolidWorksCadAgent.IntegrationTests
                 Assert.AreEqual(bodyCount == 1 ? 10.0 : 40.0, bounds.Value<double>("sizeXmm"), 0.02, "Bounds must include the hidden solid.");
                 Assert.AreEqual(5.0, bounds.Value<double>("sizeYmm"), 0.02);
                 Assert.AreEqual(10.0, bounds.Value<double>("sizeZmm"), 0.02);
+                var stateBefore=await session.InvokeWithApplicationAsync(app=>
+                {
+                    var doc=(ModelDoc2)((SldWorks)app).ActiveDoc;
+                    return new {dirty=doc.GetSaveFlag(),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,
+                        activeSketch=doc.SketchManager.ActiveSketch!=null,selected=((SelectionMgr)doc.SelectionManager).GetSelectedObjectCount2(-1)};
+                },CancellationToken.None);
+                var faces=(await Execute(bridge,"InspectTopology",new{kind="Face",expect=6*bodyCount})).Data;
+                Assert.AreEqual(6*bodyCount,faces.Value<int>("matchCount"));
+                var edges=(await Execute(bridge,"InspectTopology",new{kind="Edge",expect=12*bodyCount})).Data;
+                Assert.AreEqual(12*bodyCount,edges.Value<int>("matchCount"));
+                var topFaces=(await Execute(bridge,"InspectTopology",new{kind="Face",where=new{surface="plane",normal="+y"},expect=bodyCount})).Data;
+                Assert.AreEqual(bodyCount,topFaces.Value<int>("matchCount"));
+                var vertical=(await Execute(bridge,"InspectTopology",new{kind="Edge",where=new{curve="line",parallelTo="y",lengthMm=5},expect=4*bodyCount})).Data;
+                Assert.AreEqual(4*bodyCount,vertical.Value<int>("matchCount"));
+                var bossName=tree.First(f=>f.Value<string>("typeName")=="Boss"||f.Value<string>("typeName")=="BossExtrude").Value<string>("name");
+                var ownedEdges=(await Execute(bridge,"InspectTopology",new{kind="Edge",where=new{feature=bossName},expect=12*bodyCount})).Data;
+                Assert.AreEqual(12*bodyCount,ownedEdges.Value<int>("matchCount"));
+                var mismatch=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="InspectTopology",Parameters=JObject.FromObject(new{kind="Face",expect=1})},CancellationToken.None);
+                Assert.IsFalse(mismatch.Success);Assert.AreEqual("TOPOLOGY_QUERY_FAILED",mismatch.Error.Code);
+                var stateAfter=await session.InvokeWithApplicationAsync(app=>
+                {
+                    var doc=(ModelDoc2)((SldWorks)app).ActiveDoc;
+                    return new {dirty=doc.GetSaveFlag(),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,
+                        activeSketch=doc.SketchManager.ActiveSketch!=null,selected=((SelectionMgr)doc.SelectionManager).GetSelectedObjectCount2(-1)};
+                },CancellationToken.None);
+                Assert.IsTrue(JToken.DeepEquals(JObject.FromObject(stateBefore),JObject.FromObject(stateAfter)),"Topology inspection must not change native state.");
             });
 #else
             await Task.CompletedTask;

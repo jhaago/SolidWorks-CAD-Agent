@@ -4,6 +4,33 @@ This branch was built without native interop on Linux. The native adapter code u
 `SOLIDWORKS_INTEROP` has **not** been compiled or run in this session. Keep that boundary
 visible until the installed 2020 build and fixtures pass.
 
+## Additional acceptance for the licensed reuse batch
+
+The new COM-free suite has140 cases locally. Run the full Windows unit suite to cover
+tool registration, prior standard-plane behavior and OLE scope restoration as well.
+The licence bundle test must pass and all copied notices must appear in the output ZIP:
+
+```powershell
+.\scripts\test-bundle-third-party-notices.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+```
+
+The modified `PrismaticCapabilityTests` now inspect six faces/twelve edges per box,
+hidden solids, signed top normals, four5mm Y-parallel edges per box, adjacent feature
+ownership, exact-count failure and unchanged dirty/configuration/sketch/selection-count
+state, both before and after save/reopen. Run `CheckpointedParametricEditNativeTests`
+alongside the previous filters to verify feature inventory preservation and restoration:
+
+```powershell
+dotnet test tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj --no-build --configuration Debug --filter 'FullyQualifiedName~PrismaticCapabilityTests|FullyQualifiedName~CheckpointedParametricEditNativeTests' --logger 'trx;LogFileName=licensed-reuse-native.trx'
+```
+
+InspectTopology is read-only and part-only. Its IDs are not persistent mutation handles;
+face-box centers are approximate. The graph tool validates symbols and dimensions but
+does not create/solve constraints. No new fillet/face-sketch planner capability is enabled.
+The scoped OLE filter must additionally be exercised against an actual busy SOLIDWORKS2020
+COM server: only retry-later refusals are retried, cancellation stops retries and previous
+filters are restored. No accepted-call timeout or automatic mutation replay is promised.
+
 ## Reproduce the portable verification
 
 Production targets remain net48. Only this selected, COM-free test project uses net8.

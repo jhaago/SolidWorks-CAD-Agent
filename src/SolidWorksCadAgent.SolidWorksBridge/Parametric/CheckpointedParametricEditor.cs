@@ -8,6 +8,7 @@ using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.Core.References;
 using SolidWorksCadAgent.Core.Workspace;
+using SolidWorksCadAgent.Core.Geometry;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
 #if SOLIDWORKS_INTEROP
 using SolidWorks.Interop.sldworks;
@@ -28,6 +29,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
         private WorkspacePolicy _workspace;
         private string _workingPath,_checkpointPath,_checkpointHash,_sourcePath;
         private bool _mutationInvoked,_restored;
+        private IReadOnlyDictionary<string,string> _featureInventory;
 #endif
         public CadParametricEditCheckpoint Fork(object appObject,SolidWorksDocumentContext context,WorkspacePolicy workspace,
             CadParametricEditNativeRequest request,CadModelIdentityRecord source,CadModelIdentityRecord child,CadPlanV2Document baseline,IReadOnlyList<CadEntityReferenceBinding> bindings)
@@ -61,6 +63,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                 if(!document.Save3((int)swSaveAsOptions_e.swSaveAsOptions_Silent,ref errors,ref warnings)||errors!=0)
                     throw new InvalidOperationException("The child identity could not be saved before checkpointing.");
                 var observed=Check(document,child,baseline,rebased);
+                var featureInventory=CaptureInventory(document);
                 workspace.ResolveForWrite(checkpoint,false);CopyNew(working,checkpoint);
                 var hash=CheckpointedParametricEditorHash.HashFile(checkpoint);
                 if(hash!=CheckpointedParametricEditorHash.HashFile(working))throw new InvalidOperationException("Checkpoint copy differs from its saved child.");
@@ -70,6 +73,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
                 _request.AuthorizeSideEffect=request.AuthorizeSideEffect;
                 _child=child;_baseline=baseline;_bindings=rebased;_workspace=workspace;
                 _sourcePath=source.CanonicalPath;_workingPath=working;_checkpointPath=checkpoint;_checkpointHash=hash;_mutationInvoked=false;_restored=false;
+                _featureInventory=featureInventory;
                 return new CadParametricEditCheckpoint{ModelId=child.ModelId,WorkingPath=working,CheckpointPath=checkpoint,Sha256=hash,Bindings=rebased,Observed=observed};
             }catch {
                 if(document!=null&&SolidWorksDocumentContext.SameIdentity(document,app.IActiveDoc2))app.CloseDoc(document.GetTitle());
@@ -88,6 +92,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
             if(errors.Count>0||!JToken.DeepEquals(JObject.FromObject(approvedPlan.ParametricEdit),JObject.FromObject(_request.Source)))
                 throw new InvalidOperationException("The approved source-bound plan differs from the checkpoint.");
             Check(document,_child,_baseline,_bindings);
+            RequireInventory(document);
             RequireSourceHash();
             var role=approvedPlan.Steps[1].Parameters.Value<string>("parameter");
             var value=approvedPlan.Steps[1].Parameters.Value<double>("valueMm");
@@ -109,6 +114,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
             if(dimensions[0].SetSystemValue3(value/1000,(int)swSetValueInConfiguration_e.swSetValue_InThisConfiguration,null)!=0||!document.ForceRebuild3(false))
                 throw new InvalidOperationException("Native driving parameter change or regeneration failed.");
             var observed=Check(document,_child,CadParametricEditContract.ExpectedPart(approvedPlan),_bindings);
+            observed["featureInventoryCheck"]=CadCommandResult.Ok(RequireInventory(document)).Data;
             RequireSourceHash();return observed;
 #else
             throw new NotSupportedException("Native SOLIDWORKS interop required.");
@@ -117,7 +123,10 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
         public JObject Inspect(object app,SolidWorksDocumentContext context,Guid execution,Guid child,CadPlanV2Document expected)
         {
 #if SOLIDWORKS_INTEROP
-            var observed=Check(Require(app,context,execution,child),_child,expected,_bindings);RequireSourceHash();return observed;
+            var document=Require(app,context,execution,child);
+            var observed=Check(document,_child,expected,_bindings);
+            observed["featureInventoryCheck"]=CadCommandResult.Ok(RequireInventory(document)).Data;
+            RequireSourceHash();return observed;
 #else
             throw new NotSupportedException("Native SOLIDWORKS interop required.");
 #endif
@@ -150,12 +159,21 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Parametric
             var restored=Open(app,_workingPath);RequireStamp(restored,child);
             context.BeginExecution(execution);context.SetExecutionIdentity(child,null);context.Bind(restored);
             var observed=Check(restored,_child,_baseline,_bindings);
+            observed["featureInventoryCheck"]=CadCommandResult.Ok(RequireInventory(restored)).Data;
             RequireSourceHash();_restored=true;return observed;
 #else
             throw new NotSupportedException("Native SOLIDWORKS interop required.");
 #endif
         }
 #if SOLIDWORKS_INTEROP
+        private static IReadOnlyDictionary<string,string> CaptureInventory(ModelDoc2 document)=>
+            FeatureInventory.Capture(SolidWorksInspector.GetFeatureTree(document).Select(f=>new KeyValuePair<string,string>(f.Name,f.TypeName)));
+        private FeatureInventoryDifference RequireInventory(ModelDoc2 document)
+        {
+            var difference=FeatureInventory.Compare(_featureInventory,CaptureInventory(document));
+            if(!difference.Matches)throw new InvalidOperationException("Checkpointed parameter edit changed the feature inventory: "+JObject.FromObject(difference));
+            return difference;
+        }
         private ModelDoc2 Require(object appObject,SolidWorksDocumentContext context,Guid execution,Guid child)
         {
             if(_request==null||_request.ExecutionId!=execution||_request.ChildModelId!=child||context.ManagedModelId!=child)

@@ -105,7 +105,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new GetBoundingBoxCommandHandler(_commandSession),
                 new GetFeatureTreeCommandHandler(_commandSession),
                 new GetRebuildErrorsCommandHandler(_commandSession),
-                new GetPrismaticCutReadbackCommandHandler(_commandSession)
+                new GetPrismaticCutReadbackCommandHandler(_commandSession),
+                new TopologyInspectionCommandHandler(_commandSession),
+                new SketchConstraintGraphCommandHandler()
             }, new IVersionedCadCommandHandler[]
             {
                 new VersionTwoExtrudeCommandHandler(this),
