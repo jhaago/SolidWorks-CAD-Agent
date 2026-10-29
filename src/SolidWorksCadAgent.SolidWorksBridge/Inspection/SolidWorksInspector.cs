@@ -15,6 +15,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
         public string TypeName { get; set; }
         public int ErrorCode { get; set; }
         public bool IsWarning { get; set; }
+        public string ParentName { get; set; }
+        public int Depth { get; set; }
     }
 
     public sealed class RebuildInspectionResult
@@ -92,10 +94,13 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
                 throw new ArgumentNullException(nameof(model));
             }
 
+            var entries = BoundedFeatureTraversal.Walk(RootFeatures(model),
+                feature => feature.GetID().ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + feature.GetTypeName2() + ":" + feature.Name,
+                SubFeatures);
             var result = new List<FeatureInspectionItem>();
-            Feature feature = model.IFirstFeature();
-            while (feature != null)
+            foreach (var entry in entries)
             {
+                var feature = entry.Node;
                 bool isWarning;
                 var errorCode = feature.GetErrorCode2(out isWarning);
                 var typeName = feature.GetTypeName2();
@@ -108,14 +113,26 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
                 {
                     Name = feature.Name,
                     TypeName = typeName,
+                    ParentName = entry.Parent?.Name,
+                    Depth = entry.Depth,
                     ErrorCode = errorCode,
                     IsWarning = errorCode != 0 && isWarning
                 });
-
-                feature = feature.GetNextFeature() as Feature;
             }
 
             return result;
+        }
+
+        private static IEnumerable<Feature> RootFeatures(ModelDoc2 model)
+        {
+            for (var feature = model.IFirstFeature(); feature != null; feature = feature.GetNextFeature() as Feature)
+                yield return feature;
+        }
+
+        private static IEnumerable<Feature> SubFeatures(Feature parent)
+        {
+            for (var feature = parent.GetFirstSubFeature() as Feature; feature != null; feature = feature.GetNextSubFeature() as Feature)
+                yield return feature;
         }
 
         public static JArray GetPrismaticCutReadback(ModelDoc2 model)

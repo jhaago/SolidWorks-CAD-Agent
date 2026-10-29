@@ -5,6 +5,7 @@ using SolidWorksCadAgent.Contracts.Cad;
 using SolidWorksCadAgent.Core.Units;
 using SolidWorksCadAgent.Core.Commands;
 using SolidWorksCadAgent.SolidWorksBridge.Session;
+using SolidWorksCadAgent.SolidWorksBridge.Inspection;
 #if SOLIDWORKS_INTEROP
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
@@ -55,7 +56,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
         internal static CadCommandResult CreateSelectedBoss(ModelDoc2 model, double depthMm)
         {
                 var depth = UnitConverter.MillimetresToMetres(depthMm);
-                var feature = model.FeatureManager.FeatureExtrusion2(
+                return NativeFeatureMaterialVerifier.Execute(model, MaterialChangeKind.Add,
+                    () => model.FeatureManager.FeatureExtrusion2(
                     true,
                     false,
                     false,
@@ -78,12 +80,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     true,
                     (int)swStartConditions_e.swStartSketchPlane,
                     0.0,
-                    false);
-
-                if (feature == null)
-                    return Failure("EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the boss extrusion.");
-
-                return Ok(new { depthMm, featureName = feature.Name });
+                    false),
+                    feature => new { depthMm, featureName = feature.Name });
         }
 #endif
     }
@@ -134,7 +132,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                 // command contract remains stable. The V1 plate workflow creates its boss
                 // along the sketch normal, while SOLIDWORKS defaults cuts opposite that
                 // normal, so Direction 1 is reversed to cut into the newly created body.
-                var feature = model.FeatureManager.FeatureCut4(
+                return NativeFeatureMaterialVerifier.Execute(model, MaterialChangeKind.Remove,
+                    () => model.FeatureManager.FeatureCut4(
                     true,
                     false,
                     true,
@@ -161,12 +160,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     (int)swStartConditions_e.swStartSketchPlane,
                     0.0,
                     false,
-                    false);
-
-                if (feature == null)
-                    return Failure("CUT_EXTRUDE_FAILED", "Execute", "SOLIDWORKS did not create the requested cut.");
-
-                return Ok(new { endCondition, depthMm, featureName = feature.Name });
+                    false),
+                    feature => new { endCondition, depthMm, featureName = feature.Name });
         }
 #endif
     }

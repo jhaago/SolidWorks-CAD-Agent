@@ -40,7 +40,9 @@ namespace SolidWorksCadAgent.IntegrationTests
                 if (bodyCount == 2)
                     await Execute(bridge, "AddRectangle", new { centerXmm = 30.0, centerYmm = 0.0, widthMm = 10.0, heightMm = 10.0 });
                 await Execute(bridge, "ExitSketch", new { });
-                await Execute(bridge, "Extrude", new { depthMm = 5.0 });
+                var boss = await Execute(bridge, "Extrude", new { depthMm = 5.0 });
+                Assert.AreEqual("added", boss.Data["materialVerification"].Value<string>("material"));
+                Assert.AreEqual(500.0 * bodyCount, boss.Data["materialVerification"].Value<double>("volumeDeltaMm3"), 0.05);
             }, async (bridge, session) =>
             {
                 await session.InvokeWithApplicationAsync(app =>
@@ -61,8 +63,12 @@ namespace SolidWorksCadAgent.IntegrationTests
 
                 var count = (await Execute(bridge, "GetBodyCount", new { })).Data;
                 Assert.AreEqual(bodyCount, count.Value<int>("bodyCount"), "Display visibility must not change the physical solid count.");
-                if (bodyCount == 1)
-                    Assert.AreEqual(500.0, count.Value<double>("volumeMm3"), 0.05, "The hidden boss still has its complete physical volume.");
+                Assert.AreEqual(500.0 * bodyCount, count.Value<double>("volumeMm3"), 0.05,
+                    "Every hidden and visible solid contributes to total volume.");
+                var tree = (await Execute(bridge, "GetFeatureTree", new { })).Data["features"] as JArray;
+                Assert.IsNotNull(tree);
+                Assert.IsTrue(tree.Any(f => f.Value<string>("typeName") == "ProfileFeature"), "Absorbed profile must be inspected.");
+                Assert.AreEqual(tree.Count, tree.Select(f => f.Value<string>("name")).Distinct().Count(), "Repeated native references must not duplicate features.");
                 var bounds = (await Execute(bridge, "GetBoundingBox", new { })).Data;
                 Assert.AreEqual(bodyCount == 1 ? 10.0 : 40.0, bounds.Value<double>("sizeXmm"), 0.02, "Bounds must include the hidden solid.");
                 Assert.AreEqual(5.0, bounds.Value<double>("sizeYmm"), 0.02);

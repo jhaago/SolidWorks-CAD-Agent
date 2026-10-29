@@ -7,6 +7,18 @@ on:
   pull_request:
 
 jobs:
+  portable-policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build selected COM-free verification tests
+        run: dotnet build tests/SolidWorksCadAgent.PortableTests/SolidWorksCadAgent.PortableTests.csproj -m:1
+      - name: Run official MSTest executable
+        run: dotnet tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll --no-progress
+
   unit-tests:
     runs-on: windows-latest
     steps:

@@ -26,7 +26,8 @@ namespace SolidWorksCadAgent.UnitTests
         [TestMethod]
         public void Inspection_UsesCamelCaseIncludingNestedFeatureProperties()
         {
-            var feature = new FeatureInspectionItem { Name = "Cut-Extrude1", TypeName = "Cut", ErrorCode = 0, IsWarning = false };
+            var feature = new FeatureInspectionItem { Name = "Cut-Extrude1", TypeName = "Cut", ErrorCode = 0, IsWarning = false,
+                ParentName = "Owner", Depth = 1 };
             var data = CadCommandResult.Ok(new RebuildInspectionResult
             {
                 Rebuilt = true, HasErrors = false, HasWarnings = false, Features = new[] { feature }
@@ -35,10 +36,12 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse(data.Value<bool>("hasErrors"));
             Assert.IsFalse(data.Value<bool>("hasWarnings"));
             var item = data["features"][0];
-            CollectionAssert.AreEquivalent(new[] { "name", "typeName", "errorCode", "isWarning" },
+            CollectionAssert.AreEquivalent(new[] { "name", "typeName", "errorCode", "isWarning", "parentName", "depth" },
                 System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(((JObject)item).Properties(), p => p.Name)));
             Assert.AreEqual("Cut", (string)item["typeName"]);
             Assert.AreEqual(0, (int)item["errorCode"]);
+            Assert.AreEqual("Owner", (string)item["parentName"]);
+            Assert.AreEqual(1, (int)item["depth"]);
             Assert.AreEqual(1, CadCommandResult.Ok(new { BodyCount = 1 }).Data.Value<int>("bodyCount"));
             Assert.AreEqual("Cut", (string)CadCommandResult.Ok(new { Features = new[] { feature } }).Data["features"][0]["typeName"]);
         }

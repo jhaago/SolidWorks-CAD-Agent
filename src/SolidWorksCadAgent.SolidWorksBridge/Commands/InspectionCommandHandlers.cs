@@ -29,12 +29,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
 
                 try
                 {
-                    var bodies = SolidWorksInspector.GetSolidBodies(model);
-                    var mass = bodies.Length == 1 ? ((Body2)bodies[0]).GetMassProperties(1.0) as double[] : null;
-                    double? volumeMm3 = mass != null && mass.Length > 3 &&
-                        !double.IsNaN(mass[3]) && !double.IsInfinity(mass[3])
-                        ? mass[3] * 1e9 : (double?)null;
-                    return Ok(new { bodyCount = bodies.Length, volumeMm3 });
+                    var material = NativeFeatureMaterialVerifier.Measure(model);
+                    return Ok(new { bodyCount = material.BodyCount, volumeMm3 = material.VolumeMm3 });
                 }
                 catch (Exception ex)
                 {

@@ -1,0 +1,8 @@
+MSTest v3.6.4 (UTC 11/11/2024) [linux-x64 - .NET 8.0.21]
+
+Test run summary: Passed! - /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll (net8.0|x64)
+  total: 53
+  failed: 0
+  succeeded: 53
+  skipped: 0
+  duration: 327ms
