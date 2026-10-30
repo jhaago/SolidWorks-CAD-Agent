@@ -35,5 +35,10 @@
     <Compile Include="../SolidWorksCadAgent.UnitTests/ComBusyRetryPolicyTests.cs" Link="ComBusyRetryPolicyTests.cs" />
     <Compile Include="../../src/SolidWorksCadAgent.Core/Interop/NativeEdgeEvaluation.cs" Link="NativeEdgeEvaluation.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/NativeEdgeEvaluationTests.cs" Link="NativeEdgeEvaluationTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningTests.cs" Link="FamilyPlanningTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Contracts/Cad/CadCommandNames.cs" Link="CadCommandNames.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/ICadCommandHandler.cs" Link="ICadCommandHandler.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Commands/FamilyPlanningCommandHandlers.cs" Link="FamilyPlanningCommandHandlers.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningHandlerTests.cs" Link="FamilyPlanningHandlerTests.cs" />
   </ItemGroup>
 </Project>

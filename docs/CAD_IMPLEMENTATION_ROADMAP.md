@@ -1,5 +1,7 @@
 # SolidWorks CAD Agent implementation roadmap
 
+2026-10-29 scope update: the user has authorized the complete useful feature-family programme. See [current reuse, implementation boundaries and dependency order](feature-family-programme-2026-10-29.md). Assembly-pattern placement and drawing-layout calculations are now callable planning tools; their native feature adapters and AI exposure are still pending. The historical phases below remain dependencies, not completed-feature claims.
+
 Latest priority (13 October 2026): durable submissions and native startup/prismatic
 acceptance are complete. The first explicit parametric plate slice now creates and
 verifies driving width/length/thickness with intended sketch constraints; it does

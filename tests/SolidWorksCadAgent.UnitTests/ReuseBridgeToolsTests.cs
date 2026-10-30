@@ -45,6 +45,20 @@ namespace SolidWorksCadAgent.UnitTests
         {
             Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"InspectTopology"));
             Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"ValidateSketchConstraintGraph"));
+            Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"PlanComponentPattern"));
+            Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"PlanDrawingLayout"));
+        }
+        [DataTestMethod]
+        [DataRow("PlanComponentPattern","{'pattern':'linear','seeds':[{'id':'bolt','originMm':[0,0,0]}],'direction':'x','spacingMm':20,'count':3}")]
+        [DataRow("PlanDrawingLayout","{'sheetWidthMm':420,'sheetHeightMm':297,'modelSizeMm':[100,60,20],'views':['front','top']}")]
+        public async Task FamilyPlanningIsRegisteredAndNeverInvokesCom(string command,string json)
+        {
+            var session=new NeverInvokeSession();using(var bridge=new SolidWorksBridgeFacade(session))
+            {
+                var result=await bridge.ExecuteAsync(new CadCommandEnvelope{Command=command,Parameters=JObject.Parse(json)},CancellationToken.None);
+                Assert.IsTrue(result.Success,result.Error?.Message);Assert.IsTrue(result.Data.Value<bool>("planningOnly"));
+                Assert.IsFalse(result.Data.Value<bool>("nativeCreated"));Assert.AreEqual(0,session.Invocations);
+            }
         }
         private sealed class NeverInvokeSession:ISolidWorksSession
         {

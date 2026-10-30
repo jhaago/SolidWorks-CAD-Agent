@@ -1,0 +1,23 @@
+# Feature-family calculation verification — 2026-10-29
+
+- RED: missing planning types; portable build failed before implementation.
+- RED: missing handlers; portable build failed before handler implementation.
+- Independent review: no Critical issues; one Important zero-height-area false fit, fixed with two regression cases; incorrect inventory count corrected to 417.
+- Fix RED: 184 tests, 2 failed (automatic/fixed scale on zero-height usable area).
+- Fix GREEN: require positive usable width/height before tolerance; final portable suite below.
+- All 15 pinned upstream source hashes verified against local source clones; local destinations exist. MIT notices retained unchanged.
+- Complete net48 solution build, including disabled-native integration contract: succeeded, zero errors. Five existing async-without-await warnings in disabled-native acceptance code.
+- Native-enabled compilation/SOLIDWORKS runtime not available. No native assembly or drawing creation, rendering or mating is certified.
+- Windows full unit/facade/bundle/licence checks are run on the published head by PR #7 CI; see its final validation record.
+
+Final portable command:
+`/tmp/cad-dotnet/dotnet tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll --no-progress`
+
+MSTest v3.6.4 (UTC 11/11/2024) [linux-x64 - .NET 8.0.21]
+
+Test run summary: Passed! - /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll (net8.0|x64)
+  total: 184
+  failed: 0
+  succeeded: 184
+  skipped: 0
+  duration: 462ms

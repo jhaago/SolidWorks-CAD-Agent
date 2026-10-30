@@ -133,6 +133,39 @@
         "src/SolidWorksCadAgent.Core/Geometry/FeatureInventory.cs"
       ],
       "adaptations": "port dictionary differences and mismatch detection; reject incomplete/duplicate inventories; integrated checkpoint pre/post/reopen/restore guard"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/AssemblyPatternMath.cs",
+      "source_sha256": "a1523074892d4ecbf62ee6f5786325e5e446308d5035fe54c51ade4a07428d2f",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/ComponentPatternPlan.cs"
+      ],
+      "adaptations": "Port linear/circular expected-instance generation and full/partial-circle step semantics; bounded strict planning contracts, seed IDs and no native mutation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/AssemblyMath.cs",
+      "source_sha256": "e86d04f445f163fe75e7b487ef26c25555d88af1e774ecdede6adf204aeccfd9",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/ComponentPatternPlan.cs"
+      ],
+      "adaptations": "Port Rodrigues rotation, application and matrix multiplication; reject reflected/nonrigid matrices; explicit column-to-row rotation conversion and mm-to-metre translation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/DrawingLayout.cs",
+      "source_sha256": "04e50da26b24b0ee11477fd6b6c594d221a51750e8aafc447cc42602a8ec66e3",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/StandardDrawingLayout.cs"
+      ],
+      "adaptations": "Port standard view axes, projection grid/corner placement, extent, gap, automatic scale and margin reservation; strict bounded planning-only output with explicit native outline limitation."
     }
   ],
   "not_copied": [
@@ -142,7 +175,7 @@
     },
     {
       "component": "assembly/drawing/simulation/sheet-metal services",
-      "reason": "large native API/dependency surfaces; port in bounded 2020-tested increments after entity reference selection and native acceptance"
+      "reason": "Native service layers remain deferred; only bounded assembly-pattern and standard-view-layout calculations have been ported. Document kinds, occurrence/view references, native 2020 adapters and acceptance remain required."
     },
     {
       "component": "Python raw execution and VBA runners",

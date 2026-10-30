@@ -29,5 +29,7 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string GetPrismaticCutReadback = "GetPrismaticCutReadback";
         public const string InspectTopology = "InspectTopology";
         public const string ValidateSketchConstraintGraph = "ValidateSketchConstraintGraph";
+        public const string PlanComponentPattern = "PlanComponentPattern";
+        public const string PlanDrawingLayout = "PlanDrawingLayout";
     }
 }
