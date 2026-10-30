@@ -31,5 +31,6 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string ValidateSketchConstraintGraph = "ValidateSketchConstraintGraph";
         public const string PlanComponentPattern = "PlanComponentPattern";
         public const string PlanDrawingLayout = "PlanDrawingLayout";
+        public const string InspectFaceBoundary = "InspectFaceBoundary";
     }
 }

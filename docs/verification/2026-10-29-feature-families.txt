@@ -21,3 +21,5 @@ Test run summary: Passed! - /workspace/scratch/81b480a4ac81/cad-integration/test
   succeeded: 184
   skipped: 0
   duration: 462ms
+
+2026-10-30 Windows CI caught two test-arrangement failures: net48 rejects 1e309 in JToken.Parse before the validator; net8 parses it as infinity. Replaced parser-dependent literals with representable 1e308 for bounds and added explicit JValue NaN/+Infinity/-Infinity inputs. Production validation unchanged. The previous 184-case local run passed. The restored session no longer has the temporary SDK; the expanded 187-case portable suite and Windows revalidation follow on PR #7.

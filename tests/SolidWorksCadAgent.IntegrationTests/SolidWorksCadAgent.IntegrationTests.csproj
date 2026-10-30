@@ -37,4 +37,5 @@
     <ProjectReference Include="..\..\src\SolidWorksCadAgent.AgentHost\SolidWorksCadAgent.AgentHost.csproj" />
   </ItemGroup>
   <ItemGroup><Compile Include="..\Shared\AcceptancePlateEvidence.cs" Link="TestUtilities\AcceptancePlateEvidence.cs" /></ItemGroup>
+  <Import Project="../../build/SolidWorks2020Interop.targets" />
 </Project>

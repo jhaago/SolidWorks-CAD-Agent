@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Draft edge finishing still lacks the persistent semantic face/edge resolver. Keep the WIP source in-tree, but out of both interop build paths until its topology dependencies are implemented. -->
+    <!-- Face/outer-loop resolution is now available for read-only inspection. Draft mutation still needs checkpoint ownership, feature-definition/health verification and native 2020 acceptance before registration. -->
     <Compile Remove="Commands\EdgeFinishingCommandHandlers.cs" />
     <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
     <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
@@ -33,4 +33,5 @@
       <Private>true</Private>
     </Reference>
   </ItemGroup>
+  <Import Project="../../build/SolidWorks2020Interop.targets" />
 </Project>

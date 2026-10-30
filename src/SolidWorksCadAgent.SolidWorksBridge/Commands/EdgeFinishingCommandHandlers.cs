@@ -58,7 +58,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             try
             {
                 var face = NativeFaceSelector.Resolve(model, axis, side);
-                var edges = NativeFaceSelector.OuterEdges(face);
+                var edges = NativeFaceSelector.OuterEdges(model, face, token);
                 if (edges == null || edges.Count == 0)
                     return Failure("NO_OUTER_EDGES", "Execute", "The selected face has no supported outer-loop edges.");
                 var mark = IsFillet ? 1 : 0;

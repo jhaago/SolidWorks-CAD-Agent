@@ -1,5 +1,7 @@
 # Complete feature-family programme
 
+2026-10-30 update: [exact face/outer-loop inspection, API-version guard and native-enabled compilation](face-boundary-and-api-compatibility-2026-10-30.md) are implemented. Face-feature mutation and real SOLIDWORKS acceptance remain gated. The expanded portable suite passes 213 cases, including the cross-runtime regression coverage.
+
 All useful feature families in the two investigated projects are in the target scope. This is a multi-increment programme, not a statement that every feature is implemented. The [417-capability matrix](CAD_CAPABILITY_MATRIX.md) remains the detailed inventory; its historical evidence is scoped to the scenario and revision recorded there. Do not replace its statuses with a blanket support label.
 
 ## Current increment: callable planning tools
@@ -58,11 +60,11 @@ Default reservations: 20 mm left margin, 10 mm other margins, title band clamped
 | Family | Reuse decision | Current boundary / next implementation |
 |---|---|---|
 | Runtime, command protocol, document ownership | Retain existing; adapt selected A/B practices | Existing STA, workspace/identity, approvals and checkpoints retained; optional MCP adapter follows verified descriptors |
-| Sketch primitives and frames | Retain existing; adapt A/B | Existing primitive handlers; complete semantic face selection and face-local frame before face-bound sketching |
+| Sketch primitives and frames | Retain existing; adapt A/B | Existing primitive handlers; exact extreme-face/outer-loop read-only resolver is implemented; face-local frames and safe mutation contracts remain |
 | Relations and driving dimensions | Adapt B plus existing native work | Graph preflight ported; existing bounded plate/hole native dimensions retained; generic graph-to-native constraints and under/over-defined readback next |
 | Dimension/feature editing and equations | Retain checkpoints; adapt B | Existing named plate/hole edits plus inventory guard; general definition adapters and safe expression dependency evaluation remain |
 | Extrudes and cuts | Retain existing | Existing material-change verification; add more end conditions only with independent geometry checks |
-| Fillets/chamfers | Adapt A | Draft handlers remain excluded; complete semantic selection, definitions, material checks, native acceptance, then planner admission |
+| Fillets/chamfers | Adapt A | Draft mutation remains excluded; read-only selection is implemented; definitions, material checks, checkpointing and native acceptance precede planner admission |
 | Revolves, shell, draft, ribs and Hole Wizard | Adapt A | Add bounded version-2020 handlers, driving readback and canonical fixtures after selection/recovery support |
 | Patterns, mirrors, multibody and Booleans | Adapt A/B | Component-pattern predictions now ported; native part/assembly patterns and body dependency verification remain |
 | Reference planes, axes and coordinate systems | Adapt A | Persistent reference roles and frame verification required; existing standard-plane handling retained |
@@ -85,8 +87,8 @@ Every native slice must cross the same gates: reviewed 2020 API and licence → 
 
 ## Verification
 
-- New pure calculations and handler tests: 44 cases, covering grid/circle placements, rotated seeds, native transform conversion, bounds, both projections, all standard views, spacing, fit/no-fit (including zero-height areas with tiny views), structured errors and cancellation.
-- Portable MSTest: 184 passed, zero failed/skipped, including existing verification tests.
+- New pure calculations and handler tests: 47 cases, covering grid/circle placements, rotated seeds, native transform conversion, bounds, both projections, all standard views, spacing, fit/no-fit (including zero-height areas with tiny views), structured errors and cancellation.
+- Portable MSTest: the combined suite now passes 213 cases, including all 187 cases from this family-planning increment and 26 face-boundary/evidence cases; see the 2026-10-30 update.
 - Complete net48 solution and integration-test contract compile succeeded with native interop disabled; existing async-without-await warnings in disabled native tests remain.
 - Two facade tests verify the new tools perform zero COM calls; Windows CI runs these alongside the existing full unit suite and bundle/licence checks.
 - Native assembly/drawing creation, native rendering and SOLIDWORKS 2020 runtime behaviour are not tested or claimed by this increment.
@@ -94,7 +96,7 @@ Every native slice must cross the same gates: reviewed 2020 API and licence → 
 ## Next vertical slices
 
 1. Run the existing plate/hole/edit and topology acceptance fixtures in installed SOLIDWORKS 2020, retaining synthetic artifacts and evidence.
-2. Complete semantic face/edge selection and bounded face frames; finish the existing excluded fillet/chamfer work with native readback and saved evidence.
+2. Build on the new read-only face/outer-loop resolver: add bounded face frames and safe checkpointed mutation, then finish fillet/chamfer with native readback and saved evidence.
 3. Lower generic named sketch constraints/dimensions into native APIs and verify solver status; extend editing without regenerating the entire model.
 4. Add core part features and verification one family at a time; share the same contracts with the AI planner.
 5. Add document families and reuse the newly ported pattern/layout calculations for native assemblies and drawings.

@@ -64,10 +64,18 @@ namespace SolidWorksCadAgent.UnitTests
         }
         [DataTestMethod]
         [DataRow("count", "1")][DataRow("count", "2.5")][DataRow("count", "257")][DataRow("count", "9223372036854775808")]
-        [DataRow("spacingMm", "0")][DataRow("spacingMm", "1e309")][DataRow("spacingMm", "'20'")]
+        [DataRow("spacingMm", "0")][DataRow("spacingMm", "1e308")][DataRow("spacingMm", "'20'")]
         [DataRow("direction", "'0,0,0'")][DataRow("pattern", "'mirror'")][DataRow("unknown", "true")]
         public void InvalidPatternInputsAreRejected(string key,string json)
         {var input=Linear();input[key]=JToken.Parse(json);Assert.ThrowsException<ArgumentException>(()=>ComponentPatternPlan.Create(input));}
+        [DataTestMethod][DataRow(double.NaN)][DataRow(double.PositiveInfinity)][DataRow(double.NegativeInfinity)]
+        public void NonfiniteValuesAreRejectedWithoutDependingOnJsonParserRuntime(double value)
+        {
+            var pattern=Linear();pattern["spacingMm"]=value;
+            Assert.ThrowsException<ArgumentException>(()=>ComponentPatternPlan.Create(pattern));
+            var drawing=Drawing();drawing["modelSizeMm"]=new JArray(1,1,value);
+            Assert.ThrowsException<ArgumentException>(()=>StandardDrawingLayout.Create(drawing));
+        }
         [DataTestMethod]
         [DataRow("[-1,0,0,0,1,0,0,0,1]")][DataRow("[1,1,0,0,1,0,0,0,1]")][DataRow("[2,0,0,0,2,0,0,0,2]")][DataRow("[1,0,0]")]
         public void NonRigidOrReflectedSeedRotationsAreRejected(string rotation)
@@ -147,7 +155,7 @@ namespace SolidWorksCadAgent.UnitTests
         }
         [DataTestMethod]
         [DataRow("views", "[]")][DataRow("views", "['front','front']")][DataRow("views", "['banana']")]
-        [DataRow("modelSizeMm", "[0,1,2]")][DataRow("modelSizeMm", "[1,1,1e309]")]
+        [DataRow("modelSizeMm", "[0,1,2]")][DataRow("modelSizeMm", "[1,1,1e308]")]
         [DataRow("sheetWidthMm", "49")][DataRow("sheetHeightMm", "5001")]
         [DataRow("projection", "'perspective'")][DataRow("fixedScale", "0")][DataRow("sheetScale", "'1:2'")]
         [DataRow("usableMm", "[-1,0,100,100]")][DataRow("usableMm", "[100,100,10,10]")][DataRow("unknown", "false")]

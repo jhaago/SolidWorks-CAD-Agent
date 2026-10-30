@@ -40,5 +40,6 @@
     <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/ICadCommandHandler.cs" Link="ICadCommandHandler.cs" />
     <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Commands/FamilyPlanningCommandHandlers.cs" Link="FamilyPlanningCommandHandlers.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningHandlerTests.cs" Link="FamilyPlanningHandlerTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FaceBoundarySelectionTests.cs" Link="FaceBoundarySelectionTests.cs" />
   </ItemGroup>
 </Project>

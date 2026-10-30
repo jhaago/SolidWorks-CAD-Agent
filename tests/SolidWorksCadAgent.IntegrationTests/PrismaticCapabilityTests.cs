@@ -92,6 +92,14 @@ namespace SolidWorksCadAgent.IntegrationTests
                 Assert.AreEqual(12*bodyCount,ownedEdges.Value<int>("matchCount"));
                 var mismatch=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="InspectTopology",Parameters=JObject.FromObject(new{kind="Face",expect=1})},CancellationToken.None);
                 Assert.IsFalse(mismatch.Success);Assert.AreEqual("TOPOLOGY_QUERY_FAILED",mismatch.Error.Code);
+                var boundary=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="InspectFaceBoundary",Parameters=JObject.FromObject(new{normalAxis="Y",side="Max"})},CancellationToken.None);
+                if(bodyCount==1)
+                {
+                    Assert.IsTrue(boundary.Success,boundary.Error?.Message);Assert.AreEqual(4,boundary.Data.Value<int>("outerEdgeCount"));
+                    Assert.AreEqual(0,boundary.Data.Value<int>("innerLoopCount"));Assert.AreEqual(5.0,boundary.Data.Value<double>("bodyMaxMm"),0.00001);
+                    Assert.IsTrue(boundary.Data.Value<bool>("inspectionOnly"));Assert.IsFalse(boundary.Data.Value<bool>("selectionAuthority"));
+                }
+                else {Assert.IsFalse(boundary.Success);Assert.AreEqual("FACE_BOUNDARY_QUERY_FAILED",boundary.Error.Code);}
                 var stateAfter=await session.InvokeWithApplicationAsync(app=>
                 {
                     var doc=(ModelDoc2)((SldWorks)app).ActiveDoc;
@@ -231,6 +239,44 @@ namespace SolidWorksCadAgent.IntegrationTests
             Assert.Inconclusive("Installed SOLIDWORKS interop is required.");
 #endif
         }
+        [TestMethod]
+        [Timeout(180000)]
+        public async Task ExactFaceBoundaryExcludesThroughHoleEdgesAfterSaveReopen()
+        {
+            RequireOptIn();
+#if SOLIDWORKS_INTEROP
+            await WithOwnedPartAsync("face-boundary-hole",async(bridge,session)=>
+            {
+                await Execute(bridge,"CreateSketch",new{plane="Top Plane"});
+                await Execute(bridge,"AddRectangle",new{centerXmm=0.0,centerYmm=0.0,widthMm=100.0,heightMm=60.0});
+                await Execute(bridge,"ExitSketch",new{});await Execute(bridge,"Extrude",new{depthMm=10.0});
+                await Execute(bridge,"CreateSketch",new{plane="Top Plane"});
+                await Execute(bridge,"AddCircle",new{centerXmm=0.0,centerYmm=0.0,diameterMm=20.0});
+                await Execute(bridge,"ExitSketch",new{});await Execute(bridge,"CutExtrude",new{endCondition="ThroughAll"});
+            },async(bridge,session)=>
+            {
+                foreach(string side in new[]{"Min","Max"})
+                {
+                    var state=await session.InvokeWithApplicationAsync(app=>
+                    {var doc=(ModelDoc2)((SldWorks)app).ActiveDoc;return new{dirty=doc.GetSaveFlag(),configuration=doc.ConfigurationManager.ActiveConfiguration.Name,selected=((SelectionMgr)doc.SelectionManager).GetSelectedObjectCount2(-1)};},CancellationToken.None);
+                    var result=(await Execute(bridge,"InspectFaceBoundary",new{normalAxis="Y",side})).Data;
+                    Assert.AreEqual(4,result.Value<int>("outerEdgeCount"));Assert.AreEqual(1,result.Value<int>("innerLoopCount"));
+                    var outer=(JArray)result["outerEdgeKeys"];Assert.AreEqual(4,outer.Count);Assert.AreEqual(4,outer.Values<string>().Distinct().Count());
+                    Assert.AreEqual(side=="Max"?10.0:0.0,result["pointMm"].Value<double>("y"),0.00001);
+                    await session.InvokeWithApplicationAsync(app=>
+                    {
+                        var doc=(ModelDoc2)((SldWorks)app).ActiveDoc;Assert.AreEqual(state.dirty,doc.GetSaveFlag());
+                        Assert.AreEqual(state.configuration,doc.ConfigurationManager.ActiveConfiguration.Name);Assert.IsNull(doc.SketchManager.ActiveSketch);
+                        Assert.AreEqual(state.selected,((SelectionMgr)doc.SelectionManager).GetSelectedObjectCount2(-1));return true;
+                    },CancellationToken.None);
+                }
+            });
+#else
+            await Task.CompletedTask;
+            Assert.Inconclusive("Installed SOLIDWORKS interop is required for native face-boundary acceptance.");
+#endif
+        }
+
         private static void RequireOptIn()
         {
             if (System.Environment.GetEnvironmentVariable("SOLIDWORKS_RUN_PRISMATIC_TESTS") != "1")

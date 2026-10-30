@@ -47,6 +47,16 @@ namespace SolidWorksCadAgent.UnitTests
             Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"ValidateSketchConstraintGraph"));
             Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"PlanComponentPattern"));
             Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"PlanDrawingLayout"));
+            Assert.IsFalse(System.Linq.Enumerable.Contains(CadOperationCatalog.Names,"InspectFaceBoundary"));
+        }
+        [DataTestMethod][DataRow("{}")][DataRow("{'normalAxis':'y','side':'Max'}")][DataRow("{'normalAxis':'Y','side':'Max','edge':1}")]
+        public async Task InvalidFaceBoundarySelectorIsRejectedBeforeCom(string json)
+        {
+            var session=new NeverInvokeSession();using(var bridge=new SolidWorksBridgeFacade(session))
+            {
+                var result=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="InspectFaceBoundary",Parameters=JObject.Parse(json)},CancellationToken.None);
+                Assert.IsFalse(result.Success);Assert.AreEqual("INVALID_PARAMETERS",result.Error.Code);Assert.AreEqual(0,session.Invocations);
+            }
         }
         [DataTestMethod]
         [DataRow("PlanComponentPattern","{'pattern':'linear','seeds':[{'id':'bolt','originMm':[0,0,0]}],'direction':'x','spacingMm':20,'count':3}")]

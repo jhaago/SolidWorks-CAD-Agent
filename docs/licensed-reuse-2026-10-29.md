@@ -1,5 +1,7 @@
 # Licensed components carried into the CAD agent
 
+2026-10-30 update: [exact face-boundary inspection and version-2020 native-enabled compilation](face-boundary-and-api-compatibility-2026-10-30.md) now extend this work. The full solution compiles against 28.1.0.74 references; actual SOLIDWORKS runtime acceptance remains pending. Earlier native-disabled limitations below describe that earlier validation stage.
+
 This pass follows the user's explicit instruction to copy useful implementations from
 both reviewed repositories. It extends the existing isolated `feature/open-source-verification-2020`
 branch; the net48 Host/Core/Contracts/Bridge/Desktop boundaries remain intact.
