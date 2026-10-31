@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><LangVersion>latest</LangVersion><ImplicitUsings>enable</ImplicitUsings>
+    <CadEngineRoot Condition="'$(CadEngineRoot)' == ''">$(MSBuildThisFileDirectory)../../../engine</CadEngineRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(CadEngineRoot)/adapters/SolidWorksCadEngine.Adapter/SolidWorksCadEngine.Adapter.csproj" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Remote/CadNativeControlLease.cs" Link="CadNativeControlLease.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Backends/UpstreamBackendJob.cs" Link="UpstreamBackendJob.cs" />
+  </ItemGroup>
+</Project>

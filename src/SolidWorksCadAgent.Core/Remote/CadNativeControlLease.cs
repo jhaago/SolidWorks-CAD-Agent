@@ -16,8 +16,13 @@ namespace SolidWorksCadAgent.Core.Remote
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(resolved));
-                return new CadNativeControlLease(new FileStream(resolved, FileMode.OpenOrCreate,
-                    FileAccess.ReadWrite, FileShare.None));
+                var stream = new FileStream(resolved, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                if (File.Exists(resolved + ".recovery-required"))
+                {
+                    stream.Dispose();
+                    return null;
+                }
+                return new CadNativeControlLease(stream);
             }
             catch (IOException) { return null; }
             catch (UnauthorizedAccessException) { return null; }

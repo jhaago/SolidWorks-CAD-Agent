@@ -1,9 +1,10 @@
 <Project>
+  <!-- Legacy target name retained for script compatibility; no SOLIDWORKS major version gate. -->
   <!-- Explicit API paths must fail clearly; an empty path keeps the established compile-only build. -->
   <Target Name="ValidateSolidWorks2020Interop" BeforeTargets="ResolveAssemblyReferences;CoreCompile"
           Condition="'$(SolidWorksApiPath)' != ''">
     <Error Condition="!Exists('$(SolidWorksApiPath)/SolidWorks.Interop.sldworks.dll') or !Exists('$(SolidWorksApiPath)/SolidWorks.Interop.swconst.dll')"
-           Code="SW2020_API_MISSING" Text="SolidWorksApiPath must contain both SOLIDWORKS 2020 interop reference assemblies." />
+           Code="SW2020_API_MISSING" Text="SolidWorksApiPath must contain both SOLIDWORKS interop reference assemblies." />
     <GetAssemblyIdentity AssemblyFiles="$(SolidWorksApiPath)/SolidWorks.Interop.sldworks.dll">
       <Output TaskParameter="Assemblies" ItemName="_SolidWorks2020SldWorksIdentity" />
     </GetAssemblyIdentity>
@@ -14,9 +15,7 @@
       <_SolidWorks2020SldWorksVersion>@(_SolidWorks2020SldWorksIdentity->'%(Version)')</_SolidWorks2020SldWorksVersion>
       <_SolidWorks2020SwConstVersion>@(_SolidWorks2020SwConstIdentity->'%(Version)')</_SolidWorks2020SwConstVersion>
     </PropertyGroup>
-    <Error Condition="!$([System.String]::Copy('$(_SolidWorks2020SldWorksVersion)').StartsWith('28.')) or !$([System.String]::Copy('$(_SolidWorks2020SwConstVersion)').StartsWith('28.'))"
-           Code="SW2020_API_VERSION" Text="SOLIDWORKS 2020 requires version-28 API references. Found sldworks=$(_SolidWorks2020SldWorksVersion), swconst=$(_SolidWorks2020SwConstVersion)." />
     <Error Condition="'$(_SolidWorks2020SldWorksVersion)' != '$(_SolidWorks2020SwConstVersion)'"
-           Code="SW2020_API_MISMATCH" Text="The SOLIDWORKS 2020 interop reference assembly versions must match." />
+           Code="SW2020_API_MISMATCH" Text="The SOLIDWORKS interop reference assembly versions must match." />
   </Target>
 </Project>

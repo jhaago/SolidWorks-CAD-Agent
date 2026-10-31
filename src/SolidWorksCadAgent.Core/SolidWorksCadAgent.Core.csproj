@@ -8,4 +8,10 @@
   <ItemGroup>
     <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
   </ItemGroup>
+  <ItemGroup Condition="'$(CadEngineRoot)' != ''">
+    <ProjectReference Include="$(CadEngineRoot)/adapters/SolidWorksCadEngine.Adapter/SolidWorksCadEngine.Adapter.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(CadEngineRoot)' == ''">
+    <Compile Remove="Backends/UpstreamBackendJob.cs" />
+  </ItemGroup>
 </Project>

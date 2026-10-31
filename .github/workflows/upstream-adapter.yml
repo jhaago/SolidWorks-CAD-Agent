@@ -1,0 +1,29 @@
+name: Upstream adapter boundary
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  local-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - name: Read pinned engine revision
+        id: engine
+        shell: bash
+        run: echo "sha=$(cat app/build/UpstreamEngine.commit)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: jhaago/Solidworks-CAD-Engine
+          ref: ${{ steps.engine.outputs.sha }}
+          path: engine
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: engine/global.json
+      - name: Shared and legacy lease tests
+        run: dotnet run --project app/tests/SolidWorksCadAgent.BackendTests -p:CadEngineRoot="${{ github.workspace }}/engine"
+      - name: Compile application Core with upstream opt-in
+        run: dotnet build app/src/SolidWorksCadAgent.Core -c Release -p:CadEngineRoot="${{ github.workspace }}/engine" -m:1
+      - name: Compile default legacy Core
+        run: dotnet build app/src/SolidWorksCadAgent.Core -c Release -m:1
