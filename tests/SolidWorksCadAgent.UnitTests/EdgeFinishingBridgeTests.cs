@@ -46,8 +46,9 @@ namespace SolidWorksCadAgent.UnitTests
         {
             using(var bridge=new SolidWorksBridgeFacade(new NeverInvokeSession()))
             {
-                Assert.IsTrue(bridge.IsOperationRegistered("FilletEdges",1));Assert.IsTrue(bridge.IsOperationRegistered("ChamferEdges",1));
-                Assert.IsTrue(bridge.IsOperationRegistered("GetEdgeFinishingFeatures",1));Assert.IsFalse(bridge.IsOperationRegistered("CreateSketchOnFace",1));
+                // Native availability deliberately stays false in compile-only builds; this checks handler registration.
+                Assert.IsTrue(System.Linq.Enumerable.Contains(bridge.RegisteredCommandNames,"FilletEdges"));Assert.IsTrue(System.Linq.Enumerable.Contains(bridge.RegisteredCommandNames,"ChamferEdges"));
+                Assert.IsTrue(System.Linq.Enumerable.Contains(bridge.RegisteredCommandNames,"GetEdgeFinishingFeatures"));Assert.IsFalse(System.Linq.Enumerable.Contains(bridge.RegisteredCommandNames,"CreateSketchOnFace"));
             }
             Assert.IsFalse(System.Linq.Enumerable.Contains(SolidWorksCadAgent.Core.Commands.CadOperationCatalog.Names,"FilletEdges"));
             Assert.IsFalse(System.Linq.Enumerable.Contains(SolidWorksCadAgent.Core.Commands.CadOperationCatalog.Names,"ChamferEdges"));
