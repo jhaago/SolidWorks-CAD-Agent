@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using SolidWorksCadAgent.Core.Commands;
 
 namespace SolidWorksCadAgent.SolidWorksBridge.Session
 {
@@ -18,6 +19,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         private Guid? _executionId;
         public Guid? ManagedModelId { get; private set; }
         public Guid? OutputEntityId { get; private set; }
+        public FreshPartMutationGuard FreshPartMutations { get; } = new FreshPartMutationGuard();
         internal bool IsClosedForExecution(Guid executionId) => _executionId == executionId &&
             _document == null && _pendingOpenDocument == null && !ManagedModelId.HasValue;
         public void BeginExecution(Guid? executionId)
@@ -33,13 +35,20 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         public void Bind(object document)
         {
             _document = document ?? throw new ArgumentNullException(nameof(document));
+            FreshPartMutations.BindExisting();
             _pendingOpenDocument = null;
             _previousActiveDocument = null;
             _pendingOpenWasOwned = false;
         }
+        public void BindCreatedPart(object document)
+        {
+            Bind(document);
+            FreshPartMutations.BindCreated();
+        }
         public void StageOpen(object document, object previousActiveDocument, bool openedByAgent)
         {
             _pendingOpenDocument = document ?? throw new ArgumentNullException(nameof(document));
+            FreshPartMutations.BindExisting();
             _previousActiveDocument = previousActiveDocument;
             _pendingOpenWasOwned = openedByAgent;
         }
@@ -49,6 +58,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         {
             if (!IsPendingOpenActive(active)) throw new DocumentTargetException();
             _document = _pendingOpenDocument;
+            FreshPartMutations.BindExisting();
             ManagedModelId = managedModelId;
             OutputEntityId = null;
             _pendingOpenDocument = null;
@@ -65,6 +75,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Session
         }
         public void Clear()
         {
+            FreshPartMutations.BindExisting();
             _document = null;
             _pendingOpenDocument = null;
             _previousActiveDocument = null;

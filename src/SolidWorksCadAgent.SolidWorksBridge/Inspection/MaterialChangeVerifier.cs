@@ -30,8 +30,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
             double delta = after.VolumeMm3 - before.VolumeMm3;
             if (kind == MaterialChangeKind.Add ? delta <= tolerance : delta >= -tolerance)
                 throw new InvalidOperationException(kind == MaterialChangeKind.Add
-                    ? "Boss did not add measurable solid material. Inspect profile, merge and direction."
-                    : "Cut did not remove measurable solid material. Inspect profile, intersection and direction.");
+                    ? "Feature did not add measurable solid material. Inspect its definition and direction."
+                    : "Feature did not remove measurable solid material. Inspect its definition and intersection.");
             return new MaterialChangeEvidence(before, after, tolerance, kind == MaterialChangeKind.Add ? "added" : "removed");
         }
     }

@@ -32,5 +32,6 @@ namespace SolidWorksCadAgent.Contracts.Cad
         public const string PlanComponentPattern = "PlanComponentPattern";
         public const string PlanDrawingLayout = "PlanDrawingLayout";
         public const string InspectFaceBoundary = "InspectFaceBoundary";
+        public const string GetEdgeFinishingFeatures = "GetEdgeFinishingFeatures";
     }
 }

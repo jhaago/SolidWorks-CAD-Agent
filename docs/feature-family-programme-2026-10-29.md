@@ -1,5 +1,7 @@
 # Complete feature-family programme
 
+2026-10-30 finishing update: [bounded native fillet/chamfer ports and definition inspection](batched-finishing-ports-2026-10-30.md) supersede the historical excluded-handler status below. Native execution acceptance remains pending.
+
 2026-10-30 update: [exact face/outer-loop inspection, API-version guard and native-enabled compilation](face-boundary-and-api-compatibility-2026-10-30.md) are implemented. Face-feature mutation and real SOLIDWORKS acceptance remain gated. The expanded portable suite passes 213 cases, including the cross-runtime regression coverage.
 
 All useful feature families in the two investigated projects are in the target scope. This is a multi-increment programme, not a statement that every feature is implemented. The [417-capability matrix](CAD_CAPABILITY_MATRIX.md) remains the detailed inventory; its historical evidence is scoped to the scenario and revision recorded there. Do not replace its statuses with a blanket support label.
@@ -64,7 +66,7 @@ Default reservations: 20 mm left margin, 10 mm other margins, title band clamped
 | Relations and driving dimensions | Adapt B plus existing native work | Graph preflight ported; existing bounded plate/hole native dimensions retained; generic graph-to-native constraints and under/over-defined readback next |
 | Dimension/feature editing and equations | Retain checkpoints; adapt B | Existing named plate/hole edits plus inventory guard; general definition adapters and safe expression dependency evaluation remain |
 | Extrudes and cuts | Retain existing | Existing material-change verification; add more end conditions only with independent geometry checks |
-| Fillets/chamfers | Adapt A | Draft mutation remains excluded; read-only selection is implemented; definitions, material checks, checkpointing and native acceptance precede planner admission |
+| Fillets/chamfers | Adapt A | Bounded native ports and definition inspection implemented for fresh unsaved parts; saved-part checkpointing, installed native acceptance and planner admission remain pending |
 | Revolves, shell, draft, ribs and Hole Wizard | Adapt A | Add bounded version-2020 handlers, driving readback and canonical fixtures after selection/recovery support |
 | Patterns, mirrors, multibody and Booleans | Adapt A/B | Component-pattern predictions now ported; native part/assembly patterns and body dependency verification remain |
 | Reference planes, axes and coordinate systems | Adapt A | Persistent reference roles and frame verification required; existing standard-plane handling retained |

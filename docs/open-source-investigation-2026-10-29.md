@@ -1,5 +1,7 @@
 # Open-source investigation and implemented verification increment
 
+2026-10-30 finishing update: [bounded native fillet/chamfer ports and definition inspection](batched-finishing-ports-2026-10-30.md) supersede the historical excluded-handler status below. Native execution acceptance remains pending.
+
 Session date: 29 October 2026 (Perth). This is an implementation handoff, not native certification.
 
 ## A. Existing system assessment

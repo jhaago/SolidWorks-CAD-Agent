@@ -16,6 +16,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
             new ConditionalWeakTable<ISolidWorksSession, SolidWorksDocumentContext>();
         internal static SolidWorksDocumentContext DocumentContext(ISolidWorksSession session) => Documents.GetValue(session, key => new SolidWorksDocumentContext());
         protected void BindDocument(object document) => DocumentContext(Session).Bind(document);
+        protected void BindCreatedPart(object document) => DocumentContext(Session).BindCreatedPart(document);
         protected void ClearDocument() => DocumentContext(Session).Clear();
         protected object RequireDocument(object application)
         {

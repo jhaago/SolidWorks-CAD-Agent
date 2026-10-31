@@ -14,8 +14,6 @@ namespace SolidWorksCadAgent.UnitTests
     {
         [DataTestMethod]
         [DataRow("CreateSketchOnFace")]
-        [DataRow("FilletEdges")]
-        [DataRow("ChamferEdges")]
         public async Task IncompleteFaceCommandsAreNotRegistered(string name)
         {
             var session = new NeverInvokeSession();
@@ -26,6 +24,33 @@ namespace SolidWorksCadAgent.UnitTests
                 Assert.AreEqual("UNSUPPORTED_COMMAND", result.Error.Code);
                 Assert.AreEqual(0, session.Invocations);
             }
+        }
+        [DataTestMethod][DataRow("FilletEdges")][DataRow("ChamferEdges")]
+        public async Task InvalidFinishingParametersAreRejectedBeforeCom(string command)
+        {
+            var session=new NeverInvokeSession();using(var bridge=new SolidWorksBridgeFacade(session))
+            {
+                var result=await bridge.ExecuteAsync(new CadCommandEnvelope{Command=command,Parameters=new JObject()},CancellationToken.None);
+                Assert.IsFalse(result.Success);Assert.AreEqual("INVALID_PARAMETERS",result.Error.Code);Assert.AreEqual(0,session.Invocations);
+            }
+        }
+        [TestMethod] public async Task FinishingInspectionRejectsSelectionParametersBeforeCom()
+        {
+            var session=new NeverInvokeSession();using(var bridge=new SolidWorksBridgeFacade(session))
+            {
+                var result=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="GetEdgeFinishingFeatures",Parameters=JObject.FromObject(new{featureName="Fillet1"})},CancellationToken.None);
+                Assert.IsFalse(result.Success);Assert.AreEqual("INVALID_PARAMETERS",result.Error.Code);Assert.AreEqual(0,session.Invocations);
+            }
+        }
+        [TestMethod] public void FinishingPortsAreRegisteredWithoutExpandingThePlanner()
+        {
+            using(var bridge=new SolidWorksBridgeFacade(new NeverInvokeSession()))
+            {
+                Assert.IsTrue(bridge.IsOperationRegistered("FilletEdges",1));Assert.IsTrue(bridge.IsOperationRegistered("ChamferEdges",1));
+                Assert.IsTrue(bridge.IsOperationRegistered("GetEdgeFinishingFeatures",1));Assert.IsFalse(bridge.IsOperationRegistered("CreateSketchOnFace",1));
+            }
+            Assert.IsFalse(System.Linq.Enumerable.Contains(SolidWorksCadAgent.Core.Commands.CadOperationCatalog.Names,"FilletEdges"));
+            Assert.IsFalse(System.Linq.Enumerable.Contains(SolidWorksCadAgent.Core.Commands.CadOperationCatalog.Names,"ChamferEdges"));
         }
 
         private sealed class NeverInvokeSession : ISolidWorksSession

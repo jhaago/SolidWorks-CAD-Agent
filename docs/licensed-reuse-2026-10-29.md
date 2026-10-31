@@ -1,5 +1,7 @@
 # Licensed components carried into the CAD agent
 
+2026-10-30 finishing update: [bounded native fillet/chamfer ports and definition inspection](batched-finishing-ports-2026-10-30.md) supersede the historical excluded-handler status below. Native execution acceptance remains pending.
+
 2026-10-30 update: [exact face-boundary inspection and version-2020 native-enabled compilation](face-boundary-and-api-compatibility-2026-10-30.md) now extend this work. The full solution compiles against 28.1.0.74 references; actual SOLIDWORKS runtime acceptance remains pending. Earlier native-disabled limitations below describe that earlier validation stage.
 
 This pass follows the user's explicit instruction to copy useful implementations from

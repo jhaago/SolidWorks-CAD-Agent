@@ -15,8 +15,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Face/outer-loop resolution is now available for read-only inspection. Draft mutation still needs checkpoint ownership, feature-definition/health verification and native 2020 acceptance before registration. -->
-    <Compile Remove="Commands\EdgeFinishingCommandHandlers.cs" />
     <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
     <ProjectReference Include="..\SolidWorksCadAgent.Core\SolidWorksCadAgent.Core.csproj" />
   </ItemGroup>

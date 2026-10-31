@@ -166,6 +166,43 @@
         "src/SolidWorksCadAgent.Core/Geometry/StandardDrawingLayout.cs"
       ],
       "adaptations": "Port standard view axes, projection grid/corner placement, extent, gap, automatic scale and margin reservation; strict bounded planning-only output with explicit native outline limitation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/FeatureService.cs",
+      "source_sha256": "2f55d428f6b467270db79da7da118cb0d8202e7f3523fc44233cccbfd33d854e",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Commands/EdgeFinishingCommandHandlers.cs",
+        "src/SolidWorksCadAgent.Core/Geometry/EdgeFinishingIntent.cs",
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port simple constant-radius FeatureFillet3 and analytic round-face radius checks; existing STA/scope/material verification, no propagation/retry/freeform fallback."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/PartFeatureService.cs",
+      "source_sha256": "69aade36d5caa34c06de576ff9915b8e708a79d8845b18c732474dc8df30dba1",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Commands/EdgeFinishingCommandHandlers.cs",
+        "src/SolidWorksCadAgent.Core/Geometry/EdgeFinishingIntent.cs",
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port fixed 45-degree angle-distance chamfer insertion and original-edge planar-face leg measurements; strict orthogonal straight-edge subset, no tangent propagation or equal-distance fallback retry."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/FeatureManagementService.cs",
+      "source_sha256": "10c074c13c77f87acbede303aee6f1111c8484fd32352f7f4608264b26626fbb",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port simple fillet/chamfer scalar definition readback, edge count and propagation fields; typed 2020 interfaces and part-level feature lookup; no AccessSelections, no native geometry certification from readback alone."
     }
   ],
   "not_copied": [
@@ -187,7 +224,7 @@
     },
     {
       "component": "generic native sketch mutation, equations and feature creation services",
-      "reason": "graph preflight and inspection integrated first; native solver/attachment/versioned mutation contracts remain required"
+      "reason": "Sketch graph preflight and bounded fresh-part fillet/chamfer creation/readback are ported; generic constraints/equations and other native feature families still need their own adapters and acceptance."
     }
   ]
 }

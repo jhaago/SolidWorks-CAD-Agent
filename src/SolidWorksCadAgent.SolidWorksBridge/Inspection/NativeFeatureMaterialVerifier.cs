@@ -11,7 +11,8 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
     internal static class NativeFeatureMaterialVerifier
     {
         internal static CadCommandResult Execute(ModelDoc2 model, MaterialChangeKind kind, Func<Feature> create,
-            Func<Feature, object> resultData)
+            Func<Feature, object> resultData,string[] expectedNativeTypes=null,Action<Feature> inspectNative=null,
+            Action<MaterialChangeEvidence> inspectMaterial=null)
         {
             try
             {
@@ -20,13 +21,15 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Inspection
                 {
                     string type = feature.GetTypeName2();
                     if (type == "ICE") type = feature.GetTypeName();
-                    bool expected = kind == MaterialChangeKind.Add ? type == "Boss" || type == "BossExtrude"
-                        : type == "Cut" || type == "CutExtrude";
+                    bool expected = expectedNativeTypes!=null?expectedNativeTypes.Contains(type):
+                        kind == MaterialChangeKind.Add ? type == "Boss" || type == "BossExtrude" : type == "Cut" || type == "CutExtrude";
                     if (!expected) throw new InvalidOperationException("SOLIDWORKS returned an unexpected native feature type: " + type);
                     var health = SolidWorksInspector.RebuildAndInspect(model);
                     if (health.HasErrors) throw new InvalidOperationException("The model has native rebuild errors after feature creation.");
+                    inspectNative?.Invoke(feature);
                 }, (feature, evidence) =>
                 {
+                    inspectMaterial?.Invoke(evidence);
                     result = CadCommandResult.Ok(resultData(feature));
                     // Use the existing camel-case serializer; do not expose the COM object.
                     result.Data["materialVerification"] = CadCommandResult.Ok(evidence).Data;

@@ -61,6 +61,7 @@ namespace SolidWorksCadAgent.IntegrationTests
 
         [TestMethod]
         [Timeout(180000)]
+        [TestCategory("EdgeFinishingCapability")]
         public async Task OuterFaceFilletAndChamfer_PreserveInnerThroughHole_SaveReopen()
         {
             RequireOptIn();
@@ -71,15 +72,18 @@ namespace SolidWorksCadAgent.IntegrationTests
             {
                 await BuildPlate(bridge);
                 await VerifyPlate(bridge, session, 60000.0, 0);
-                await Execute(bridge, "CreateSketchOnFace", new { normalAxis = "Y", side = "Max" });
+                await Execute(bridge, "CreateSketch", new { plane = "Top Plane" });
                 await Execute(bridge, "AddCircle", new { centerXmm = 0.0, centerYmm = 0.0, diameterMm = 20.0 });
                 await Execute(bridge, "ExitSketch", new { });
-                // The face-bound default must choose inward direction even when direction is omitted.
+                // Build supported origin-plane through-hole stock; the face-sketch command is a separate pending port.
                 await Execute(bridge, "CutExtrude", new { endCondition = "ThroughAll" });
                 var stock = await VerifyPlate(bridge, session, stockVolume, 1);
                 AssertThroughHoleUnchanged(stock);
-                await Execute(bridge, "FilletEdges", new { normalAxis = "Y", side = "Max", radiusMm = 1.0 });
-                await Execute(bridge, "ChamferEdges", new { normalAxis = "Y", side = "Min", distanceMm = 1.0 });
+                var fillet=await Execute(bridge, "FilletEdges", new { normalAxis = "Y", side = "Max", radiusMm = 1.0 });
+                Assert.AreEqual("AgentFillet1",fillet.Data.Value<string>("featureName"));Assert.IsTrue(fillet.Data.Value<bool>("definitionVerified"));
+                Assert.AreEqual("removed",fillet.Data["materialVerification"].Value<string>("material"));
+                var chamfer=await Execute(bridge, "ChamferEdges", new { normalAxis = "Y", side = "Min", distanceMm = 1.0 });
+                Assert.AreEqual("AgentChamfer1",chamfer.Data.Value<string>("featureName"));Assert.IsTrue(chamfer.Data.Value<bool>("edgeGeometryVerified"));
             }, async (bridge, session) =>
             {
                 var evidence = await VerifyPlate(bridge, session, finishedVolume, 1);
@@ -88,6 +92,22 @@ namespace SolidWorksCadAgent.IntegrationTests
                 Assert.AreEqual(1, evidence.Types.Count(type => type == "Fillet"), "Require one native fillet. " + string.Join(", ", evidence.TypeAudit));
                 Assert.AreEqual(1, evidence.Types.Count(type => type == "Chamfer"), "Require one native chamfer. " + string.Join(", ", evidence.TypeAudit));
                 AssertThroughHoleUnchanged(evidence);
+                var readback=(await Execute(bridge,"GetEdgeFinishingFeatures",new{})).Data;
+                Assert.AreEqual(2,readback.Value<int>("count"));
+                var definitions=(JArray)readback["features"];
+                foreach(var entry in definitions)
+                {
+                    Assert.AreEqual(1.0,entry["definition"].Value<double>("sizeMm"),0.00001);
+                    Assert.AreEqual(4,entry["definition"].Value<int>("edgeCount"));Assert.IsFalse(entry["definition"].Value<bool>("tangentPropagation"));
+                }
+                Assert.AreEqual(45.0,definitions.Single(d=>d.Value<string>("nativeType")=="Chamfer")["definition"].Value<double>("angleDegrees"),0.000001);
+                var isSaved=await session.InvokeWithApplicationAsync(app=>!string.IsNullOrEmpty(((ModelDoc2)((SldWorks)app).ActiveDoc).GetPathName()),CancellationToken.None);
+                if(isSaved)
+                {
+                    var denied=await bridge.ExecuteAsync(new CadCommandEnvelope{Command="FilletEdges",Parameters=JObject.FromObject(new{normalAxis="Y",side="Max",radiusMm=.5})},CancellationToken.None);
+                    Assert.IsFalse(denied.Success);Assert.AreEqual("FINISHING_PREFLIGHT_FAILED",denied.Error.Code);Assert.IsFalse(denied.Data.Value<bool>("nativeCallInvoked"));
+                    Assert.AreEqual(evidence.VolumeMm3,(await VerifyPlate(bridge,session,finishedVolume,1)).VolumeMm3,0.00001);
+                }
                 if (!finishedVolume.HasValue) finishedVolume = evidence.VolumeMm3;
             });
 #else

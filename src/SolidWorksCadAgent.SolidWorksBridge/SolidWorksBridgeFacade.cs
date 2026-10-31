@@ -108,6 +108,9 @@ namespace SolidWorksCadAgent.SolidWorksBridge
                 new GetPrismaticCutReadbackCommandHandler(_commandSession),
                 new TopologyInspectionCommandHandler(_commandSession),
                 new FaceBoundaryInspectionCommandHandler(_commandSession),
+                new FilletEdgesCommandHandler(_commandSession),
+                new ChamferEdgesCommandHandler(_commandSession),
+                new EdgeFinishingInspectionCommandHandler(_commandSession),
                 new SketchConstraintGraphCommandHandler(),
                 new ComponentPatternPlanCommandHandler(),
                 new StandardDrawingLayoutCommandHandler()

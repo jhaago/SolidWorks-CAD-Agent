@@ -84,7 +84,7 @@ namespace SolidWorksCadAgent.SolidWorksBridge.Commands
                     }
                 }
 
-                BindDocument(model);
+                BindCreatedPart(model);
                 return Ok(new
                 {
                     documentTitle = model.GetTitle(), template,

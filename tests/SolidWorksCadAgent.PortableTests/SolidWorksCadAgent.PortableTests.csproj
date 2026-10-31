@@ -41,5 +41,11 @@
     <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Commands/FamilyPlanningCommandHandlers.cs" Link="FamilyPlanningCommandHandlers.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningHandlerTests.cs" Link="FamilyPlanningHandlerTests.cs" />
     <Compile Include="../SolidWorksCadAgent.UnitTests/FaceBoundarySelectionTests.cs" Link="FaceBoundarySelectionTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/FreshPartMutationGuard.cs" Link="FreshPartMutationGuard.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FinishingPortTests.cs" Link="FinishingPortTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Session/SolidWorksDocumentContext.cs" Link="SolidWorksDocumentContext.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FreshPartContextTests.cs" Link="FreshPartContextTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/FinishingCompletion.cs" Link="FinishingCompletion.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FinishingCompletionTests.cs" Link="FinishingCompletionTests.cs" />
   </ItemGroup>
 </Project>

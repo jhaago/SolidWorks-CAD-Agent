@@ -1,5 +1,7 @@
 # Windows / SOLIDWORKS 2020 acceptance handoff
 
+2026-10-30 finishing update: [bounded native fillet/chamfer ports and definition inspection](batched-finishing-ports-2026-10-30.md) supersede the historical excluded-handler status below. Native execution acceptance remains pending.
+
 This branch was built without native interop on Linux. The native adapter code under
 `SOLIDWORKS_INTEROP` has **not** been compiled or run in this session. Keep that boundary
 visible until the installed 2020 build and fixtures pass.

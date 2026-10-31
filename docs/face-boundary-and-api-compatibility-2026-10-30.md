@@ -1,5 +1,7 @@
 # Exact face boundaries and SOLIDWORKS 2020 compilation
 
+2026-10-30 finishing update: [bounded native fillet/chamfer ports and definition inspection](batched-finishing-ports-2026-10-30.md) supersede the historical excluded-handler status below. Native execution acceptance remains pending.
+
 This increment implements a selection prerequisite shared by face sketches and finishing. It adds a read-only tool and reusable native resolver. The excluded sketch-on-face, fillet and chamfer mutation handlers remain unavailable.
 
 ```json
