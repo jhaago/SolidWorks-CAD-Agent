@@ -22,7 +22,7 @@ dotnet build src/SolidWorksCadAgent.Core/SolidWorksCadAgent.Core.csproj -c Relea
 ```
 
 `build/UpstreamEngine.commit` pins engine integration revision
-`e7405f1041a9c84970f1a91b2abad9888eadd867` used by CI.
+`77f057b405c3030bcaaafcdfd8a714974cc8cb6f` used by CI.
 The local facade is `Core/Backends/UpstreamBackendJob.cs`. It requires explicit
 `EngineOptions.Enabled = true`, a nonempty persisted job id, a local journal
 path, and trusted engine executable configuration. It exposes discovered
