@@ -1,0 +1,230 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Geometry/Vec3.cs",
+      "source_sha256": "20f9a5f2020467955b5de20525aff555b6271414f7b9ca2ad9b5de6692c24121",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/Vec3.cs"
+      ],
+      "adaptations": "net48, strict finite/zero/rigid checks; our exceptions and namespace; no COM returned"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Geometry/Xform.cs",
+      "source_sha256": "f9acf0e10365b949c367d645bc927f06c630983a3f54c6b464723b392bcf99a3",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/Xform.cs"
+      ],
+      "adaptations": "net48, strict finite/zero/rigid checks; our exceptions and namespace; no COM returned"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Geometry/AxisSpec.cs",
+      "source_sha256": "72b2c5f9f04268f8c95ae9c2a939e7a370cea55983bde9fa6b015d7bc4a51d22",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/AxisSpec.cs"
+      ],
+      "adaptations": "net48, strict finite/zero/rigid checks; our exceptions and namespace; no COM returned"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/EdgeChain.cs",
+      "source_sha256": "d6a942f7c7e2295006838bdc966f6d587c9300e0ac5a519fca7cb7bd704605f3",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/EdgeChain.cs"
+      ],
+      "adaptations": "record-to-class, arrays, 256-edge work budget and positive finite tolerance"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Geometry/TopoQuery.cs",
+      "source_sha256": "55f4aafe25f96fd0c53719baefdad80fb6cebbe82e30b6d53e7c258a8352e83d",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/TopologyQuery.cs"
+      ],
+      "adaptations": "conjunctive/signed normal/parallel/radius/length/extreme filtering, deterministic order; split pure facts from COM; no nearest selection; exact count and bounds"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Model/EntityRef.cs",
+      "source_sha256": "63877e6e44822e011bce4c2e373bec87349f56347811dcafbbcc545cca1303b3",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/TopologyQuery.cs"
+      ],
+      "adaptations": "strict bounded Newtonsoft query subset; not importing the newer runtime serializer or source entity registry"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Geometry/Topology.cs",
+      "source_sha256": "6f1ee384efb0d67cfce70cd88a9622b2717f4635173b900d534c1dfe350f7f5c",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeTopologyReader.cs"
+      ],
+      "adaptations": "old typed part API subset; finite array checks; read-only fact snapshots and hashed inspection IDs"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Com/SwExt.cs",
+      "source_sha256": "06bc0bade726d6e5ff410c44fb23e64428582eab61a997952bfb59e56122112b",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeTopologyReader.cs"
+      ],
+      "adaptations": "selected typed old API reads; no new COM dependency"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Com/OleMessageFilter.cs",
+      "source_sha256": "4c498a1ad4fb7398679d5b37b6a98267176fe7f9546f4f726a3b6e7d353cabc0",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Interop/ComBusyRetryPolicy.cs",
+        "src/SolidWorksCadAgent.SolidWorksBridge/Threading/OleMessageFilterScope.cs"
+      ],
+      "adaptations": "10-second rejected-call window; cancellation; scoped prior-handler restoration, no accepted-mutation retries"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Win32/NativeMethods.cs",
+      "source_sha256": "f7bbeb7433d249b371e91f502ef772f3a781852e16722d9a433267776622c447",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Threading/OleMessageFilterScope.cs"
+      ],
+      "adaptations": "only standard OLE filter P/Invoke/interface contract"
+    },
+    {
+      "repository": "czuryk/SolidworksMCP",
+      "commit": "eccb8af4aa76416baf2a5ca99b256da19b73d9b6",
+      "source_path": "solidworks_mcp/automation/parametric.py",
+      "source_sha256": "07bf8bf581fec5b3be837bfb3139e5b653e60e1426c40d39f85da792c5af4be4",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Commands/SketchConstraintGraph.cs"
+      ],
+      "adaptations": "port RELATION_CODES and _validate_constraint_graph to C#; add strict refs/arity/fields/units/budgets; no native solve claim"
+    },
+    {
+      "repository": "czuryk/SolidworksMCP",
+      "commit": "eccb8af4aa76416baf2a5ca99b256da19b73d9b6",
+      "source_path": "solidworks_mcp/automation/shape_edit_compatibility.py",
+      "source_sha256": "b844632b042f006fce082c2c59b7aa6be0266965781e1b839eff57a16e09d1de",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/FeatureInventory.cs"
+      ],
+      "adaptations": "port dictionary differences and mismatch detection; reject incomplete/duplicate inventories; integrated checkpoint pre/post/reopen/restore guard"
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/AssemblyPatternMath.cs",
+      "source_sha256": "a1523074892d4ecbf62ee6f5786325e5e446308d5035fe54c51ade4a07428d2f",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/ComponentPatternPlan.cs"
+      ],
+      "adaptations": "Port linear/circular expected-instance generation and full/partial-circle step semantics; bounded strict planning contracts, seed IDs and no native mutation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/AssemblyMath.cs",
+      "source_sha256": "e86d04f445f163fe75e7b487ef26c25555d88af1e774ecdede6adf204aeccfd9",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/ComponentPatternPlan.cs"
+      ],
+      "adaptations": "Port Rodrigues rotation, application and matrix multiplication; reject reflected/nonrigid matrices; explicit column-to-row rotation conversion and mm-to-metre translation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/DrawingLayout.cs",
+      "source_sha256": "04e50da26b24b0ee11477fd6b6c594d221a51750e8aafc447cc42602a8ec66e3",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.Core/Geometry/StandardDrawingLayout.cs"
+      ],
+      "adaptations": "Port standard view axes, projection grid/corner placement, extent, gap, automatic scale and margin reservation; strict bounded planning-only output with explicit native outline limitation."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/FeatureService.cs",
+      "source_sha256": "2f55d428f6b467270db79da7da118cb0d8202e7f3523fc44233cccbfd33d854e",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Commands/EdgeFinishingCommandHandlers.cs",
+        "src/SolidWorksCadAgent.Core/Geometry/EdgeFinishingIntent.cs",
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port simple constant-radius FeatureFillet3 and analytic round-face radius checks; existing STA/scope/material verification, no propagation/retry/freeform fallback."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/PartFeatureService.cs",
+      "source_sha256": "69aade36d5caa34c06de576ff9915b8e708a79d8845b18c732474dc8df30dba1",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Commands/EdgeFinishingCommandHandlers.cs",
+        "src/SolidWorksCadAgent.Core/Geometry/EdgeFinishingIntent.cs",
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port fixed 45-degree angle-distance chamfer insertion and original-edge planar-face leg measurements; strict orthogonal straight-edge subset, no tangent propagation or equal-distance fallback retry."
+    },
+    {
+      "repository": "soheil-mp/solidworks-mcp",
+      "commit": "f450dabcd02a9a7ba705ee9e18a77aaeee9fe802",
+      "source_path": "src/SolidWorksMcp.Core/Services/FeatureManagementService.cs",
+      "source_sha256": "10c074c13c77f87acbede303aee6f1111c8484fd32352f7f4608264b26626fbb",
+      "licence": "MIT",
+      "local_files": [
+        "src/SolidWorksCadAgent.SolidWorksBridge/Inspection/NativeEdgeFinishingInspector.cs"
+      ],
+      "adaptations": "Port simple fillet/chamfer scalar definition readback, edge count and propagation fields; typed 2020 interfaces and part-level feature lookup; no AccessSelections, no native geometry certification from readback alone."
+    }
+  ],
+  "not_copied": [
+    {
+      "component": "full MCP hosts/runtime/COM schedulers",
+      "reason": "retain our net48 Host and owning STA; adapter would require separate compatibility work"
+    },
+    {
+      "component": "assembly/drawing/simulation/sheet-metal services",
+      "reason": "Native service layers remain deferred; only bounded assembly-pattern and standard-view-layout calculations have been ported. Document kinds, occurrence/view references, native 2020 adapters and acceptance remain required."
+    },
+    {
+      "component": "Python raw execution and VBA runners",
+      "reason": "bypass existing structured tool/approval contracts"
+    },
+    {
+      "component": "neural image tracing/scientific stack/model weights",
+      "reason": "needs separate process, dependency/weight licence review, local worker contract and image-to-design-intent acceptance"
+    },
+    {
+      "component": "generic native sketch mutation, equations and feature creation services",
+      "reason": "Sketch graph preflight and bounded fresh-part fillet/chamfer creation/readback are ported; generic constraints/equations and other native feature families still need their own adapters and acceptance."
+    }
+  ]
+}

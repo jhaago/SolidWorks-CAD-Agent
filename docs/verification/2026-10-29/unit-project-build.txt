@@ -1,0 +1,13 @@
+  SolidWorksCadAgent.Contracts -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.Contracts/bin/Debug/net48/SolidWorksCadAgent.Contracts.dll
+  SolidWorksCadAgent.Core -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.Core/bin/Debug/net48/SolidWorksCadAgent.Core.dll
+  SolidWorksCadAgent.RemoteAgent -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.RemoteAgent/bin/Debug/net48/SolidWorksCadAgent.RemoteAgent.exe
+  SolidWorksCadAgent.SolidWorksBridge -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.SolidWorksBridge/bin/Debug/net48/SolidWorksCadAgent.SolidWorksBridge.dll
+  SolidWorksCadAgent.AgentHost -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.AgentHost/bin/Debug/net48/SolidWorksCadAgent.AgentHost.exe
+  SolidWorksCadAgent.Desktop -> /workspace/scratch/81b480a4ac81/cad-integration/src/SolidWorksCadAgent.Desktop/bin/Debug/net48/SolidWorksCadAgent.Desktop.exe
+  SolidWorksCadAgent.UnitTests -> /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.UnitTests/bin/Debug/net48/SolidWorksCadAgent.UnitTests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.10

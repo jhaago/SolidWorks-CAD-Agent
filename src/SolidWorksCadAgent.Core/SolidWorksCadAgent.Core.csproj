@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>SolidWorksCadAgent.Core</RootNamespace>
+    <AssemblyName>SolidWorksCadAgent.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SolidWorksCadAgent.Contracts\SolidWorksCadAgent.Contracts.csproj" />
+  </ItemGroup>
+</Project>

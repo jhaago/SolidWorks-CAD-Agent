@@ -1,0 +1,22 @@
+Exact face-boundary verification, 2026-10-30
+
+Pure-selector RED: missing PlanarFaceFact and FaceBoundaryLoop before implementation.
+Review-regression RED: missing TopologyArrayEvidence before adding native completeness readback.
+Guard RED: MSB4057, ValidateSolidWorks2020Interop absent.
+Guard GREEN: actual version28.1.0.74 references accepted; missing references produce SW2020_API_MISSING.
+Independent review found no Critical issue; expected-negative-probe exit leakage fixed in the PowerShell guard script. Incomplete-face enumeration was regraded as an Important uniqueness concern and fixed with a count-readback guard and two regressions.
+Windows-only script execution awaits CI; no local pwsh/MSBuild Windows execution is claimed.
+Native-enabled compilation: both compiler invocations include SOLIDWORKS_INTEROP; references are actual metadata version28.1.0.74. Complete solution and native acceptance sources compile, zero warnings/errors.
+No SOLIDWORKS runtime execution: hidden-body/through-hole/save-reopen fixtures remain opt-in and unexecuted here.
+No vendor DLLs or package are committed or shipped. Only the two hash-recorded references were extracted; no package scripts executed.
+
+Final portable command uses cad-sdk/dotnet and the official MSTest executable:
+
+MSTest v3.6.4 (UTC 11/11/2024) [linux-x64 - .NET 8.0.21]
+
+Test run summary: Passed! - /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll (net8.0|x64)
+  total: 213
+  failed: 0
+  succeeded: 213
+  skipped: 0
+  duration: 844ms

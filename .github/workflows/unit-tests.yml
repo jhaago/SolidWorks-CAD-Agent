@@ -1,0 +1,103 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+  pull_request:
+
+jobs:
+  portable-policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build selected COM-free verification tests
+        run: dotnet build tests/SolidWorksCadAgent.PortableTests/SolidWorksCadAgent.PortableTests.csproj -m:1
+      - name: Run official MSTest executable
+        run: dotnet tests/SolidWorksCadAgent.PortableTests/bin/Debug/net8.0/SolidWorksCadAgent.PortableTests.dll --no-progress
+
+  unit-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /t:Restore /p:Configuration=Debug
+
+      - name: Build complete solution
+        shell: pwsh
+        run: msbuild SolidWorksCadAgent.sln /p:Configuration=Debug /p:Restore=false
+
+      - name: Restore unit-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Build unit tests
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Run unit tests
+        shell: pwsh
+        run: dotnet test tests\SolidWorksCadAgent.UnitTests\SolidWorksCadAgent.UnitTests.csproj --no-build --configuration Debug --blame --logger "trx;LogFileName=unit-tests.trx"
+
+      - name: Upload unit-test results and aborted-run sequence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-unit-test-results
+          path: tests/SolidWorksCadAgent.UnitTests/TestResults/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Restore integration-test dependencies
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /t:Restore /p:Configuration=Debug
+
+      - name: Compile integration-test contract only
+        shell: pwsh
+        run: msbuild tests\SolidWorksCadAgent.IntegrationTests\SolidWorksCadAgent.IntegrationTests.csproj /p:Configuration=Debug /p:Restore=false
+
+      - name: Test bundle file-lock diagnostics
+        shell: pwsh
+        run: .\scripts\test-bundle-file-locks.ps1
+
+      - name: Build Windows test bundle
+        shell: pwsh
+        run: .\scripts\build-windows-test-bundle.ps1 -Configuration Release
+
+      - name: Validate Windows test bundle
+        shell: pwsh
+        run: .\scripts\validate-windows-test-bundle.ps1 -ZipPath .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Test bundle capability validation
+        shell: pwsh
+        run: .\scripts\test-bundle-capability.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Verify distributed source licences and notice enforcement
+        shell: pwsh
+        run: .\scripts\test-bundle-third-party-notices.ps1 -SourceZip .\artifacts\SolidWorksCadAgent-Windows-Test-Bundle.zip
+
+      - name: Upload Windows test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolidWorksCadAgent-Windows-Test-Bundle
+          path: artifacts/SolidWorksCadAgent-Windows-Test-Bundle.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Test SOLIDWORKS 2020 API version guard
+        shell: pwsh
+        run: |
+          .\scripts\test-solidworks-api-version-guard.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'API guard leaked an expected negative-probe exit status.' }
+
+      - name: Compile native contract against pinned 2020 references
+        shell: pwsh
+        run: .\scripts\test-solidworks-2020-reference-compile.ps1

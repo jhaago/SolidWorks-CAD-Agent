@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.6.4" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/SolidMaterialSnapshot.cs" Link="SolidMaterialSnapshot.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/MaterialChangeVerifier.cs" Link="MaterialChangeVerifier.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/FeatureMaterialOperation.cs" Link="FeatureMaterialOperation.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/MaterialChangeVerifierTests.cs" Link="MaterialChangeVerifierTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/BoundedFeatureTraversal.cs" Link="BoundedFeatureTraversal.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FeatureTraversalTests.cs" Link="FeatureTraversalTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/SolidWorksInspector.cs" Link="SolidWorksInspector.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/PreciseBoundsAccumulator.cs" Link="PreciseBoundsAccumulator.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Units/UnitConverter.cs" Link="UnitConverter.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Contracts/Cad/CadCommandResult.cs" Link="CadCommandResult.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Contracts/Cad/CadError.cs" Link="CadError.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/CadResultJsonRegressionTests.cs" Link="CadResultJsonRegressionTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/PreciseBoundsTests.cs" Link="PreciseBoundsTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Geometry/*.cs" Link="Geometry/%(Filename)%(Extension)" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/ImportedGeometryTests.cs" Link="ImportedGeometryTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/TopologyQueryTests.cs" Link="TopologyQueryTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/SketchConstraintGraph.cs" Link="SketchConstraintGraph.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/SketchConstraintGraphTests.cs" Link="SketchConstraintGraphTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FeatureInventoryTests.cs" Link="FeatureInventoryTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Interop/ComBusyRetryPolicy.cs" Link="ComBusyRetryPolicy.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/ComBusyRetryPolicyTests.cs" Link="ComBusyRetryPolicyTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Interop/NativeEdgeEvaluation.cs" Link="NativeEdgeEvaluation.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/NativeEdgeEvaluationTests.cs" Link="NativeEdgeEvaluationTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningTests.cs" Link="FamilyPlanningTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Contracts/Cad/CadCommandNames.cs" Link="CadCommandNames.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/ICadCommandHandler.cs" Link="ICadCommandHandler.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Commands/FamilyPlanningCommandHandlers.cs" Link="FamilyPlanningCommandHandlers.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FamilyPlanningHandlerTests.cs" Link="FamilyPlanningHandlerTests.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FaceBoundarySelectionTests.cs" Link="FaceBoundarySelectionTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.Core/Commands/FreshPartMutationGuard.cs" Link="FreshPartMutationGuard.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FinishingPortTests.cs" Link="FinishingPortTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Session/SolidWorksDocumentContext.cs" Link="SolidWorksDocumentContext.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FreshPartContextTests.cs" Link="FreshPartContextTests.cs" />
+    <Compile Include="../../src/SolidWorksCadAgent.SolidWorksBridge/Inspection/FinishingCompletion.cs" Link="FinishingCompletion.cs" />
+    <Compile Include="../SolidWorksCadAgent.UnitTests/FinishingCompletionTests.cs" Link="FinishingCompletionTests.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+Command: dotnet <installed-sdk>/MSBuild.dll SolidWorksCadAgent.sln /t:Build /p:Configuration=Debug /p:Restore=false /m:1 /nologo
+
+Build succeeded.
+
+"/workspace/scratch/81b480a4ac81/cad-integration/SolidWorksCadAgent.sln" (Build target) (1) ->
+"/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj" (default target) (9) ->
+(CoreCompile target) -> 
+  /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/DocumentTargetTests.cs(20,27): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj]
+  /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/ParametricHoleNativeRecipeTests.cs(26,27): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj]
+  /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/ParametricPlateNativeRecipeTests.cs(23,27): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj]
+  /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/ParametricPlateAcceptanceTests.cs(35,27): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj]
+  /workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/ParametricHoleAcceptanceTests.cs(37,28): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [/workspace/scratch/81b480a4ac81/cad-integration/tests/SolidWorksCadAgent.IntegrationTests/SolidWorksCadAgent.IntegrationTests.csproj]
+
+    5 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.03

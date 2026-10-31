@@ -1,0 +1,7 @@
+Command: dotnet <installed-sdk>/MSBuild.dll tests/SolidWorksCadAgent.UnitTests/SolidWorksCadAgent.UnitTests.csproj /t:Build /p:Configuration=Debug /p:Restore=false /m:1 /nologo
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:06.30
